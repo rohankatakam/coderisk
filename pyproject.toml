@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coderisk"
+version = "0.1.0"
+description = "AI-powered code regression risk assessment tool"
+readme = "README.md"
+authors = [
+    {name = "Rohan Katakam", email = "rohan@coderisk.dev"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Quality Assurance",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["code", "risk", "assessment", "regression", "ci", "cd", "git"]
+requires-python = ">=3.8"
+dependencies = [
+    "click>=8.0.0",
+    "gitpython>=3.1.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+cognee = [
+    "cognee>=0.1.0",
+]
+dev = [
+    "pytest>=6.0",
+    "black>=22.0",
+    "isort>=5.0",
+    "mypy>=0.950",
+    "pre-commit>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rohankatakam/coderisk"
+Documentation = "https://github.com/rohankatakam/coderisk#readme"
+Repository = "https://github.com/rohankatakam/coderisk.git"
+Issues = "https://github.com/rohankatakam/coderisk/issues"
+
+[project.scripts]
+crisk = "coderisk.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["coderisk*"]
+exclude = ["tests*", "docs*"]
+
+[tool.setuptools.package-data]
+coderisk = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

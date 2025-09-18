@@ -1,0 +1,50 @@
+name: CodeRisk Example Usage
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  risk-assessment:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for better analysis
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install CodeRisk
+      run: |
+        pip install git+https://github.com/rohankatakam/coderisk.git
+
+    - name: Run Risk Assessment
+      run: |
+        crisk check --json > risk_report.json
+        cat risk_report.json
+
+    - name: Check Risk Threshold
+      run: |
+        RISK_SCORE=$(cat risk_report.json | jq -r '.score')
+        echo "Risk Score: $RISK_SCORE"
+
+        if (( $(echo "$RISK_SCORE > 80" | bc -l) )); then
+          echo "🔴 HIGH RISK: Score $RISK_SCORE exceeds threshold"
+          echo "Consider additional review before merging"
+          exit 1
+        else
+          echo "✅ Risk acceptable: Score $RISK_SCORE"
+        fi
+
+    - name: Upload Risk Report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: risk-report
+        path: risk_report.json

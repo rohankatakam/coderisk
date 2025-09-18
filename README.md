@@ -7,8 +7,13 @@ CodeRisk is an AI-powered tool that predicts code regression risk before you com
 ## Quick Start
 
 ```bash
-# Install
-pip install crisk
+# Install directly from GitHub
+pip install git+https://github.com/rohankatakam/coderisk.git
+
+# Or clone and install locally
+git clone https://github.com/rohankatakam/coderisk.git
+cd coderisk
+pip install -e .
 
 # Check risk of your current changes
 crisk check
@@ -203,15 +208,18 @@ CodeRisk is built on [Cognee](https://cognee.ai), leveraging:
 
 ```bash
 # Clone and install for development
-git clone https://github.com/[yourname]/coderisk
+git clone https://github.com/rohankatakam/coderisk.git
 cd coderisk
 pip install -e .
 
-# Run tests
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run tests (coming soon)
 pytest
 
-# Install from source
-python setup.py install
+# Install with Cognee integration
+pip install -e ".[cognee]"
 ```
 
 ## Requirements
@@ -234,8 +242,8 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ## Support
 
-- 📧 Email: team@coderisk.dev
-- 🐛 Issues: [GitHub Issues](https://github.com/[yourname]/coderisk/issues)
+- 📧 Email: rohan@coderisk.dev
+- 🐛 Issues: [GitHub Issues](https://github.com/rohankatakam/coderisk/issues)
 - 💬 Discord: [CodeRisk Community](https://discord.gg/coderisk)
 
 ---
