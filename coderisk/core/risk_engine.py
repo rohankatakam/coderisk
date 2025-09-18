@@ -51,6 +51,25 @@ except ImportError:
     COGNEE_AVAILABLE = False
     from .simple_analyzer import SimpleCodeAnalyzer
 
+try:
+    from ..observability.langfuse_integration import observer
+    OBSERVABILITY_AVAILABLE = True
+except ImportError:
+    OBSERVABILITY_AVAILABLE = False
+    # Create a no-op observer
+    class MockObserver:
+        def observe_risk_assessment(self, func):
+            return func
+        def observe_signal_calculation(self, name):
+            def decorator(func):
+                return func
+            return decorator
+        def log_performance_metrics(self, metrics):
+            pass
+        def log_repository_analysis(self, repo_path, metrics):
+            pass
+    observer = MockObserver()
+
 logger = logging.getLogger(__name__)
 
 
@@ -107,6 +126,7 @@ class RiskEngine:
         if self.use_advanced_calculations and self.regression_scaling:
             self.regression_scaling.initialize()
 
+    @observer.observe_risk_assessment
     async def assess_worktree_risk(self) -> RiskAssessment:
         """Assess risk of uncommitted changes in the working tree"""
         if not self._repo:
@@ -160,7 +180,7 @@ class RiskEngine:
 
         # Get all signals for compatibility
         all_signals = signal_suite.get_all_signals()
-        signals = [RiskSignal(s.name, s.score, s.confidence, s.evidence, s.response_time_ms) for s in all_signals]
+        signals = [RiskSignal(name=s.name, score=s.score, confidence=s.confidence, evidence=s.evidence, response_time_ms=s.response_time_ms) for s in all_signals]
 
         # Calculate regression scaling factors
         scaling_factors = self.regression_scaling.calculate_scaling_factors(
@@ -826,6 +846,7 @@ class RiskEngine:
 
         return suite
 
+    @observer.observe_signal_calculation("blast_radius")
     async def _calculate_blast_radius_advanced(
         self,
         change_context: ChangeContext,
@@ -850,11 +871,15 @@ class RiskEngine:
         )
 
         return AdvancedRiskSignal(
-            signal.name, signal.score, signal.confidence,
-            signal.evidence, signal.response_time_ms,
+            name=signal.name,
+            score=signal.score,
+            confidence=signal.confidence,
+            evidence=signal.evidence,
+            response_time_ms=signal.response_time_ms,
             detailed_data=detailed_data
         )
 
+    @observer.observe_signal_calculation("cochange")
     async def _calculate_cochange_advanced(
         self,
         change_context: ChangeContext,
@@ -876,8 +901,11 @@ class RiskEngine:
         )
 
         return AdvancedRiskSignal(
-            signal.name, signal.score, signal.confidence,
-            signal.evidence, signal.response_time_ms,
+            name=signal.name,
+            score=signal.score,
+            confidence=signal.confidence,
+            evidence=signal.evidence,
+            response_time_ms=signal.response_time_ms,
             detailed_data=detailed_data
         )
 
@@ -894,8 +922,11 @@ class RiskEngine:
         )
 
         return AdvancedRiskSignal(
-            signal.name, signal.score, signal.confidence,
-            signal.evidence, signal.response_time_ms
+            name=signal.name,
+            score=signal.score,
+            confidence=signal.confidence,
+            evidence=signal.evidence,
+            response_time_ms=signal.response_time_ms
         )
 
     async def _calculate_jit_baselines_advanced(self, change_context: ChangeContext) -> AdvancedRiskSignal:
@@ -921,8 +952,11 @@ class RiskEngine:
         )
 
         return AdvancedRiskSignal(
-            signal.name, signal.score, signal.confidence,
-            signal.evidence, signal.response_time_ms,
+            name=signal.name,
+            score=signal.score,
+            confidence=signal.confidence,
+            evidence=signal.evidence,
+            response_time_ms=signal.response_time_ms,
             detailed_data=detailed_data
         )
 
@@ -937,8 +971,11 @@ class RiskEngine:
         )
 
         return AdvancedRiskSignal(
-            signal.name, signal.score, signal.confidence,
-            signal.evidence, signal.response_time_ms
+            name=signal.name,
+            score=signal.score,
+            confidence=signal.confidence,
+            evidence=signal.evidence,
+            response_time_ms=signal.response_time_ms
         )
 
     async def _calculate_bridge_risk_advanced(
@@ -953,8 +990,11 @@ class RiskEngine:
         )
 
         return AdvancedRiskSignal(
-            signal.name, signal.score, signal.confidence,
-            signal.evidence, signal.response_time_ms
+            name=signal.name,
+            score=signal.score,
+            confidence=signal.confidence,
+            evidence=signal.evidence,
+            response_time_ms=signal.response_time_ms
         )
 
     async def _calculate_incident_adjacency_advanced(self, change_context: ChangeContext) -> AdvancedRiskSignal:
@@ -969,8 +1009,11 @@ class RiskEngine:
         )
 
         return AdvancedRiskSignal(
-            signal.name, signal.score, signal.confidence,
-            signal.evidence, signal.response_time_ms
+            name=signal.name,
+            score=signal.score,
+            confidence=signal.confidence,
+            evidence=signal.evidence,
+            response_time_ms=signal.response_time_ms
         )
 
     async def _calculate_g2_surprise_advanced(self, change_context: ChangeContext) -> AdvancedRiskSignal:
@@ -984,8 +1027,11 @@ class RiskEngine:
         )
 
         return AdvancedRiskSignal(
-            signal.name, signal.score, signal.confidence,
-            signal.evidence, signal.response_time_ms
+            name=signal.name,
+            score=signal.score,
+            confidence=signal.confidence,
+            evidence=signal.evidence,
+            response_time_ms=signal.response_time_ms
         )
 
     # Helper methods for advanced calculations

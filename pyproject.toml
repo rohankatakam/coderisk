@@ -57,6 +57,10 @@ neo4j = [
 chromadb = [
     "chromadb>=0.4.0",
 ]
+observability = [
+    "langfuse>=2.0.0",
+    "deepeval>=0.20.0",
+]
 dev = [
     "pytest>=6.0",
     "pytest-asyncio>=0.20.0",
@@ -70,6 +74,8 @@ all = [
     "psycopg2-binary>=2.9.0",
     "neo4j>=5.0.0",
     "chromadb>=0.4.0",
+    "langfuse>=2.0.0",
+    "deepeval>=0.20.0",
 ]
 
 [project.urls]

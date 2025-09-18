@@ -154,19 +154,8 @@ class ConcurrencyRiskSignalData(MicroDetectorSignalData):
 class AdvancedRiskSignal(RiskSignal):
     """Extended risk signal with detailed mathematical data"""
 
-    def __init__(
-        self,
-        name: str,
-        score: float,
-        confidence: float,
-        evidence: List[str],
-        response_time_ms: int,
-        detailed_data: Optional[Any] = None,
-        mathematical_metadata: Optional[Dict[str, Any]] = None
-    ):
-        super().__init__(name, score, confidence, evidence, response_time_ms)
-        self.detailed_data = detailed_data
-        self.mathematical_metadata = mathematical_metadata or {}
+    detailed_data: Optional[Any] = None
+    mathematical_metadata: Optional[Dict[str, Any]] = None
 
     def get_blast_radius_data(self) -> Optional[BlastRadiusSignalData]:
         """Get blast radius detailed data if available"""
