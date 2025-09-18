@@ -6,6 +6,7 @@ import asyncio
 import click
 import json
 from pathlib import Path
+from typing import Dict, Any
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -14,8 +15,46 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from ..core.risk_engine import RiskEngine
 from ..models.risk_assessment import RiskTier
+from ..detectors import detector_registry, ChangeContext, FileChange
+from ..detectors.api_detector import ApiBreakDetector
 
 console = Console()
+
+
+async def run_micro_detectors(repo_path: str, progress=None) -> Dict[str, Any]:
+    """Run all micro-detectors and return results"""
+    # This is a simplified implementation - in practice would need to:
+    # 1. Get git diff to create ChangeContext
+    # 2. Parse file changes into FileChange objects
+    # 3. Run all detectors in parallel
+
+    if progress:
+        progress.update(progress.task_ids[0], description="Running micro-detectors...")
+
+    # Mock implementation for now - would integrate with git diff
+    context = ChangeContext(
+        files_changed=[],
+        total_lines_added=0,
+        total_lines_deleted=0
+    )
+
+    detector_results = {}
+    detectors = detector_registry.get_all_detectors(repo_path)
+
+    for detector in detectors:
+        try:
+            result = await detector.run_with_timeout(context)
+            detector_results[detector.name] = result.to_dict()
+        except Exception as e:
+            detector_results[detector.name] = {
+                "score": 0.0,
+                "reasons": [f"Detector failed: {str(e)}"],
+                "anchors": [],
+                "evidence": {"error": str(e)},
+                "execution_time_ms": 0.0
+            }
+
+    return detector_results
 
 
 def print_banner():
@@ -63,7 +102,9 @@ def cli():
 @click.option("--repo", "-r", default=".", help="Repository path (default: current directory)")
 @click.option("--json", "output_json", is_flag=True, help="Output results as JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
-def check(repo: str, output_json: bool, verbose: bool):
+@click.option("--explain", is_flag=True, help="Show detailed explanations for risk factors")
+@click.option("--categories", is_flag=True, help="Show risk breakdown by category")
+def check(repo: str, output_json: bool, verbose: bool, explain: bool, categories: bool):
     """Check risk of uncommitted changes in working tree"""
 
     if not output_json:
@@ -100,6 +141,11 @@ def check(repo: str, output_json: bool, verbose: bool):
                 # Assess risk
                 assessment = await risk_engine.assess_worktree_risk()
 
+                # Run micro-detectors if categories or explain flags are used
+                detector_results = {}
+                if categories or explain:
+                    detector_results = await run_micro_detectors(str(repo_path), progress)
+
                 if not output_json:
                     progress.update(task, description="Assessment complete!", completed=True)
 
@@ -134,6 +180,56 @@ def check(repo: str, output_json: bool, verbose: bool):
                 }
             }
 
+            # Add category results if requested
+            if categories and detector_results:
+                result["categories"] = {
+                    "api": {
+                        "score": detector_results.get("api_break", {}).get("score", 0.0),
+                        "reasons": detector_results.get("api_break", {}).get("reasons", []),
+                        "anchors": detector_results.get("api_break", {}).get("anchors", [])
+                    },
+                    "schema": {
+                        "score": detector_results.get("schema_risk", {}).get("score", 0.0),
+                        "reasons": detector_results.get("schema_risk", {}).get("reasons", []),
+                        "anchors": detector_results.get("schema_risk", {}).get("anchors", [])
+                    },
+                    "deps": {
+                        "score": detector_results.get("dependency_risk", {}).get("score", 0.0),
+                        "reasons": detector_results.get("dependency_risk", {}).get("reasons", []),
+                        "anchors": detector_results.get("dependency_risk", {}).get("anchors", [])
+                    },
+                    "perf": {
+                        "score": detector_results.get("performance_risk", {}).get("score", 0.0),
+                        "reasons": detector_results.get("performance_risk", {}).get("reasons", []),
+                        "anchors": detector_results.get("performance_risk", {}).get("anchors", [])
+                    },
+                    "concurrency": {
+                        "score": detector_results.get("concurrency_risk", {}).get("score", 0.0),
+                        "reasons": detector_results.get("concurrency_risk", {}).get("reasons", []),
+                        "anchors": detector_results.get("concurrency_risk", {}).get("anchors", [])
+                    },
+                    "security": {
+                        "score": detector_results.get("security_risk", {}).get("score", 0.0),
+                        "reasons": detector_results.get("security_risk", {}).get("reasons", []),
+                        "anchors": detector_results.get("security_risk", {}).get("anchors", [])
+                    },
+                    "config": {
+                        "score": detector_results.get("config_risk", {}).get("score", 0.0),
+                        "reasons": detector_results.get("config_risk", {}).get("reasons", []),
+                        "anchors": detector_results.get("config_risk", {}).get("anchors", [])
+                    },
+                    "tests": {
+                        "score": detector_results.get("test_gap", {}).get("score", 0.0),
+                        "reasons": detector_results.get("test_gap", {}).get("reasons", []),
+                        "anchors": detector_results.get("test_gap", {}).get("anchors", [])
+                    },
+                    "merge": {
+                        "score": detector_results.get("merge_risk", {}).get("score", 0.0),
+                        "reasons": detector_results.get("merge_risk", {}).get("reasons", []),
+                        "anchors": detector_results.get("merge_risk", {}).get("anchors", [])
+                    }
+                }
+
             if verbose:
                 result["signals"] = [
                     {
@@ -150,6 +246,12 @@ def check(repo: str, output_json: bool, verbose: bool):
                         "description": rec.description
                     } for rec in assessment.recommendations
                 ]
+
+            # Add detailed explanations if requested
+            if explain and detector_results:
+                result["explanations"] = {
+                    "detectors": detector_results
+                }
 
             console.print(json.dumps(result, indent=2))
         else:
@@ -229,6 +331,90 @@ Assessment completed in {assessment.assessment_time_ms}ms
                     )
 
                 console.print(table)
+
+            # Category breakdown (if requested)
+            if categories and detector_results:
+                console.print(f"\n📋 Risk Categories:", style="bold")
+
+                categories_table = Table(show_header=True, header_style="bold magenta")
+                categories_table.add_column("Category", style="cyan")
+                categories_table.add_column("Score", justify="center")
+                categories_table.add_column("Status", justify="center")
+                categories_table.add_column("Top Issue", style="dim")
+
+                category_mapping = {
+                    "api_break": ("API Breaking", "api_break"),
+                    "schema_risk": ("Schema Changes", "schema_risk"),
+                    "dependency_risk": ("Dependencies", "dependency_risk"),
+                    "performance_risk": ("Performance", "performance_risk"),
+                    "concurrency_risk": ("Concurrency", "concurrency_risk"),
+                    "security_risk": ("Security", "security_risk"),
+                    "config_risk": ("Configuration", "config_risk"),
+                    "test_gap": ("Test Coverage", "test_gap"),
+                    "merge_risk": ("Merge Conflicts", "merge_risk")
+                }
+
+                for detector_name, (category_name, key) in category_mapping.items():
+                    result = detector_results.get(detector_name, {})
+                    score = result.get("score", 0.0)
+                    reasons = result.get("reasons", [])
+
+                    # Determine status and color
+                    if score >= 0.8:
+                        status = "🔴 Critical"
+                        score_color = "red"
+                    elif score >= 0.6:
+                        status = "🔶 High"
+                        score_color = "orange"
+                    elif score >= 0.3:
+                        status = "⚠️ Medium"
+                        score_color = "yellow"
+                    elif score > 0:
+                        status = "💡 Low"
+                        score_color = "blue"
+                    else:
+                        status = "✅ Good"
+                        score_color = "green"
+
+                    top_issue = reasons[0] if reasons else "No issues detected"
+                    if len(top_issue) > 40:
+                        top_issue = top_issue[:37] + "..."
+
+                    categories_table.add_row(
+                        category_name,
+                        f"[{score_color}]{score:.2f}[/]",
+                        status,
+                        top_issue
+                    )
+
+                console.print(categories_table)
+
+            # Detailed explanations (if requested)
+            if explain and detector_results:
+                console.print(f"\n🔍 Detailed Explanations:", style="bold")
+
+                for detector_name, result in detector_results.items():
+                    if result.get("score", 0) > 0 or result.get("reasons"):
+                        category_name = detector_name.replace("_", " ").title()
+                        console.print(f"\n{category_name}:", style="bold cyan")
+
+                        score = result.get("score", 0.0)
+                        console.print(f"  Score: {score:.2f}")
+
+                        reasons = result.get("reasons", [])
+                        if reasons:
+                            console.print("  Issues:")
+                            for reason in reasons[:3]:  # Show top 3 reasons
+                                console.print(f"    • {reason}", style="dim")
+
+                        anchors = result.get("anchors", [])
+                        if anchors:
+                            console.print("  Locations:")
+                            for anchor in anchors[:3]:  # Show top 3 locations
+                                console.print(f"    📍 {anchor}", style="dim blue")
+
+                        execution_time = result.get("execution_time_ms", 0)
+                        console.print(f"  Analysis time: {execution_time:.1f}ms", style="dim")
 
     # Run the async assessment
     try:

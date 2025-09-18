@@ -134,4 +134,5 @@ dmypy.json
 risk_results.json
 
 # Documentation folder (contains business docs)
-docs/
+docs/.env
+.venv-cognee/
