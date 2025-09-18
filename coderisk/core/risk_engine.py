@@ -46,29 +46,16 @@ from ..calculations import (
 
 try:
     from .cognee_integration import CogneeCodeAnalyzer
+    from cognee.modules.observability.get_observe import get_observe
     COGNEE_AVAILABLE = True
-except ImportError:
-    COGNEE_AVAILABLE = False
-    from .simple_analyzer import SimpleCodeAnalyzer
-
-try:
-    from ..observability.langfuse_integration import observer
-    OBSERVABILITY_AVAILABLE = True
-except ImportError:
-    OBSERVABILITY_AVAILABLE = False
-    # Create a no-op observer
-    class MockObserver:
-        def observe_risk_assessment(self, func):
-            return func
-        def observe_signal_calculation(self, name):
-            def decorator(func):
-                return func
-            return decorator
-        def log_performance_metrics(self, metrics):
-            pass
-        def log_repository_analysis(self, repo_path, metrics):
-            pass
-    observer = MockObserver()
+except ImportError as e:
+    raise ImportError(
+        "Cognee is required for CodeRisk to function. Please install Cognee and configure your environment:\n"
+        "1. Install: pip install cognee\n"
+        "2. Set up your .env file with LLM_API_KEY\n"
+        "3. Optionally configure Langfuse with LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY\n"
+        f"Original error: {e}"
+    ) from e
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +67,12 @@ class RiskEngine:
         self.repo_path = Path(repo_path).resolve()
         self.use_advanced_calculations = use_advanced_calculations
 
-        # Initialize analyzers
-        if COGNEE_AVAILABLE:
-            self.analyzer = CogneeCodeAnalyzer(repo_path)
-        else:
-            self.analyzer = SimpleCodeAnalyzer(repo_path)
+        # Initialize Cognee analyzer (required - no fallback)
+        self.analyzer = CogneeCodeAnalyzer(repo_path)
         self._repo = None
+
+        # Initialize Cognee's observability
+        self.observe = get_observe()
 
         # Initialize advanced calculation components
         if use_advanced_calculations:
@@ -126,7 +113,6 @@ class RiskEngine:
         if self.use_advanced_calculations and self.regression_scaling:
             self.regression_scaling.initialize()
 
-    @observer.observe_risk_assessment
     async def assess_worktree_risk(self) -> RiskAssessment:
         """Assess risk of uncommitted changes in the working tree"""
         if not self._repo:
@@ -846,7 +832,6 @@ class RiskEngine:
 
         return suite
 
-    @observer.observe_signal_calculation("blast_radius")
     async def _calculate_blast_radius_advanced(
         self,
         change_context: ChangeContext,
@@ -879,7 +864,6 @@ class RiskEngine:
             detailed_data=detailed_data
         )
 
-    @observer.observe_signal_calculation("cochange")
     async def _calculate_cochange_advanced(
         self,
         change_context: ChangeContext,

@@ -1,0 +1,419 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://coderisk.ai/ontology/2025/09/coderisk#"
+     xml:base="http://coderisk.ai/ontology/2025/09/coderisk"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://coderisk.ai/ontology/2025/09/coderisk">
+        <rdfs:label>CodeRisk Ontology</rdfs:label>
+        <rdfs:comment>Comprehensive ontology for software development risk assessment, incident tracking, and code analysis</rdfs:comment>
+        <owl:versionInfo>1.0</owl:versionInfo>
+    </owl:Ontology>
+
+    <!--
+    //////////////////////////////////////////////////////////////////
+    //
+    //    Object Properties
+    //
+    //////////////////////////////////////////////////////////////////
+     -->
+
+    <!-- Repository Relationships -->
+    <owl:ObjectProperty rdf:about="#contains">
+        <rdfs:label>contains</rdfs:label>
+        <rdfs:comment>Indicates that a repository contains a file or that a file contains a function</rdfs:comment>
+        <rdfs:domain rdf:resource="#Repository"/>
+        <rdfs:range rdf:resource="#File"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#hasCommit">
+        <rdfs:label>has commit</rdfs:label>
+        <rdfs:comment>Indicates that a repository has a commit</rdfs:comment>
+        <rdfs:domain rdf:resource="#Repository"/>
+        <rdfs:range rdf:resource="#Commit"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#ownedBy">
+        <rdfs:label>owned by</rdfs:label>
+        <rdfs:comment>Indicates ownership of a repository, file, or commit by a developer</rdfs:comment>
+        <rdfs:range rdf:resource="#Developer"/>
+    </owl:ObjectProperty>
+
+    <!-- File Relationships -->
+    <owl:ObjectProperty rdf:about="#imports">
+        <rdfs:label>imports</rdfs:label>
+        <rdfs:comment>Indicates that one file imports another file or module</rdfs:comment>
+        <rdfs:domain rdf:resource="#File"/>
+        <rdfs:range rdf:resource="#File"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#dependsOn">
+        <rdfs:label>depends on</rdfs:label>
+        <rdfs:comment>Indicates a dependency relationship between files or functions</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#modifies">
+        <rdfs:label>modifies</rdfs:label>
+        <rdfs:comment>Indicates that a commit modifies a file</rdfs:comment>
+        <rdfs:domain rdf:resource="#Commit"/>
+        <rdfs:range rdf:resource="#File"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#calls">
+        <rdfs:label>calls</rdfs:label>
+        <rdfs:comment>Indicates that one function calls another function</rdfs:comment>
+        <rdfs:domain rdf:resource="#Function"/>
+        <rdfs:range rdf:resource="#Function"/>
+    </owl:ObjectProperty>
+
+    <!-- Risk Relationships -->
+    <owl:ObjectProperty rdf:about="#hasRiskSignal">
+        <rdfs:label>has risk signal</rdfs:label>
+        <rdfs:comment>Indicates that an entity has an associated risk signal</rdfs:comment>
+        <rdfs:range rdf:resource="#RiskSignal"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#causesIncident">
+        <rdfs:label>causes incident</rdfs:label>
+        <rdfs:comment>Indicates that a commit or change causes an incident</rdfs:comment>
+        <rdfs:domain rdf:resource="#Commit"/>
+        <rdfs:range rdf:resource="#Incident"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#correlatesWith">
+        <rdfs:label>correlates with</rdfs:label>
+        <rdfs:comment>Indicates correlation between incidents, commits, or risk signals</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#similarTo">
+        <rdfs:label>similar to</rdfs:label>
+        <rdfs:comment>Indicates similarity between changes, commits, or incidents</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <!-- Temporal Relationships -->
+    <owl:ObjectProperty rdf:about="#followedBy">
+        <rdfs:label>followed by</rdfs:label>
+        <rdfs:comment>Indicates temporal sequence between commits or incidents</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#coChangedWith">
+        <rdfs:label>co-changed with</rdfs:label>
+        <rdfs:comment>Indicates that files or functions frequently change together</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <!--
+    //////////////////////////////////////////////////////////////////
+    //
+    //    Data Properties
+    //
+    //////////////////////////////////////////////////////////////////
+     -->
+
+    <!-- Identifiers -->
+    <owl:DatatypeProperty rdf:about="#hasName">
+        <rdfs:label>has name</rdfs:label>
+        <rdfs:comment>The name of an entity (file, function, repository, etc.)</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;string"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasPath">
+        <rdfs:label>has path</rdfs:label>
+        <rdfs:comment>The file system path of a file or repository</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;string"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasHash">
+        <rdfs:label>has hash</rdfs:label>
+        <rdfs:comment>The git hash or checksum of a commit or file</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;string"/>
+    </owl:DatatypeProperty>
+
+    <!-- Temporal Properties -->
+    <owl:DatatypeProperty rdf:about="#hasTimestamp">
+        <rdfs:label>has timestamp</rdfs:label>
+        <rdfs:comment>The timestamp when an event occurred</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;dateTime"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasCreatedAt">
+        <rdfs:label>has created at</rdfs:label>
+        <rdfs:comment>The creation timestamp of an entity</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;dateTime"/>
+    </owl:DatatypeProperty>
+
+    <!-- Risk Properties -->
+    <owl:DatatypeProperty rdf:about="#hasRiskScore">
+        <rdfs:label>has risk score</rdfs:label>
+        <rdfs:comment>Numerical risk score between 0.0 and 1.0</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasConfidence">
+        <rdfs:label>has confidence</rdfs:label>
+        <rdfs:comment>Confidence level in the risk assessment</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasRiskCategory">
+        <rdfs:label>has risk category</rdfs:label>
+        <rdfs:comment>Category of risk (security, performance, etc.)</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;string"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasSeverity">
+        <rdfs:label>has severity</rdfs:label>
+        <rdfs:comment>Severity level (LOW, MEDIUM, HIGH, CRITICAL)</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;string"/>
+    </owl:DatatypeProperty>
+
+    <!-- Code Properties -->
+    <owl:DatatypeProperty rdf:about="#hasLanguage">
+        <rdfs:label>has language</rdfs:label>
+        <rdfs:comment>Programming language of a file</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;string"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasLineCount">
+        <rdfs:label>has line count</rdfs:label>
+        <rdfs:comment>Number of lines in a file or function</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;integer"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasComplexity">
+        <rdfs:label>has complexity</rdfs:label>
+        <rdfs:comment>Cyclomatic complexity measure</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;integer"/>
+    </owl:DatatypeProperty>
+
+    <!-- Developer Properties -->
+    <owl:DatatypeProperty rdf:about="#hasEmail">
+        <rdfs:label>has email</rdfs:label>
+        <rdfs:comment>Email address of a developer</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;string"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasExperience">
+        <rdfs:label>has experience</rdfs:label>
+        <rdfs:comment>Experience level or years of experience</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <!-- Incident Properties -->
+    <owl:DatatypeProperty rdf:about="#hasDescription">
+        <rdfs:label>has description</rdfs:label>
+        <rdfs:comment>Textual description of an incident or change</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;string"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasImpact">
+        <rdfs:label>has impact</rdfs:label>
+        <rdfs:comment>Impact level of an incident</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;string"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#isResolved">
+        <rdfs:label>is resolved</rdfs:label>
+        <rdfs:comment>Whether an incident has been resolved</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;boolean"/>
+    </owl:DatatypeProperty>
+
+    <!--
+    //////////////////////////////////////////////////////////////////
+    //
+    //    Classes
+    //
+    //////////////////////////////////////////////////////////////////
+     -->
+
+    <!-- Core Repository Entities -->
+    <owl:Class rdf:about="#Repository">
+        <rdfs:label>Repository</rdfs:label>
+        <rdfs:comment>A software repository containing source code and history</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#File">
+        <rdfs:label>File</rdfs:label>
+        <rdfs:comment>A source code file within a repository</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Function">
+        <rdfs:label>Function</rdfs:label>
+        <rdfs:comment>A function or method within a source code file</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Class">
+        <rdfs:label>Class</rdfs:label>
+        <rdfs:comment>A class definition within a source code file</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Module">
+        <rdfs:label>Module</rdfs:label>
+        <rdfs:comment>A module or package in the codebase</rdfs:comment>
+    </owl:Class>
+
+    <!-- Version Control Entities -->
+    <owl:Class rdf:about="#Commit">
+        <rdfs:label>Commit</rdfs:label>
+        <rdfs:comment>A git commit representing a set of changes</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Branch">
+        <rdfs:label>Branch</rdfs:label>
+        <rdfs:comment>A git branch in the repository</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#PullRequest">
+        <rdfs:label>Pull Request</rdfs:label>
+        <rdfs:comment>A pull request or merge request</rdfs:comment>
+    </owl:Class>
+
+    <!-- People Entities -->
+    <owl:Class rdf:about="#Developer">
+        <rdfs:label>Developer</rdfs:label>
+        <rdfs:comment>A software developer who contributes to the repository</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Team">
+        <rdfs:label>Team</rdfs:label>
+        <rdfs:comment>A team of developers working on the project</rdfs:comment>
+    </owl:Class>
+
+    <!-- Risk Assessment Entities -->
+    <owl:Class rdf:about="#RiskSignal">
+        <rdfs:label>Risk Signal</rdfs:label>
+        <rdfs:comment>A risk signal indicating potential issues or vulnerabilities</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#RiskAssessment">
+        <rdfs:label>Risk Assessment</rdfs:label>
+        <rdfs:comment>A comprehensive risk assessment for a change or commit</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Vulnerability">
+        <rdfs:label>Vulnerability</rdfs:label>
+        <rdfs:comment>A security vulnerability in the code</rdfs:comment>
+    </owl:Class>
+
+    <!-- Incident and Issue Entities -->
+    <owl:Class rdf:about="#Incident">
+        <rdfs:label>Incident</rdfs:label>
+        <rdfs:comment>A production incident or system failure</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Bug">
+        <rdfs:label>Bug</rdfs:label>
+        <rdfs:comment>A software bug or defect</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Issue">
+        <rdfs:label>Issue</rdfs:label>
+        <rdfs:comment>A tracked issue or ticket</rdfs:comment>
+    </owl:Class>
+
+    <!-- Dependency and Architecture Entities -->
+    <owl:Class rdf:about="#Dependency">
+        <rdfs:label>Dependency</rdfs:label>
+        <rdfs:comment>A dependency relationship between code components</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#API">
+        <rdfs:label>API</rdfs:label>
+        <rdfs:comment>An application programming interface</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Service">
+        <rdfs:label>Service</rdfs:label>
+        <rdfs:comment>A microservice or system component</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Database">
+        <rdfs:label>Database</rdfs:label>
+        <rdfs:comment>A database or data store</rdfs:comment>
+    </owl:Class>
+
+    <!-- Configuration and Environment -->
+    <owl:Class rdf:about="#Configuration">
+        <rdfs:label>Configuration</rdfs:label>
+        <rdfs:comment>Configuration files and settings</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Environment">
+        <rdfs:label>Environment</rdfs:label>
+        <rdfs:comment>Deployment environment (dev, staging, production)</rdfs:comment>
+    </owl:Class>
+
+    <!-- Testing Entities -->
+    <owl:Class rdf:about="#Test">
+        <rdfs:label>Test</rdfs:label>
+        <rdfs:comment>A unit test, integration test, or other test</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#TestSuite">
+        <rdfs:label>Test Suite</rdfs:label>
+        <rdfs:comment>A collection of related tests</rdfs:comment>
+    </owl:Class>
+
+    <!-- Risk Categories (Subclasses of RiskSignal) -->
+    <owl:Class rdf:about="#SecurityRisk">
+        <rdfs:label>Security Risk</rdfs:label>
+        <rdfs:comment>Risk related to security vulnerabilities</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#PerformanceRisk">
+        <rdfs:label>Performance Risk</rdfs:label>
+        <rdfs:comment>Risk related to performance degradation</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#ReliabilityRisk">
+        <rdfs:label>Reliability Risk</rdfs:label>
+        <rdfs:comment>Risk related to system reliability and stability</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#APIBreakingRisk">
+        <rdfs:label>API Breaking Risk</rdfs:label>
+        <rdfs:comment>Risk of breaking API compatibility</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#ConfigurationRisk">
+        <rdfs:label>Configuration Risk</rdfs:label>
+        <rdfs:comment>Risk related to configuration changes</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#DependencyRisk">
+        <rdfs:label>Dependency Risk</rdfs:label>
+        <rdfs:comment>Risk related to dependency changes or vulnerabilities</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#ConcurrencyRisk">
+        <rdfs:label>Concurrency Risk</rdfs:label>
+        <rdfs:comment>Risk related to concurrent code and race conditions</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#SchemaRisk">
+        <rdfs:label>Schema Risk</rdfs:label>
+        <rdfs:comment>Risk related to database schema changes</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#MergeRisk">
+        <rdfs:label>Merge Risk</rdfs:label>
+        <rdfs:comment>Risk related to complex merges and conflicts</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#TestGapRisk">
+        <rdfs:label>Test Gap Risk</rdfs:label>
+        <rdfs:comment>Risk related to insufficient test coverage</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+</rdf:RDF>
