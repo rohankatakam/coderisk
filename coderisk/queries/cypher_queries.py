@@ -3,6 +3,8 @@ CYPHER query support for CodeRisk risk calculations
 
 This module provides CYPHER queries compatible with Kuzu graph database
 used by Cognee for risk assessment calculations.
+
+Updated to use Kuzu-specific syntax and database connection management.
 """
 
 import asyncio
@@ -12,49 +14,154 @@ import cognee
 from cognee import SearchType
 import structlog
 
+from ..core.database_manager import safe_cognee_operation, db_manager
+
 logger = structlog.get_logger(__name__)
 
 
 class CypherQueryEngine:
-    """Engine for executing CYPHER queries against Cognee's Kuzu graph database"""
+    """
+    Engine for executing CYPHER queries against Cognee's Kuzu graph database
+
+    Updated for Kuzu-specific syntax and safe concurrent access.
+    """
 
     def __init__(self):
         self.logger = logger
 
-    async def execute_query(self, query: str) -> List[Tuple]:
-        """Execute a CYPHER query and return results"""
-        try:
-            results = await cognee.search(
-                query_type=SearchType.CYPHER,
-                query_text=query
-            )
+    async def execute_query(self, query: str, dataset_name: Optional[str] = None) -> List[Tuple]:
+        """
+        Execute a CYPHER query with safe database connection management.
 
-            if isinstance(results, list):
-                return results
-            else:
-                return [results] if results else []
+        Args:
+            query: Kuzu-compatible CYPHER query
+            dataset_name: Optional dataset scope for the query
+        """
+        # Convert to Kuzu-compatible syntax
+        kuzu_query = self._convert_to_kuzu_syntax(query)
 
-        except Exception as e:
-            self.logger.error(f"CYPHER query failed: {e}", query=query)
-            return []
+        async def _execute():
+            try:
+                search_params = {
+                    "query_type": SearchType.CYPHER,
+                    "query_text": kuzu_query
+                }
 
-    async def get_basic_stats(self) -> Dict[str, int]:
-        """Get basic graph statistics"""
+                if dataset_name:
+                    search_params["datasets"] = [dataset_name]
+
+                results = await cognee.search(**search_params)
+
+                if isinstance(results, list):
+                    return results
+                else:
+                    return [results] if results else []
+
+            except Exception as e:
+                self.logger.error(f"CYPHER query failed: {e}",
+                                query=kuzu_query,
+                                original_query=query)
+                return []
+
+        # Use safe database operation
+        return await safe_cognee_operation(
+            _execute,
+            process_id=f"cypher_{hash(kuzu_query) % 10000}"
+        )
+
+    def _convert_to_kuzu_syntax(self, query: str) -> str:
+        """
+        Convert standard CYPHER to Kuzu-compatible syntax.
+
+        Key differences in Kuzu:
+        - No labels() function, use label() instead
+        - No toString() function, use CAST as STRING
+        - LIST functions have list_ prefix
+        - Different function names for some operations
+        """
+        kuzu_query = query
+
+        # Function replacements for Kuzu
+        replacements = {
+            # Function name changes
+            'labels(': 'label(',
+            'toString(': 'CAST(',
+            'toInteger(': 'CAST(',
+            'toFloat(': 'CAST(',
+
+            # List function prefixes
+            'size(': 'list_size(',
+            'head(': 'list_first(',
+            'tail(': 'list_tail(',
+            'reverse(': 'list_reverse(',
+
+            # String functions that need adjustment
+            'split(': 'list_split(',
+
+            # Handle CAST syntax for toString conversions
+            'CAST(': 'CAST(',  # This will be handled specially below
+        }
+
+        for old, new in replacements.items():
+            kuzu_query = kuzu_query.replace(old, new)
+
+        # Handle toString() -> CAST(..., STRING) conversion
+        import re
+
+        # Pattern for toString(expression) -> CAST(expression AS STRING)
+        toString_pattern = r'CAST\(([^)]+)\)'
+
+        def toString_replacement(match):
+            expression = match.group(1)
+            # Check if this was originally a toString call
+            if 'toString(' in query and expression in query:
+                return f'CAST({expression} AS STRING)'
+            return match.group(0)  # Return unchanged if not a toString conversion
+
+        kuzu_query = re.sub(toString_pattern, toString_replacement, kuzu_query)
+
+        # Add semicolon if missing (required in Kuzu)
+        if not kuzu_query.strip().endswith(';'):
+            kuzu_query += ';'
+
+        return kuzu_query
+
+    async def get_basic_stats(self, dataset_name: Optional[str] = None) -> Dict[str, int]:
+        """Get basic graph statistics using Kuzu-compatible queries"""
         stats = {}
 
-        # Total nodes
+        # Total nodes (Kuzu-compatible)
         try:
-            result = await self.execute_query("MATCH (n) RETURN count(n) as total_nodes")
-            stats['total_nodes'] = result[0][0] if result else 0
-        except:
+            result = await self.execute_query(
+                "MATCH (n) RETURN count(n) as total_nodes",
+                dataset_name=dataset_name
+            )
+            stats['total_nodes'] = result[0][0] if result and result[0] else 0
+        except Exception as e:
+            self.logger.debug(f"Node count query failed: {e}")
             stats['total_nodes'] = 0
 
-        # Total relationships
+        # Total relationships (Kuzu-compatible)
         try:
-            result = await self.execute_query("MATCH ()-[r]-() RETURN count(r) as total_relationships")
-            stats['total_relationships'] = result[0][0] if result else 0
-        except:
+            result = await self.execute_query(
+                "MATCH ()-[r]-() RETURN count(r) as total_relationships",
+                dataset_name=dataset_name
+            )
+            stats['total_relationships'] = result[0][0] if result and result[0] else 0
+        except Exception as e:
+            self.logger.debug(f"Relationship count query failed: {e}")
             stats['total_relationships'] = 0
+
+        # Node types (Kuzu uses label() function)
+        try:
+            result = await self.execute_query(
+                "MATCH (n) RETURN label(n) as node_type, count(n) as count",
+                dataset_name=dataset_name
+            )
+            stats['node_types'] = {row[0]: row[1] for row in result if row and len(row) >= 2}
+        except Exception as e:
+            self.logger.debug(f"Node types query failed: {e}")
+            stats['node_types'] = {}
 
         return stats
 

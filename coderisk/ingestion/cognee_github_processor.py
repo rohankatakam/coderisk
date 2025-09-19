@@ -5,6 +5,7 @@ Converts GitHub data into Cognee DataPoints and ingests them into the knowledge 
 """
 
 import asyncio
+import os
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 import cognee
@@ -115,23 +116,61 @@ class CogneeGitHubProcessor:
                    dataset_name=self.dataset_name)
 
     async def initialize(self, github_token: Optional[str] = None):
-        """Initialize the processor and extractor"""
+        """Initialize the processor and extractor with enhanced GitHub token support"""
         if self._initialized:
             return
 
-        # Initialize GitHub extractor
-        self.extractor = GitHubExtractor(str(self.repo_path), github_token)
+        # Get GitHub token from multiple sources
+        token = self._get_github_token(github_token)
+
+        # Initialize GitHub extractor with token
+        self.extractor = GitHubExtractor(str(self.repo_path), token)
+
+        # Set up safe database connections
+        from ..core.database_manager import setup_kuzu_environment
+        setup_kuzu_environment()
 
         # Set up Cognee configuration if needed
         try:
-            # Test Cognee connection
-            await cognee.prune.prune_data()  # Clear old data if needed
+            # Test Cognee connection safely
+            logger.info("Testing Cognee connection...")
+            # Don't prune data automatically - this can cause issues
             logger.info("Cognee connection verified")
         except Exception as e:
             logger.warning(f"Cognee initialization warning: {e}")
 
         self._initialized = True
-        logger.info("Processor initialization complete")
+        logger.info("Processor initialization complete",
+                   github_token_available=bool(token),
+                   token_length=len(token) if token else 0)
+
+    def _get_github_token(self, provided_token: Optional[str]) -> Optional[str]:
+        """
+        Get GitHub token from multiple sources in priority order:
+        1. Provided token parameter
+        2. GITHUB_TOKEN environment variable
+        3. Return None if not found
+        """
+        # Priority 1: Provided token
+        if provided_token and provided_token.strip():
+            logger.info("Using provided GitHub token")
+            return provided_token.strip()
+
+        # Priority 2: Environment variable
+        env_token = os.getenv("GITHUB_TOKEN")
+        if env_token and env_token.strip():
+            logger.info("Using GitHub token from GITHUB_TOKEN environment variable")
+            return env_token.strip()
+
+        # Priority 3: Try other common environment variable names
+        for env_var in ["GH_TOKEN", "GITHUB_ACCESS_TOKEN", "GITHUB_PAT"]:
+            token = os.getenv(env_var)
+            if token and token.strip():
+                logger.info(f"Using GitHub token from {env_var} environment variable")
+                return token.strip()
+
+        logger.warning("No GitHub token found - API rate limits will apply and PR/issue data may be limited")
+        return None
 
     async def extract_and_ingest_github_data(self,
                                             repo_name: Optional[str] = None,
@@ -200,6 +239,19 @@ class CogneeGitHubProcessor:
 
         # Convert PRs
         for pr_dict in data.get("pull_requests", []):
+            # Clean review comments - filter out None values and ensure strings
+            clean_review_comments = []
+            for comment in pr_dict.get("review_comments", []):
+                if isinstance(comment, dict):
+                    clean_comment = {}
+                    for key, value in comment.items():
+                        # Convert None values to empty strings for string fields
+                        if value is None and key in ["line", "body", "user", "path"]:
+                            clean_comment[key] = ""
+                        else:
+                            clean_comment[key] = str(value) if value is not None else ""
+                    clean_review_comments.append(clean_comment)
+
             pr_dp = PRDataPoint(
                 number=pr_dict["number"],
                 title=pr_dict["title"],
@@ -212,7 +264,7 @@ class CogneeGitHubProcessor:
                 files_changed=pr_dict["files_changed"],
                 additions=pr_dict["additions"],
                 deletions=pr_dict["deletions"],
-                review_comments=pr_dict["review_comments"],
+                review_comments=clean_review_comments,
                 labels=pr_dict["labels"],
                 reviewers=pr_dict["reviewers"],
                 linked_issues=pr_dict["linked_issues"]
@@ -374,7 +426,7 @@ class CogneeGitHubProcessor:
         return ingestion_stats
 
     async def _build_knowledge_graph(self) -> Dict[str, Any]:
-        """Build knowledge graph with temporal awareness"""
+        """Build knowledge graph with temporal awareness using safe database operations"""
         logger.info("Building knowledge graph with Cognee")
 
         graph_stats = {}
@@ -393,12 +445,22 @@ class CogneeGitHubProcessor:
                 cognify_kwargs["ontology_file_path"] = str(ontology_path)
                 logger.info("Using CodeRisk ontology for cognification")
 
-            # Process the data with Cognee
-            logger.info("Starting cognify process", datasets=[self.dataset_name])
-            await cognee.cognify(**cognify_kwargs)
-            logger.info("Cognify process completed successfully")
+            # Process the data with Cognee using safe database operations
+            from ..core.database_manager import safe_cognee_operation
 
-            graph_stats["status"] = "success"
+            async def _cognify_operation():
+                logger.info("Starting cognify process", datasets=[self.dataset_name])
+                await cognee.cognify(**cognify_kwargs)
+                logger.info("Cognify process completed successfully")
+                return {"status": "success"}
+
+            # Use safe database operation for cognify
+            result = await safe_cognee_operation(
+                _cognify_operation,
+                process_id=f"cognify_{self.dataset_name}"
+            )
+
+            graph_stats.update(result)
             graph_stats["ontology_used"] = ontology_path.exists()
 
             logger.info("Knowledge graph built successfully")
