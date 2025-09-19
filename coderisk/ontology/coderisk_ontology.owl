@@ -101,6 +101,40 @@
     <owl:ObjectProperty rdf:about="#coChangedWith">
         <rdfs:label>co-changed with</rdfs:label>
         <rdfs:comment>Indicates that files or functions frequently change together</rdfs:comment>
+        <rdfs:domain rdf:resource="#File"/>
+        <rdfs:range rdf:resource="#File"/>
+    </owl:ObjectProperty>
+
+    <!-- Critical Missing Relationships for Risk Math -->
+    <owl:ObjectProperty rdf:about="#hasOwner">
+        <rdfs:label>has owner</rdfs:label>
+        <rdfs:comment>Indicates ownership of a file or code component by a developer or team</rdfs:comment>
+        <rdfs:range rdf:resource="#Developer"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#tests">
+        <rdfs:label>tests</rdfs:label>
+        <rdfs:comment>Indicates that a test file tests a source file</rdfs:comment>
+        <rdfs:domain rdf:resource="#Test"/>
+        <rdfs:range rdf:resource="#File"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#adjacentTo">
+        <rdfs:label>adjacent to</rdfs:label>
+        <rdfs:comment>Indicates incident adjacency for GB-RRF calculations</rdfs:comment>
+        <rdfs:domain rdf:resource="#Incident"/>
+        <rdfs:range rdf:resource="#ChangeEvent"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#hasBlastRadius">
+        <rdfs:label>has blast radius</rdfs:label>
+        <rdfs:comment>Links a change to its calculated blast radius impact</rdfs:comment>
+        <rdfs:range rdf:resource="#BlastRadius"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="#bridgesTo">
+        <rdfs:label>bridges to</rdfs:label>
+        <rdfs:comment>Indicates bridging relationship between components</rdfs:comment>
     </owl:ObjectProperty>
 
     <!--
@@ -141,6 +175,31 @@
         <rdfs:label>has created at</rdfs:label>
         <rdfs:comment>The creation timestamp of an entity</rdfs:comment>
         <rdfs:range rdf:resource="&xsd;dateTime"/>
+    </owl:DatatypeProperty>
+
+    <!-- Critical Missing Temporal Properties for Risk Math -->
+    <owl:DatatypeProperty rdf:about="#hasDecayFactor">
+        <rdfs:label>has decay factor</rdfs:label>
+        <rdfs:comment>Decay factor for Hawkes modeling in HDCC calculations</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasFrequency">
+        <rdfs:label>has frequency</rdfs:label>
+        <rdfs:comment>Frequency of co-change or interaction events</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasRecency">
+        <rdfs:label>has recency</rdfs:label>
+        <rdfs:comment>Recency score for temporal analysis</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasChurnMetric">
+        <rdfs:label>has churn metric</rdfs:label>
+        <rdfs:comment>File or component churn metric for risk calculations</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
     </owl:DatatypeProperty>
 
     <!-- Risk Properties -->
@@ -198,6 +257,49 @@
         <rdfs:label>has experience</rdfs:label>
         <rdfs:comment>Experience level or years of experience</rdfs:comment>
         <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasAuthorityScore">
+        <rdfs:label>has authority score</rdfs:label>
+        <rdfs:comment>Authority score for OAM calculations</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <!-- Risk Math Specific Properties -->
+    <owl:DatatypeProperty rdf:about="#hasBlastRadiusDelta">
+        <rdfs:label>has blast radius delta</rdfs:label>
+        <rdfs:comment>ΔDBR calculation result</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasCentralityScore">
+        <rdfs:label>has centrality score</rdfs:label>
+        <rdfs:comment>Betweenness centrality for bridge risk calculations</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasCoChangeFrequency">
+        <rdfs:label>has co-change frequency</rdfs:label>
+        <rdfs:comment>Frequency of co-change for HDCC calculations</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasEntropyScore">
+        <rdfs:label>has entropy score</rdfs:label>
+        <rdfs:comment>Diff entropy for JIT baseline calculations</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;double"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasAdditions">
+        <rdfs:label>has additions</rdfs:label>
+        <rdfs:comment>Number of lines added in a change</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;integer"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="#hasDeletions">
+        <rdfs:label>has deletions</rdfs:label>
+        <rdfs:comment>Number of lines deleted in a change</rdfs:comment>
+        <rdfs:range rdf:resource="&xsd;integer"/>
     </owl:DatatypeProperty>
 
     <!-- Incident Properties -->
@@ -414,6 +516,69 @@
         <rdfs:label>Test Gap Risk</rdfs:label>
         <rdfs:comment>Risk related to insufficient test coverage</rdfs:comment>
         <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <!-- Risk Math Calculation Entities -->
+    <owl:Class rdf:about="#BlastRadius">
+        <rdfs:label>Blast Radius</rdfs:label>
+        <rdfs:comment>Represents the calculated blast radius for ΔDBR calculations</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#CoChangePattern">
+        <rdfs:label>Co-Change Pattern</rdfs:label>
+        <rdfs:comment>Represents co-change relationships for HDCC calculations</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#OwnershipTransition">
+        <rdfs:label>Ownership Transition</rdfs:label>
+        <rdfs:comment>Represents ownership changes for OAM calculations</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#IncidentAdjacency">
+        <rdfs:label>Incident Adjacency</rdfs:label>
+        <rdfs:comment>Represents incident adjacency for GB-RRF fusion calculations</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#BridgeNode">
+        <rdfs:label>Bridge Node</rdfs:label>
+        <rdfs:comment>Represents a bridge node in the dependency graph</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#CorePersistence">
+        <rdfs:label>Core Persistence</rdfs:label>
+        <rdfs:comment>Represents temporal core persistence for span-core analysis</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#ChangeEvent">
+        <rdfs:label>Change Event</rdfs:label>
+        <rdfs:comment>Represents a specific change event with temporal properties</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#TimeWindow">
+        <rdfs:label>Time Window</rdfs:label>
+        <rdfs:comment>Represents a temporal window for historical analysis</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#RiskTrend">
+        <rdfs:label>Risk Trend</rdfs:label>
+        <rdfs:comment>Represents risk trends over time</rdfs:comment>
+    </owl:Class>
+
+    <!-- Additional Missing Classes -->
+    <owl:Class rdf:about="#MergeConflictRisk">
+        <rdfs:label>Merge Conflict Risk</rdfs:label>
+        <rdfs:comment>Risk related to merge conflicts and complex merges</rdfs:comment>
+        <rdfs:subClassOf rdf:resource="#RiskSignal"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="#TestCoverage">
+        <rdfs:label>Test Coverage</rdfs:label>
+        <rdfs:comment>Represents test coverage information for files and functions</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="#Migration">
+        <rdfs:label>Migration</rdfs:label>
+        <rdfs:comment>Represents database or schema migration</rdfs:comment>
     </owl:Class>
 
 </rdf:RDF>

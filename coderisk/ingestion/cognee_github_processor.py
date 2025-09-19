@@ -21,7 +21,7 @@ logger = structlog.get_logger(__name__)
 
 
 class CommitDataPoint(DataPoint):
-    """DataPoint for commit information"""
+    """DataPoint for commit information with risk math properties"""
     sha: str
     message: str
     author: str
@@ -35,6 +35,12 @@ class CommitDataPoint(DataPoint):
     is_hotfix: bool
     branch: str
     parent_shas: List[str]
+
+    # Risk math properties
+    churn_metric: Optional[float] = None
+    entropy_score: Optional[float] = None
+    blast_radius_delta: Optional[float] = None
+    co_change_frequency: Optional[float] = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -84,7 +90,7 @@ class IssueDataPoint(DataPoint):
 
 
 class DeveloperDataPoint(DataPoint):
-    """DataPoint for developer information"""
+    """DataPoint for developer information with authority tracking"""
     username: str
     email: Optional[str]
     name: Optional[str]
@@ -97,6 +103,49 @@ class DeveloperDataPoint(DataPoint):
     last_contribution: datetime
     files_touched: List[str]
     expertise_areas: List[str]
+
+    # OAM calculation properties
+    authority_score: Optional[float] = None
+    experience_score: Optional[float] = None
+    ownership_files: List[str] = []
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+# New DataPoint models for risk math entities
+class CoChangePatternDataPoint(DataPoint):
+    """DataPoint for co-change relationships"""
+    file_a: str
+    file_b: str
+    frequency: float
+    decay_factor: float
+    recency: float
+    last_co_change: datetime
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class BlastRadiusDataPoint(DataPoint):
+    """DataPoint for blast radius calculations"""
+    source_file: str
+    affected_files: List[str]
+    blast_radius_delta: float
+    centrality_score: float
+    impact_score: float
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class IncidentAdjacencyDataPoint(DataPoint):
+    """DataPoint for incident adjacency"""
+    incident_id: str
+    related_files: List[str]
+    similarity_score: float
+    incident_description: str
+    occurred_at: datetime
 
     class Config:
         arbitrary_types_allowed = True
