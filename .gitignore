@@ -1,0 +1,138 @@
+# ==============================================
+# CodeRisk Go - OSS Development .gitignore
+# ==============================================
+
+# Binaries and executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build outputs
+bin/
+dist/
+build/
+out/
+
+# Test binaries and coverage
+*.test
+*.out
+coverage.html
+coverage.txt
+coverage.out
+coverage.xml
+
+# Go workspace and modules
+go.work
+go.work.sum
+vendor/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vim/
+.emacs.d/
+.atom/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Environment and configuration files
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+.env.development
+*.env
+config.local.yaml
+config.local.yml
+secrets.yaml
+secrets.yml
+
+# Local development and testing
+.coderisk/
+tmp/
+temp/
+*.tmp
+*.temp
+local/
+*.local
+.cache/
+.scratch/
+
+# Logs and debug files
+*.log
+logs/
+debug/
+*.debug
+
+# Database files (local development)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Docker local files
+docker-compose.override.yml
+.dockerignore.local
+
+# Security and credentials (extra safety)
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+service-account.json
+
+# Backup and temporary files
+*.bak
+*.backup
+*.swp
+*.orig
+*~
+
+# Archives (unless specifically needed)
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.zip
+*.rar
+*.7z
+*.dmg
+*.pkg
+
+# Profiling and performance data
+*.prof
+*.pprof
+cpu.prof
+mem.prof
+profile.out
+
+# Test artifacts
+test-results/
+junit.xml
+testdata/local/
+
+# Documentation builds (keep source docs)
+docs/build/
+site/
+
+# Cloud and deployment artifacts
+.terraform/
+*.tfstate
+*.tfstate.backup
+.ansible/
+k8s/local/
