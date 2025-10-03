@@ -1,0 +1,426 @@
+package graph
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/coderisk/coderisk-go/internal/database"
+)
+
+// Builder orchestrates graph construction from PostgreSQL staging tables
+// Reference: dev_docs/03-implementation/integration_guides/layers_2_3_graph_construction.md
+type Builder struct {
+	stagingDB *database.StagingClient
+	backend   Backend
+}
+
+// NewBuilder creates a graph builder instance
+func NewBuilder(stagingDB *database.StagingClient, backend Backend) *Builder {
+	return &Builder{
+		stagingDB: stagingDB,
+		backend:   backend,
+	}
+}
+
+// BuildStats tracks graph construction statistics
+type BuildStats struct {
+	Nodes int
+	Edges int
+}
+
+// BuildGraph constructs the complete graph for a repository
+// This is Priority 6B: PostgreSQL → Neo4j/Neptune
+func (b *Builder) BuildGraph(ctx context.Context, repoID int64) (*BuildStats, error) {
+	log.Printf("🔨 Building graph for repo %d...", repoID)
+	stats := &BuildStats{}
+
+	// Process commits (Layer 2: Temporal)
+	commitStats, err := b.processCommits(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("process commits failed: %w", err)
+	}
+	stats.Nodes += commitStats.Nodes
+	stats.Edges += commitStats.Edges
+	log.Printf("  ✓ Processed commits: %d nodes, %d edges", commitStats.Nodes, commitStats.Edges)
+
+	// Process issues (Layer 3: Incidents)
+	issueStats, err := b.processIssues(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("process issues failed: %w", err)
+	}
+	stats.Nodes += issueStats.Nodes
+	stats.Edges += issueStats.Edges
+	log.Printf("  ✓ Processed issues: %d nodes, %d edges", issueStats.Nodes, issueStats.Edges)
+
+	// Process PRs (Layer 3: Incidents)
+	prStats, err := b.processPRs(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("process PRs failed: %w", err)
+	}
+	stats.Nodes += prStats.Nodes
+	stats.Edges += prStats.Edges
+	log.Printf("  ✓ Processed PRs: %d nodes, %d edges", prStats.Nodes, prStats.Edges)
+
+	return stats, nil
+}
+
+// processCommits transforms commits from PostgreSQL to graph nodes/edges
+func (b *Builder) processCommits(ctx context.Context, repoID int64) (*BuildStats, error) {
+	batchSize := 100
+	stats := &BuildStats{}
+
+	for {
+		// Fetch unprocessed commits
+		commits, err := b.stagingDB.FetchUnprocessedCommits(ctx, repoID, batchSize)
+		if err != nil {
+			return stats, err
+		}
+
+		if len(commits) == 0 {
+			break // All processed
+		}
+
+		// Transform to graph entities
+		var allNodes []GraphNode
+		var allEdges []GraphEdge
+		var commitIDs []int64
+
+		for _, commit := range commits {
+			nodes, edges, err := b.transformCommit(commit)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to transform commit %s: %v", commit.SHA, err)
+				continue
+			}
+
+			allNodes = append(allNodes, nodes...)
+			allEdges = append(allEdges, edges...)
+			commitIDs = append(commitIDs, commit.ID)
+		}
+
+		// Create nodes
+		if len(allNodes) > 0 {
+			if _, err := b.backend.CreateNodes(allNodes); err != nil {
+				return stats, fmt.Errorf("failed to create nodes: %w", err)
+			}
+			stats.Nodes += len(allNodes)
+		}
+
+		// Create edges
+		if len(allEdges) > 0 {
+			if err := b.backend.CreateEdges(allEdges); err != nil {
+				return stats, fmt.Errorf("failed to create edges: %w", err)
+			}
+			stats.Edges += len(allEdges)
+		}
+
+		// Mark as processed
+		if len(commitIDs) > 0 {
+			if err := b.stagingDB.MarkCommitsProcessed(ctx, commitIDs); err != nil {
+				return stats, fmt.Errorf("failed to mark commits as processed: %w", err)
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// transformCommit converts a commit into graph nodes and edges
+func (b *Builder) transformCommit(commit database.CommitData) ([]GraphNode, []GraphEdge, error) {
+	var nodes []GraphNode
+	var edges []GraphEdge
+
+	// Parse raw data to extract files
+	var fullCommit struct {
+		Files []struct {
+			Filename  string `json:"filename"`
+			Status    string `json:"status"`
+			Additions int    `json:"additions"`
+			Deletions int    `json:"deletions"`
+		} `json:"files"`
+		Stats struct {
+			Additions int `json:"additions"`
+			Deletions int `json:"deletions"`
+			Total     int `json:"total"`
+		} `json:"stats"`
+	}
+
+	if err := json.Unmarshal(commit.RawData, &fullCommit); err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal commit: %w", err)
+	}
+
+	// 1. Create Commit node
+	commitNode := GraphNode{
+		Label: "Commit",
+		ID:    fmt.Sprintf("commit:%s", commit.SHA),
+		Properties: map[string]interface{}{
+			"sha":          commit.SHA,
+			"message":      commit.Message,
+			"author_email": commit.AuthorEmail,
+			"author_name":  commit.AuthorName,
+			"author_date":  commit.AuthorDate.Unix(),
+			"additions":    fullCommit.Stats.Additions,
+			"deletions":    fullCommit.Stats.Deletions,
+		},
+	}
+	nodes = append(nodes, commitNode)
+
+	// 2. Create Developer node
+	developerNode := GraphNode{
+		Label: "Developer",
+		ID:    fmt.Sprintf("developer:%s", commit.AuthorEmail),
+		Properties: map[string]interface{}{
+			"email": commit.AuthorEmail,
+			"name":  commit.AuthorName,
+		},
+	}
+	nodes = append(nodes, developerNode)
+
+	// 3. Create AUTHORED edge
+	authoredEdge := GraphEdge{
+		Label: "AUTHORED",
+		From:  developerNode.ID,
+		To:    commitNode.ID,
+		Properties: map[string]interface{}{
+			"timestamp": commit.AuthorDate.Unix(),
+		},
+	}
+	edges = append(edges, authoredEdge)
+
+	// 4. Create MODIFIES edges for each file
+	for _, file := range fullCommit.Files {
+		modifiesEdge := GraphEdge{
+			Label: "MODIFIES",
+			From:  commitNode.ID,
+			To:    fmt.Sprintf("file:%s", file.Filename),
+			Properties: map[string]interface{}{
+				"status":    file.Status,
+				"additions": file.Additions,
+				"deletions": file.Deletions,
+				"timestamp": commit.AuthorDate.Unix(),
+			},
+		}
+		edges = append(edges, modifiesEdge)
+	}
+
+	return nodes, edges, nil
+}
+
+// processIssues transforms issues from PostgreSQL to graph nodes
+func (b *Builder) processIssues(ctx context.Context, repoID int64) (*BuildStats, error) {
+	batchSize := 100
+	stats := &BuildStats{}
+
+	for {
+		// Fetch unprocessed issues
+		issues, err := b.stagingDB.FetchUnprocessedIssues(ctx, repoID, batchSize)
+		if err != nil {
+			return stats, err
+		}
+
+		if len(issues) == 0 {
+			break
+		}
+
+		// Transform to graph entities
+		var allNodes []GraphNode
+		var issueIDs []int64
+
+		for _, issue := range issues {
+			node, err := b.transformIssue(issue)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to transform issue #%d: %v", issue.Number, err)
+				continue
+			}
+
+			allNodes = append(allNodes, node)
+			issueIDs = append(issueIDs, issue.ID)
+		}
+
+		// Create nodes
+		if len(allNodes) > 0 {
+			if _, err := b.backend.CreateNodes(allNodes); err != nil {
+				return stats, fmt.Errorf("failed to create issue nodes: %w", err)
+			}
+			stats.Nodes += len(allNodes)
+		}
+
+		// Mark as processed
+		if len(issueIDs) > 0 {
+			if err := b.stagingDB.MarkIssuesProcessed(ctx, issueIDs); err != nil {
+				return stats, fmt.Errorf("failed to mark issues as processed: %w", err)
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// transformIssue converts an issue into a graph node
+func (b *Builder) transformIssue(issue database.IssueData) (GraphNode, error) {
+	// Parse labels
+	var labels []string
+	if err := json.Unmarshal(issue.Labels, &labels); err != nil {
+		return GraphNode{}, fmt.Errorf("failed to unmarshal labels: %w", err)
+	}
+
+	node := GraphNode{
+		Label: "Issue",
+		ID:    fmt.Sprintf("issue:%d", issue.Number),
+		Properties: map[string]interface{}{
+			"number":     issue.Number,
+			"title":      issue.Title,
+			"body":       issue.Body,
+			"state":      issue.State,
+			"labels":     labels,
+			"created_at": issue.CreatedAt.Unix(),
+		},
+	}
+
+	if issue.ClosedAt != nil {
+		node.Properties["closed_at"] = issue.ClosedAt.Unix()
+	}
+
+	return node, nil
+}
+
+// processPRs transforms PRs from PostgreSQL to graph nodes/edges
+func (b *Builder) processPRs(ctx context.Context, repoID int64) (*BuildStats, error) {
+	batchSize := 100
+	stats := &BuildStats{}
+
+	for {
+		// Fetch unprocessed PRs
+		prs, err := b.stagingDB.FetchUnprocessedPRs(ctx, repoID, batchSize)
+		if err != nil {
+			return stats, err
+		}
+
+		if len(prs) == 0 {
+			break
+		}
+
+		// Transform to graph entities
+		var allNodes []GraphNode
+		var allEdges []GraphEdge
+		var prIDs []int64
+
+		for _, pr := range prs {
+			node, edges, err := b.transformPR(pr)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to transform PR #%d: %v", pr.Number, err)
+				continue
+			}
+
+			allNodes = append(allNodes, node)
+			allEdges = append(allEdges, edges...)
+			prIDs = append(prIDs, pr.ID)
+		}
+
+		// Create nodes
+		if len(allNodes) > 0 {
+			if _, err := b.backend.CreateNodes(allNodes); err != nil {
+				return stats, fmt.Errorf("failed to create PR nodes: %w", err)
+			}
+			stats.Nodes += len(allNodes)
+		}
+
+		// Create edges
+		if len(allEdges) > 0 {
+			if err := b.backend.CreateEdges(allEdges); err != nil {
+				return stats, fmt.Errorf("failed to create PR edges: %w", err)
+			}
+			stats.Edges += len(allEdges)
+		}
+
+		// Mark as processed
+		if len(prIDs) > 0 {
+			if err := b.stagingDB.MarkPRsProcessed(ctx, prIDs); err != nil {
+				return stats, fmt.Errorf("failed to mark PRs as processed: %w", err)
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// transformPR converts a PR into graph node and edges
+func (b *Builder) transformPR(pr database.PRData) (GraphNode, []GraphEdge, error) {
+	var edges []GraphEdge
+
+	// Create PR node
+	node := GraphNode{
+		Label: "PullRequest",
+		ID:    fmt.Sprintf("pr:%d", pr.Number),
+		Properties: map[string]interface{}{
+			"number":     pr.Number,
+			"title":      pr.Title,
+			"body":       pr.Body,
+			"state":      pr.State,
+			"merged":     pr.Merged,
+			"created_at": pr.CreatedAt.Unix(),
+		},
+	}
+
+	if pr.MergedAt != nil {
+		node.Properties["merged_at"] = pr.MergedAt.Unix()
+	}
+
+	// Create MERGED_TO edge if merged
+	if pr.Merged && pr.MergeCommitSHA != nil {
+		mergedToEdge := GraphEdge{
+			Label: "MERGED_TO",
+			From:  node.ID,
+			To:    fmt.Sprintf("commit:%s", *pr.MergeCommitSHA),
+			Properties: map[string]interface{}{},
+		}
+		if pr.MergedAt != nil {
+			mergedToEdge.Properties["merged_at"] = pr.MergedAt.Unix()
+		}
+		edges = append(edges, mergedToEdge)
+	}
+
+	// Extract issue references from title and body for FIXES edges
+	issueNumbers := extractIssueReferences(pr.Title, pr.Body)
+	for _, issueNum := range issueNumbers {
+		fixesEdge := GraphEdge{
+			Label: "FIXES",
+			From:  node.ID,
+			To:    fmt.Sprintf("issue:%d", issueNum),
+			Properties: map[string]interface{}{
+				"detected_from": "pr_body",
+				"timestamp":     pr.CreatedAt.Unix(),
+			},
+		}
+		edges = append(edges, fixesEdge)
+	}
+
+	return node, edges, nil
+}
+
+// extractIssueReferences parses text for "Fixes #123", "Closes #456" patterns
+func extractIssueReferences(title, body string) []int {
+	text := strings.ToLower(title + " " + body)
+	re := regexp.MustCompile(`(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s+#(\d+)`)
+	matches := re.FindAllStringSubmatch(text, -1)
+
+	issueNumbers := []int{}
+	seen := make(map[int]bool)
+
+	for _, match := range matches {
+		if len(match) > 1 {
+			if num, err := strconv.Atoi(match[1]); err == nil {
+				if !seen[num] {
+					issueNumbers = append(issueNumbers, num)
+					seen[num] = true
+				}
+			}
+		}
+	}
+
+	return issueNumbers
+}

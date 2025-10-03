@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/coderisk/coderisk-go/internal/cache"
 	"github.com/spf13/cobra"
@@ -62,13 +63,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	// Repository info
 	fmt.Printf("\n🔗 Repository:\n")
-	repoInfo, err := detectGitRepo()
-	if err != nil {
-		fmt.Printf("  Status: ❌ Not a git repository\n")
-	} else {
-		fmt.Printf("  URL: %s\n", repoInfo.URL)
-		fmt.Printf("  Branch: %s\n", repoInfo.Branch)
-	}
+	// TODO: Implement git detection
+	fmt.Printf("  Status: Not yet implemented\n")
 
 	// Sync configuration
 	fmt.Printf("\n🔄 Sync Settings:\n")
@@ -121,4 +117,14 @@ func formatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// Stub helper functions
+func formatDuration(d time.Duration) string {
+	return d.String()
+}
+
+func getChangedFiles() ([]string, error) {
+	// TODO: Implement git status parsing
+	return []string{}, nil
 }

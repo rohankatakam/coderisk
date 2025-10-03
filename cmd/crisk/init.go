@@ -3,257 +3,190 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/cache"
+	"github.com/coderisk/coderisk-go/internal/config"
+	"github.com/coderisk/coderisk-go/internal/database"
 	"github.com/coderisk/coderisk-go/internal/github"
-	"github.com/coderisk/coderisk-go/internal/ingestion"
-	"github.com/coderisk/coderisk-go/internal/models"
-	"github.com/coderisk/coderisk-go/internal/storage"
+	"github.com/coderisk/coderisk-go/internal/graph"
 	"github.com/spf13/cobra"
 )
 
 var (
-	connectURL string
-	localOnly  bool
-	repoURL    string
+	backendType string
 )
 
 var initCmd = &cobra.Command{
-	Use:   "init",
+	Use:   "init [repository]",
 	Short: "Initialize CodeRisk for a repository",
-	Long: `Initialize CodeRisk by either connecting to a shared team cache
-or performing a full repository ingestion.`,
+	Long: `Initialize CodeRisk by fetching GitHub data and building the knowledge graph.
+
+Examples:
+  crisk init omnara-ai/omnara
+  crisk init omnara-ai/omnara --backend neo4j
+
+Configuration:
+  All credentials are loaded from .env file in project root.
+  Run 'cp .env.example .env' and fill in your GITHUB_TOKEN.
+
+The repository must be specified as owner/repo format.`,
+	Args: cobra.ExactArgs(1),
 	RunE: runInit,
 }
 
 func init() {
-	initCmd.Flags().StringVar(&connectURL, "connect", "", "Connect to existing team cache")
-	initCmd.Flags().BoolVar(&localOnly, "local-only", false, "Use local analysis only (no cloud)")
-	initCmd.Flags().StringVar(&repoURL, "repo", "", "Repository URL to ingest")
+	initCmd.Flags().StringVarP(&backendType, "backend", "b", "neo4j", "Graph backend: neo4j (local) or neptune (cloud)")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	startTime := time.Now()
 	ctx := context.Background()
 
-	// Try auto-discovery if no flags provided
-	if connectURL == "" && !localOnly && repoURL == "" {
-		logger.Info("Auto-discovering repository configuration...")
-		if err := autoDiscover(ctx); err != nil {
-			logger.WithError(err).Debug("Auto-discovery failed")
-			return fmt.Errorf("could not auto-discover repository. Use --connect, --local-only, or --repo flag")
-		}
-		return nil
+	// Load environment variables from .env file
+	envLoader := config.NewEnvLoader()
+	envLoader.MustLoad()
+
+	// Validate required variables including GitHub token
+	if err := envLoader.ValidateWithGitHub(); err != nil {
+		return err
 	}
 
-	// Connect to existing cache
-	if connectURL != "" {
-		return connectToCache(ctx, connectURL)
-	}
-
-	// Local-only mode
-	if localOnly {
-		return initLocalMode(ctx)
-	}
-
-	// Full repository ingestion
-	if repoURL != "" {
-		return performIngestion(ctx, repoURL)
-	}
-
-	return fmt.Errorf("no initialization method specified")
-}
-
-func autoDiscover(ctx context.Context) error {
-	// Detect git repository
-	repoInfo, err := detectGitRepo()
+	// Parse repository name
+	repoName := args[0]
+	owner, repo, err := parseRepoName(repoName)
 	if err != nil {
-		return fmt.Errorf("not a git repository: %w", err)
+		return fmt.Errorf("invalid repository name: %w", err)
 	}
 
-	logger.WithField("repo", repoInfo.URL).Info("Detected repository")
+	fmt.Printf("🚀 Initializing CodeRisk for %s/%s...\n", owner, repo)
+	fmt.Printf("   Backend: %s\n", backendType)
+	fmt.Printf("   Config: %s\n", envLoader.GetPath())
 
-	// Query cache registry
-	cacheManager := cache.NewManager(cfg, logger)
-	cacheInfo, err := cacheManager.QueryRegistry(ctx, repoInfo.URL)
-	if err != nil {
-		logger.WithError(err).Debug("No existing cache found")
-
-		// Offer to create new cache
-		fmt.Printf("No cache found for %s\n", repoInfo.URL)
-		fmt.Println("Would you like to:")
-		fmt.Println("1. Initialize shared team cache (recommended, ~$15)")
-		fmt.Println("2. Use local-only mode (free, limited features)")
-		fmt.Println("3. Cancel")
-
-		var choice int
-		fmt.Scanln(&choice)
-
-		switch choice {
-		case 1:
-			return performIngestion(ctx, repoInfo.URL)
-		case 2:
-			return initLocalMode(ctx)
-		default:
-			return fmt.Errorf("initialization cancelled")
-		}
-	}
-
-	// Found existing cache
-	fmt.Printf("✓ Found team cache for %s\n", repoInfo.URL)
-	fmt.Printf("  Last updated: %s\n", cacheInfo.LastUpdated.Format("2006-01-02 15:04"))
-	fmt.Printf("  Managed by: %s\n", cacheInfo.Admin)
-
-	return connectToCache(ctx, cacheInfo.URL)
-}
-
-func connectToCache(ctx context.Context, url string) error {
-	logger.WithField("url", url).Info("Connecting to team cache")
-
-	cacheManager := cache.NewManager(cfg, logger)
-	if err := cacheManager.Connect(ctx, url); err != nil {
-		return fmt.Errorf("failed to connect to cache: %w", err)
-	}
-
-	// Pull initial cache data
-	if err := cacheManager.Pull(ctx); err != nil {
-		return fmt.Errorf("failed to pull cache: %w", err)
-	}
-
-	fmt.Println("✓ Connected to team cache!")
-	fmt.Println("✓ Cache synchronized")
-	fmt.Println("\nReady to use! Run 'crisk check' to assess risk")
-
-	return nil
-}
-
-func initLocalMode(ctx context.Context) error {
-	logger.Info("Initializing local-only mode")
-
-	// Create local storage
-	store, err := storage.NewSQLiteStore(cfg.Storage.LocalPath, logger)
-	if err != nil {
-		return fmt.Errorf("failed to create local storage: %w", err)
-	}
-	defer store.Close()
-
-	// Download local models if needed
-	fmt.Println("Setting up local analysis models...")
-	// TODO: Download embedding models, etc.
-
-	fmt.Println("✓ Local mode initialized!")
-	fmt.Println("\nNote: Local mode provides Level 1 analysis only")
-	fmt.Println("Run 'crisk check' to perform risk assessment")
-
-	return nil
-}
-
-func performIngestion(ctx context.Context, repoURL string) error {
-	logger.WithField("repo", repoURL).Info("Starting full repository ingestion")
-
-	// Parse repository info
-	owner, name, err := parseRepoURL(repoURL)
-	if err != nil {
-		return fmt.Errorf("invalid repository URL: %w", err)
-	}
-
-	// Estimate cost
-	fmt.Printf("Initializing repository: %s/%s\n", owner, name)
-	fmt.Println("Estimated cost: $15-50 (one-time)")
-	fmt.Print("Continue? [y/N]: ")
-
-	var confirm string
-	fmt.Scanln(&confirm)
-	if confirm != "y" && confirm != "Y" {
-		return fmt.Errorf("ingestion cancelled")
-	}
-
-	// Create storage
-	store, err := createStorage()
-	if err != nil {
-		return fmt.Errorf("failed to create storage: %w", err)
-	}
-	defer store.Close()
-
-	// Create GitHub client
-	githubClient := github.NewClient(cfg.GitHub.Token, cfg.GitHub.RateLimit)
-	extractor := github.NewExtractor(githubClient, logger)
-
-	// Create ingestion orchestrator
-	orchestrator := ingestion.NewOrchestrator(
-		extractor,
-		store,
-		logger,
-		cfg,
+	// Connect to PostgreSQL
+	fmt.Printf("\n[0/3] Connecting to databases...\n")
+	stagingDB, err := database.NewStagingClient(
+		ctx,
+		config.GetString("POSTGRES_HOST", "localhost"),
+		config.GetInt("POSTGRES_PORT_EXTERNAL", 5433),
+		config.MustGetString("POSTGRES_DB"),
+		config.MustGetString("POSTGRES_USER"),
+		config.MustGetString("POSTGRES_PASSWORD"),
 	)
-
-	// Perform ingestion
-	startTime := time.Now()
-	fmt.Println("\n⚡ Starting ingestion...")
-
-	result, err := orchestrator.IngestRepository(ctx, owner, name)
 	if err != nil {
-		return fmt.Errorf("ingestion failed: %w", err)
+		return fmt.Errorf("PostgreSQL connection failed: %w", err)
+	}
+	defer stagingDB.Close()
+
+	// Connect to graph backend
+	var graphBackend graph.Backend
+	switch backendType {
+	case "neo4j":
+		// Construct Neo4j URI from components
+		neo4jHost := config.GetString("NEO4J_HOST", "localhost")
+		neo4jPort := config.GetInt("NEO4J_BOLT_PORT", 7688)
+		neo4jURI := fmt.Sprintf("bolt://%s:%d", neo4jHost, neo4jPort)
+
+		graphBackend, err = graph.NewNeo4jBackend(
+			ctx,
+			neo4jURI,
+			config.MustGetString("NEO4J_USER"),
+			config.MustGetString("NEO4J_PASSWORD"),
+		)
+		if err != nil {
+			return fmt.Errorf("Neo4j connection failed: %w", err)
+		}
+	case "neptune":
+		return fmt.Errorf("Neptune backend not yet implemented")
+	default:
+		return fmt.Errorf("unsupported backend: %s (use 'neo4j' or 'neptune')", backendType)
+	}
+	defer graphBackend.Close()
+
+	fmt.Printf("  ✓ Connected to PostgreSQL\n")
+	fmt.Printf("  ✓ Connected to %s\n", backendType)
+
+	// Stage 1: Fetch GitHub data → PostgreSQL
+	fmt.Printf("\n[1/3] Fetching GitHub API data...\n")
+	fetchStart := time.Now()
+
+	fetcher := github.NewFetcher(config.MustGetString("GITHUB_TOKEN"), stagingDB)
+	repoID, stats, err := fetcher.FetchAll(ctx, owner, repo)
+	if err != nil {
+		return fmt.Errorf("fetch failed: %w", err)
 	}
 
-	duration := time.Since(startTime)
+	fetchDuration := time.Since(fetchStart)
+	fmt.Printf("  ✓ Fetched in %v\n", fetchDuration)
+	fmt.Printf("    Commits: %d | Issues: %d | PRs: %d | Branches: %d\n",
+		stats.Commits, stats.Issues, stats.PRs, stats.Branches)
 
-	fmt.Printf("\n✓ Ingestion completed in %s\n", duration)
-	fmt.Printf("  Files processed: %d\n", result.FileCount)
-	fmt.Printf("  Commits analyzed: %d\n", result.CommitCount)
-	fmt.Printf("  Risk sketches created: %d\n", result.SketchCount)
-	fmt.Printf("  Total cost: $%.2f\n", result.Cost)
+	// Stage 2: Build graph from PostgreSQL → Neo4j/Neptune
+	fmt.Printf("\n[2/3] Building knowledge graph...\n")
+	graphStart := time.Now()
 
-	// Save cache metadata
-	metadata := &models.CacheMetadata{
-		Version:     generateVersion(),
-		RepoID:      fmt.Sprintf("%s/%s", owner, name),
-		LastCommit:  result.LastCommit,
-		LastUpdated: time.Now(),
-		FileCount:   result.FileCount,
-		SketchCount: result.SketchCount,
+	builder := graph.NewBuilder(stagingDB, graphBackend)
+	buildStats, err := builder.BuildGraph(ctx, repoID)
+	if err != nil {
+		return fmt.Errorf("graph construction failed: %w", err)
 	}
 
-	if err := store.SaveCacheMetadata(ctx, metadata); err != nil {
-		logger.WithError(err).Warn("Failed to save cache metadata")
-	}
+	graphDuration := time.Since(graphStart)
+	fmt.Printf("  ✓ Graph built in %v\n", graphDuration)
+	fmt.Printf("    Nodes: %d | Edges: %d\n", buildStats.Nodes, buildStats.Edges)
 
-	fmt.Println("\n✓ Repository initialized successfully!")
-	fmt.Println("Run 'crisk check' to start analyzing code changes")
+	// Stage 3: Validate
+	fmt.Printf("\n[3/3] Validating...\n")
+	if err := validateGraph(ctx, graphBackend, buildStats); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+	fmt.Printf("  ✓ Validation passed\n")
+
+	// Summary
+	totalDuration := time.Since(startTime)
+	fmt.Printf("\n✅ CodeRisk initialized for %s/%s\n", owner, repo)
+	fmt.Printf("   Total time: %v (fetch: %v, graph: %v)\n",
+		totalDuration, fetchDuration, graphDuration)
+	fmt.Printf("\n💡 Try: crisk check <file>\n")
 
 	return nil
 }
 
 // Helper functions
 
-type gitRepoInfo struct {
-	URL    string
-	Owner  string
-	Name   string
-	Branch string
-}
-
-func detectGitRepo() (*gitRepoInfo, error) {
-	// TODO: Implement git detection using go-git
-	return nil, fmt.Errorf("not implemented")
-}
-
-func parseRepoURL(url string) (owner, name string, err error) {
-	// TODO: Parse GitHub URL
-	return "", "", fmt.Errorf("not implemented")
-}
-
-func createStorage() (storage.Store, error) {
-	switch cfg.Storage.Type {
-	case "postgres":
-		return storage.NewPostgresStore(cfg.Storage.PostgresDSN, logger)
-	case "sqlite":
-		return storage.NewSQLiteStore(cfg.Storage.LocalPath, logger)
-	default:
-		return nil, fmt.Errorf("unknown storage type: %s", cfg.Storage.Type)
+// parseRepoName splits "owner/repo" into components
+func parseRepoName(repoName string) (owner, repo string, err error) {
+	parts := strings.Split(repoName, "/")
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("expected format: owner/repo, got: %s", repoName)
 	}
+	return parts[0], parts[1], nil
 }
 
-func generateVersion() string {
-	return fmt.Sprintf("v1-%d", time.Now().Unix())
+// validateGraph performs basic sanity checks on the constructed graph
+func validateGraph(ctx context.Context, backend graph.Backend, stats *graph.BuildStats) error {
+	if stats.Nodes == 0 {
+		return fmt.Errorf("no nodes created in graph")
+	}
+	if stats.Edges == 0 {
+		return fmt.Errorf("no edges created in graph")
+	}
+
+	// Verify required node types exist
+	requiredLabels := []string{"Commit", "Developer"}
+
+	for _, label := range requiredLabels {
+		query := fmt.Sprintf("MATCH (n:%s) RETURN count(n) as count", label)
+		result, err := backend.Query(query)
+		if err != nil {
+			return fmt.Errorf("failed to query %s nodes: %w", label, err)
+		}
+
+		count := result.(int64)
+		if count == 0 {
+			fmt.Printf("  ⚠️  Warning: No %s nodes found\n", label)
+		}
+	}
+
+	return nil
 }

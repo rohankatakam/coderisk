@@ -14,6 +14,8 @@ bin/
 dist/
 build/
 out/
+api
+crisk
 
 # Test binaries and coverage
 *.test
@@ -71,9 +73,11 @@ local/
 *.local
 .cache/
 .scratch/
+cmd/test-env/
 
 # Private development documentation (personal IP)
 dev_docs/
+test_data/
 private/
 internal_docs/
 DEV_REFERENCE.md
@@ -93,6 +97,7 @@ debug/
 # Docker local files
 docker-compose.override.yml
 .dockerignore.local
+volumes/
 
 # Security and credentials (extra safety)
 *.key
@@ -132,6 +137,7 @@ test-results/
 test_output/
 junit.xml
 testdata/local/
+*.owl
 
 # Documentation builds (keep source docs)
 docs/build/

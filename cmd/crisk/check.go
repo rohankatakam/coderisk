@@ -3,238 +3,126 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
+	"os"
+	"strconv"
 
 	"github.com/coderisk/coderisk-go/internal/cache"
-	"github.com/coderisk/coderisk-go/internal/models"
-	"github.com/coderisk/coderisk-go/internal/risk"
+	"github.com/coderisk/coderisk-go/internal/database"
+	"github.com/coderisk/coderisk-go/internal/graph"
+	"github.com/coderisk/coderisk-go/internal/metrics"
 	"github.com/spf13/cobra"
-	"strings"
 )
 
-var (
-	offline   bool
-	fresh     bool
-	explain   bool
-	preCommit bool
-	level     int
-)
-
+// checkCmd performs Phase 1 risk assessment on specified files
+// Reference: risk_assessment_methodology.md §2 - Tier 1 Metrics
+// 12-factor: Factor 1 - Natural language to tool calls (CLI → metric calculation)
 var checkCmd = &cobra.Command{
-	Use:   "check",
-	Short: "Perform risk assessment on current changes",
-	Long: `Analyze uncommitted changes and provide risk assessment.
-This command runs in under 5 seconds using cached risk sketches.`,
-	RunE: runCheck,
-}
+	Use:   "check [file...]",
+	Short: "Assess risk for changed files using Phase 1 baseline metrics",
+	Long: `Runs Phase 1 baseline assessment using Tier 1 metrics:
+  - Structural Coupling (dependency count)
+  - Temporal Co-Change (commit patterns)
+  - Test Coverage Ratio
 
-func init() {
-	checkCmd.Flags().BoolVar(&offline, "offline", false, "Run in offline mode (no sync)")
-	checkCmd.Flags().BoolVar(&fresh, "fresh", false, "Force cache refresh before check")
-	checkCmd.Flags().BoolVar(&explain, "explain", false, "Show detailed explanations")
-	checkCmd.Flags().BoolVar(&preCommit, "pre-commit", false, "Run as pre-commit hook")
-	checkCmd.Flags().IntVar(&level, "level", 1, "Analysis level (1=fast, 2=standard, 3=deep)")
+Completes in <500ms (no LLM needed for low-risk files).
+Reference: risk_assessment_methodology.md §2`,
+	RunE: runCheck,
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	startTime := time.Now()
 
-	// Initialize cache manager
-	cacheManager := cache.NewManager(cfg, logger)
+	// Get files to check (from args or git status)
+	files := args
+	if len(files) == 0 {
+		// TODO: Auto-detect from git status
+		return fmt.Errorf("no files specified. Usage: crisk check <file>")
+	}
 
-	// Smart sync logic
-	if !offline {
-		if err := smartSync(ctx, cacheManager); err != nil {
-			logger.WithError(err).Warn("Cache sync failed, continuing with local cache")
+	// Initialize dependencies from environment
+	// Reference: DEVELOPMENT_WORKFLOW.md §3.3 - Load from environment variables
+	neo4jClient, err := initNeo4j(ctx)
+	if err != nil {
+		return fmt.Errorf("neo4j initialization failed: %w", err)
+	}
+	defer neo4jClient.Close(ctx)
+
+	redisClient, err := initRedis(ctx)
+	if err != nil {
+		return fmt.Errorf("redis initialization failed: %w", err)
+	}
+	defer redisClient.Close()
+
+	pgClient, err := initPostgres(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres initialization failed: %w", err)
+	}
+	defer pgClient.Close()
+
+	// Create metrics registry
+	registry := metrics.NewRegistry(neo4jClient, redisClient, pgClient)
+
+	// Assess each file
+	repoID := "local" // TODO: Get from git repo
+	for _, file := range files {
+		fmt.Printf("\n=== Analyzing %s ===\n\n", file)
+
+		result, err := registry.CalculatePhase1(ctx, repoID, file)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			continue
 		}
-	}
 
-	// Get changed files
-	changes, err := getChangedFiles()
-	if err != nil {
-		return fmt.Errorf("failed to detect changes: %w", err)
-	}
+		// Display results
+		fmt.Println(result.FormatSummary())
 
-	if len(changes) == 0 {
-		fmt.Println("✓ No uncommitted changes detected")
-		return nil
-	}
-
-	logger.WithField("files", len(changes)).Info("Analyzing changes")
-
-	// Load risk sketches from cache
-	sketches, err := cacheManager.LoadSketches(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to load risk sketches: %w", err)
-	}
-
-	// Perform risk calculation
-	calculator := risk.NewCalculator(logger, nil)
-	assessment, err := calculator.CalculateRisk(ctx, sketches, changes)
-	if err != nil {
-		return fmt.Errorf("risk calculation failed: %w", err)
-	}
-
-	// Display results
-	displayResults(assessment, time.Since(startTime))
-
-	// Show explanations if requested
-	if explain {
-		displayExplanations(assessment)
-	}
-
-	// Pre-commit mode: exit with error if risk too high
-	if preCommit && assessment.Level == models.RiskLevelCritical {
-		return fmt.Errorf("critical risk detected - commit blocked")
+		if result.ShouldEscalate {
+			fmt.Println("\n⚠️  HIGH RISK - Would escalate to Phase 2 (LLM investigation)")
+			fmt.Println("    Phase 2 requires LLM API key (set PHASE2_ENABLED=true)")
+		}
 	}
 
 	return nil
 }
 
-func smartSync(ctx context.Context, cacheManager *cache.Manager) error {
-	cacheAge, err := cacheManager.GetCacheAge(ctx)
-	if err != nil {
-		return err
-	}
-
-	freshThreshold := 30 * time.Minute
-	staleThreshold := 4 * time.Hour
-
-	// Auto-sync logic
-	if cacheAge > staleThreshold {
-		fmt.Printf("⚠ Cache is %s old. Syncing...\n", formatDuration(cacheAge))
-		if err := cacheManager.Pull(ctx); err != nil {
-			return err
-		}
-		fmt.Println("✓ Updated")
-	} else if fresh {
-		fmt.Println("Forcing cache refresh...")
-		if err := cacheManager.Pull(ctx); err != nil {
-			return err
-		}
-		fmt.Println("✓ Updated")
-	} else if cacheAge > freshThreshold {
-		fmt.Printf("ℹ Cache age: %s\n", formatDuration(cacheAge))
-	}
-
-	return nil
+// initNeo4j creates Neo4j client from environment
+func initNeo4j(ctx context.Context) (*graph.Client, error) {
+	return graph.NewClient(
+		ctx,
+		getEnvOrDefault("NEO4J_URI", "bolt://localhost:7688"),
+		getEnvOrDefault("NEO4J_USER", "neo4j"),
+		getEnvOrDefault("NEO4J_PASSWORD", "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123"),
+	)
 }
 
-func getChangedFiles() ([]string, error) {
-	// TODO: Use go-git to detect uncommitted changes
-	// For now, return mock data
-	return []string{}, nil
+// initRedis creates Redis client from environment
+func initRedis(ctx context.Context) (*cache.Client, error) {
+	port, _ := strconv.Atoi(getEnvOrDefault("REDIS_PORT_EXTERNAL", "6380"))
+	return cache.NewClient(
+		ctx,
+		getEnvOrDefault("REDIS_HOST", "localhost"),
+		port,
+		getEnvOrDefault("REDIS_PASSWORD", ""),
+	)
 }
 
-func displayResults(assessment *models.RiskAssessment, duration time.Duration) {
-	// Risk level with color coding
-	levelStr := formatRiskLevel(assessment.Level)
-
-	fmt.Printf("\n%s Risk Assessment %s\n", getIcon(assessment.Level), strings.Repeat("═", 50))
-	fmt.Printf("Risk Level: %s (Score: %.2f)\n", levelStr, assessment.Score)
-	fmt.Printf("Analysis Time: %s\n", duration.Round(time.Millisecond))
-
-	if assessment.BlastRadius > 0.3 {
-		fmt.Printf("Blast Radius: %.0f%% of codebase affected\n", assessment.BlastRadius*100)
-	}
-	if assessment.TestCoverage < 0.5 {
-		fmt.Printf("Test Coverage: %.0f%% (consider adding tests)\n", assessment.TestCoverage*100)
-	}
-
-	// Top risk factors
-	if len(assessment.Factors) > 0 {
-		fmt.Println("\nTop Risk Factors:")
-		for i, factor := range assessment.Factors {
-			fmt.Printf("%d. %s %s (%s)\n",
-				i+1,
-				getImpactIcon(factor.Impact),
-				factor.Signal,
-				factor.Impact)
-			fmt.Printf("   %s\n", factor.Detail)
-		}
-	}
-
-	// Suggestions
-	if len(assessment.Suggestions) > 0 {
-		fmt.Println("\nSuggestions:")
-		for _, suggestion := range assessment.Suggestions {
-			fmt.Printf("• %s\n", suggestion)
-		}
-	}
-
-	fmt.Println()
+// initPostgres creates PostgreSQL client from environment
+func initPostgres(ctx context.Context) (*database.Client, error) {
+	port, _ := strconv.Atoi(getEnvOrDefault("POSTGRES_PORT_EXTERNAL", "5433"))
+	return database.NewClient(
+		ctx,
+		getEnvOrDefault("POSTGRES_HOST", "localhost"),
+		port,
+		getEnvOrDefault("POSTGRES_DB", "coderisk"),
+		getEnvOrDefault("POSTGRES_USER", "coderisk"),
+		getEnvOrDefault("POSTGRES_PASSWORD", "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123"),
+	)
 }
 
-func displayExplanations(assessment *models.RiskAssessment) {
-	fmt.Println("\n📊 Detailed Analysis")
-	fmt.Println(strings.Repeat("─", 60))
-
-	for _, factor := range assessment.Factors {
-		fmt.Printf("\n%s %s\n", getImpactIcon(factor.Impact), factor.Signal)
-		fmt.Printf("Impact: %s | Score: %.2f\n", factor.Impact, factor.Score)
-		fmt.Printf("Details: %s\n", factor.Detail)
-
-		if factor.Evidence != "" {
-			fmt.Printf("Evidence: %s\n", factor.Evidence)
-		}
-
-		fmt.Printf("Learn more: crisk explain --signal %s\n",
-			strings.ToLower(strings.ReplaceAll(factor.Signal, " ", "-")))
+// getEnvOrDefault retrieves environment variable with fallback
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
 	}
-
-	fmt.Printf("\nView full analysis: %s\n", getAnalysisURL(assessment.ID))
-}
-
-// Helper functions
-
-func formatRiskLevel(level models.RiskLevel) string {
-	colors := map[models.RiskLevel]string{
-		models.RiskLevelLow:      "\033[32m", // Green
-		models.RiskLevelMedium:   "\033[33m", // Yellow
-		models.RiskLevelHigh:     "\033[31m", // Red
-		models.RiskLevelCritical: "\033[35m", // Magenta
-	}
-	reset := "\033[0m"
-
-	color, ok := colors[level]
-	if !ok {
-		return string(level)
-	}
-
-	return fmt.Sprintf("%s%s%s", color, level, reset)
-}
-
-func getIcon(level models.RiskLevel) string {
-	icons := map[models.RiskLevel]string{
-		models.RiskLevelLow:      "✅",
-		models.RiskLevelMedium:   "⚠️",
-		models.RiskLevelHigh:     "🔴",
-		models.RiskLevelCritical: "🚨",
-	}
-	return icons[level]
-}
-
-func getImpactIcon(impact string) string {
-	icons := map[string]string{
-		"CRITICAL": "🔴",
-		"HIGH":     "🟠",
-		"MEDIUM":   "🟡",
-		"LOW":      "🟢",
-	}
-	return icons[impact]
-}
-
-func formatDuration(d time.Duration) string {
-	if d < time.Hour {
-		return fmt.Sprintf("%d minutes", int(d.Minutes()))
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%d hours", int(d.Hours()))
-	}
-	return fmt.Sprintf("%d days", int(d.Hours()/24))
-}
-
-func getAnalysisURL(id string) string {
-	return fmt.Sprintf("https://app.coderisk.ai/analysis/%s", id)
+	return defaultValue
 }
