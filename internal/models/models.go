@@ -132,3 +132,160 @@ type CacheMetadata struct {
 	FileCount   int       `json:"file_count" db:"file_count"`
 	SketchCount int       `json:"sketch_count" db:"sketch_count"`
 }
+
+// RiskResult represents a complete risk analysis result for output formatting
+type RiskResult struct {
+	// Metadata
+	Branch       string        `json:"branch"`
+	FilesChanged int           `json:"files_changed"`
+	RiskLevel    string        `json:"risk_level"`
+	RiskScore    float64       `json:"risk_score"`
+	Confidence   float64       `json:"confidence"`
+	StartTime    time.Time     `json:"start_time"`
+	EndTime      time.Time     `json:"end_time"`
+	Duration     time.Duration `json:"duration"`
+	CacheHit     bool          `json:"cache_hit"`
+
+	// Analysis results
+	Files               []FileRisk          `json:"files"`
+	Issues              []RiskIssue         `json:"issues"`
+	Recommendations     []string            `json:"recommendations"`
+	Evidence            []string            `json:"evidence"`
+	NextSteps           []string            `json:"next_steps"`
+	InvestigationTrace  []InvestigationHop  `json:"investigation_trace"`
+
+	// Graph metrics
+	BlastRadius      int               `json:"blast_radius"`
+	TemporalCoupling []CouplingPair    `json:"temporal_coupling"`
+	Hotspots         []Hotspot         `json:"hotspots"`
+
+	// Commit control (Session 3 - AI Mode)
+	ShouldBlock                   bool   `json:"should_block_commit,omitempty"`
+	BlockReason                   string `json:"block_reason,omitempty"`
+	OverrideAllowed               bool   `json:"override_allowed,omitempty"`
+	OverrideRequiresJustification bool   `json:"override_requires_justification,omitempty"`
+
+	// Performance metrics (Session 3 - AI Mode)
+	Performance Performance `json:"performance,omitempty"`
+
+	// Contextual insights (Session 3 - AI Mode)
+	SimilarPastChanges []SimilarChange      `json:"similar_past_changes,omitempty"`
+	TeamPatterns       *TeamPatterns        `json:"team_patterns,omitempty"`
+	FileReputation     map[string]Reputation `json:"file_reputation,omitempty"`
+}
+
+// Performance represents execution metrics for AI Mode
+type Performance struct {
+	TotalDurationMS int                    `json:"total_duration_ms"`
+	Breakdown       map[string]int         `json:"breakdown"`
+	CacheEfficiency map[string]interface{} `json:"cache_efficiency"`
+}
+
+// SimilarChange represents a similar past change for context
+type SimilarChange struct {
+	CommitSHA    string   `json:"commit_sha"`
+	Date         string   `json:"date"`
+	Author       string   `json:"author"`
+	FilesChanged []string `json:"files_changed"`
+	Outcome      string   `json:"outcome"`
+	Lesson       string   `json:"lesson"`
+}
+
+// TeamPatterns represents team coding patterns
+type TeamPatterns struct {
+	AvgTestCoverage float64 `json:"avg_test_coverage"`
+	YourCoverage    float64 `json:"your_coverage"`
+	Percentile      int     `json:"percentile"`
+	TeamAvgCoupling float64 `json:"team_avg_coupling"`
+	YourCoupling    float64 `json:"your_coupling"`
+	Recommendation  string  `json:"recommendation"`
+}
+
+// Reputation represents file reputation metrics
+type Reputation struct {
+	IncidentDensity        float64 `json:"incident_density"`
+	TeamAvg                float64 `json:"team_avg"`
+	Classification         string  `json:"classification"`
+	ExtraReviewRecommended bool    `json:"extra_review_recommended"`
+}
+
+// FileRisk represents risk information for a single file
+type FileRisk struct {
+	Path         string            `json:"path"`
+	Language     string            `json:"language"`
+	LinesChanged int               `json:"lines_changed"`
+	RiskScore    float64           `json:"risk_score"`
+	Metrics      map[string]Metric `json:"metrics"`
+}
+
+// Metric represents a calculated metric with threshold
+type Metric struct {
+	Name      string   `json:"name"`
+	Value     float64  `json:"value"`
+	Threshold *float64 `json:"threshold,omitempty"`
+	Warning   *float64 `json:"warning,omitempty"`
+}
+
+// RiskIssue represents a detected risk issue
+type RiskIssue struct {
+	ID       string   `json:"id"`
+	Severity string   `json:"severity"`
+	Category string   `json:"category"`
+	File     string   `json:"file"`
+	Message  string   `json:"message"`
+	LineStart int     `json:"line_start,omitempty"`
+	LineEnd   int     `json:"line_end,omitempty"`
+	Function  string  `json:"function,omitempty"`
+
+	// AI Mode specific fields (Session 3)
+	ImpactScore         float64  `json:"impact_score,omitempty"`
+	FixPriority         int      `json:"fix_priority,omitempty"`
+	EstimatedFixTimeMin int      `json:"estimated_fix_time_min,omitempty"`
+	AutoFixable         bool     `json:"auto_fixable,omitempty"`
+	FixType             string   `json:"fix_type,omitempty"` // "generate_tests", "add_error_handling", etc.
+	FixConfidence       float64  `json:"fix_confidence,omitempty"`
+	AIPromptTemplate    string   `json:"ai_prompt_template,omitempty"`
+	ExpectedFiles       []string `json:"expected_files,omitempty"`
+	EstimatedLines      int      `json:"estimated_lines,omitempty"`
+	FixCommand          string   `json:"fix_command,omitempty"`
+}
+
+// InvestigationHop represents one step in the agent investigation
+type InvestigationHop struct {
+	NodeID          string            `json:"node_id"`
+	NodeType        string            `json:"node_type"`
+	ChangedEntities []ChangedEntity   `json:"changed_entities"`
+	Metrics         []Metric          `json:"metrics"`
+	Decision        string            `json:"decision"`
+	Reasoning       string            `json:"reasoning"`
+	Confidence      float64           `json:"confidence"`
+	DurationMS      int64             `json:"duration_ms"`
+}
+
+// ChangedEntity represents a changed function or class
+type ChangedEntity struct {
+	Name      string `json:"name"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+}
+
+// CouplingPair represents temporal coupling between two files
+type CouplingPair struct {
+	FileA       string    `json:"file_a"`
+	FileB       string    `json:"file_b"`
+	Strength    float64   `json:"strength"`
+	Commits     int       `json:"commits"`
+	TotalCommits int      `json:"total_commits"`
+	WindowDays  int       `json:"window_days"`
+	LastCoChange time.Time `json:"last_co_change"`
+}
+
+// Hotspot represents a high-risk file hotspot
+type Hotspot struct {
+	File      string  `json:"file"`
+	Score     float64 `json:"score"`
+	Reason    string  `json:"reason"`
+	Churn     float64 `json:"churn"`
+	Coverage  float64 `json:"coverage"`
+	Incidents int     `json:"incidents"`
+}

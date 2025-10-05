@@ -53,8 +53,10 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(initLocalCmd)
 	rootCmd.AddCommand(checkCmd)
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(parseCmd)
 }

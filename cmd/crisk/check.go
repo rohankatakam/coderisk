@@ -6,10 +6,14 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/coderisk/coderisk-go/internal/ai"
 	"github.com/coderisk/coderisk-go/internal/cache"
 	"github.com/coderisk/coderisk-go/internal/database"
+	"github.com/coderisk/coderisk-go/internal/git"
 	"github.com/coderisk/coderisk-go/internal/graph"
 	"github.com/coderisk/coderisk-go/internal/metrics"
+	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/coderisk/coderisk-go/internal/output"
 	"github.com/spf13/cobra"
 )
 
@@ -29,14 +33,51 @@ Reference: risk_assessment_methodology.md §2`,
 	RunE: runCheck,
 }
 
+func init() {
+	checkCmd.Flags().Bool("quiet", false, "Output one-line summary (for pre-commit hooks)")
+	checkCmd.Flags().Bool("explain", false, "Show full investigation trace")
+	checkCmd.Flags().Bool("ai-mode", false, "Output machine-readable JSON for AI assistants")
+	checkCmd.Flags().Bool("pre-commit", false, "Run in pre-commit hook mode (checks staged files)")
+
+	// Mutually exclusive flags
+	checkCmd.MarkFlagsMutuallyExclusive("quiet", "explain", "ai-mode")
+}
+
 func runCheck(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Get files to check (from args or git status)
-	files := args
-	if len(files) == 0 {
-		// TODO: Auto-detect from git status
-		return fmt.Errorf("no files specified. Usage: crisk check <file>")
+	// Get pre-commit flag
+	preCommit, _ := cmd.Flags().GetBool("pre-commit")
+
+	// Get files to check (from args, staged files, or git status)
+	var files []string
+	var err error
+
+	if preCommit {
+		// Pre-commit mode: check staged files
+		files, err = git.GetStagedFiles()
+		if err != nil {
+			return fmt.Errorf("failed to get staged files: %w", err)
+		}
+
+		if len(files) == 0 {
+			fmt.Println("✅ No files to check")
+			return nil
+		}
+	} else if len(args) > 0 {
+		// Files specified as arguments
+		files = args
+	} else {
+		// Auto-detect from git status
+		files, err = git.GetChangedFiles()
+		if err != nil {
+			return fmt.Errorf("failed to get changed files: %w", err)
+		}
+
+		if len(files) == 0 {
+			fmt.Println("✅ No changed files to check")
+			return nil
+		}
 	}
 
 	// Initialize dependencies from environment
@@ -62,24 +103,66 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Create metrics registry
 	registry := metrics.NewRegistry(neo4jClient, redisClient, pgClient)
 
+	// Determine verbosity level
+	var level output.VerbosityLevel
+	quiet, _ := cmd.Flags().GetBool("quiet")
+	explain, _ := cmd.Flags().GetBool("explain")
+	aiMode, _ := cmd.Flags().GetBool("ai-mode")
+
+	// Pre-commit mode implies quiet
+	if preCommit {
+		quiet = true
+	}
+
+	if quiet {
+		level = output.VerbosityQuiet
+	} else if explain {
+		level = output.VerbosityExplain
+	} else if aiMode {
+		level = output.VerbosityAIMode
+	} else {
+		level = output.GetDefaultVerbosity()
+	}
+
+	// Create formatter
+	formatter := output.NewFormatter(level)
+
 	// Assess each file
 	repoID := "local" // TODO: Get from git repo
-	for _, file := range files {
-		fmt.Printf("\n=== Analyzing %s ===\n\n", file)
+	hasHighRisk := false
 
+	for _, file := range files {
 		result, err := registry.CalculatePhase1(ctx, repoID, file)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			continue
 		}
 
-		// Display results
-		fmt.Println(result.FormatSummary())
+		// Convert to RiskResult and format
+		riskResult := output.ConvertPhase1ToRiskResult(result)
+
+		// If AI mode, enhance with AI prompts and confidence scores
+		if aiMode {
+			enrichWithAIData(riskResult)
+		}
+
+		if err := formatter.Format(riskResult, os.Stdout); err != nil {
+			return fmt.Errorf("formatting error: %w", err)
+		}
 
 		if result.ShouldEscalate {
-			fmt.Println("\n⚠️  HIGH RISK - Would escalate to Phase 2 (LLM investigation)")
-			fmt.Println("    Phase 2 requires LLM API key (set PHASE2_ENABLED=true)")
+			hasHighRisk = true
+			if !preCommit {
+				fmt.Println("\n⚠️  HIGH RISK - Would escalate to Phase 2 (LLM investigation)")
+				fmt.Println("    Phase 2 requires LLM API key (set PHASE2_ENABLED=true)")
+			}
 		}
+	}
+
+	// In pre-commit mode, exit with code 1 to block commit on HIGH/CRITICAL risk
+	// Reference: ux_pre_commit_hook.md - Exit code strategy
+	if preCommit && hasHighRisk {
+		os.Exit(1)
 	}
 
 	return nil
@@ -125,4 +208,85 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// enrichWithAIData adds AI-specific fields to RiskResult for AI Mode
+func enrichWithAIData(result *models.RiskResult) {
+	promptGen := ai.NewPromptGenerator()
+	confCalc := ai.NewConfidenceCalculator()
+
+	// Enhance each issue with AI data
+	for i := range result.Issues {
+		issue := &result.Issues[i]
+
+		// Find corresponding file
+		var fileRisk models.FileRisk
+		for _, f := range result.Files {
+			if f.Path == issue.File {
+				fileRisk = f
+				break
+			}
+		}
+
+		// Determine fix type if not set
+		if issue.FixType == "" {
+			issue.FixType = promptGen.DetermineFixType(*issue, fileRisk)
+		}
+
+		// Calculate confidence
+		issue.FixConfidence = confCalc.Calculate(*issue, fileRisk)
+
+		// Generate AI prompt
+		issue.AIPromptTemplate = promptGen.GeneratePrompt(*issue, fileRisk)
+
+		// Mark as auto-fixable if prompt exists and confidence is high
+		issue.AutoFixable = issue.AIPromptTemplate != "" && confCalc.ShouldAutoFix(issue.FixConfidence)
+
+		// Estimate fix time and lines
+		complexity := 0.0
+		if comp, ok := fileRisk.Metrics["complexity"]; ok {
+			complexity = comp.Value
+		}
+		issue.EstimatedFixTimeMin = confCalc.EstimateFixTime(issue.FixType, complexity)
+		issue.EstimatedLines = confCalc.EstimateLines(issue.FixType)
+
+		// Determine expected files
+		issue.ExpectedFiles = confCalc.DetermineExpectedFiles(issue.FixType, issue.File, fileRisk.Language)
+
+		// Generate fix command
+		issue.FixCommand = fmt.Sprintf("crisk fix-with-ai --%s %s:%d-%d", issue.FixType, issue.File, issue.LineStart, issue.LineEnd)
+	}
+
+	// Set commit control flags based on risk level
+	switch result.RiskLevel {
+	case "CRITICAL":
+		result.ShouldBlock = true
+		result.BlockReason = "critical_risk_detected"
+		result.OverrideAllowed = false
+		result.OverrideRequiresJustification = true
+	case "HIGH":
+		result.ShouldBlock = true
+		result.BlockReason = "high_risk_detected"
+		result.OverrideAllowed = true
+		result.OverrideRequiresJustification = true
+	case "MEDIUM":
+		result.ShouldBlock = false
+		result.BlockReason = ""
+		result.OverrideAllowed = true
+		result.OverrideRequiresJustification = false
+	default:
+		result.ShouldBlock = false
+		result.OverrideAllowed = true
+	}
+
+	// Set performance metrics (simplified - would be calculated during actual analysis)
+	result.Performance = models.Performance{
+		TotalDurationMS: int(result.Duration.Milliseconds()),
+		Breakdown: map[string]int{
+			"phase1_metrics": int(result.Duration.Milliseconds()),
+		},
+		CacheEfficiency: map[string]interface{}{
+			"cache_hit": result.CacheHit,
+		},
+	}
 }

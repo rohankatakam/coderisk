@@ -15,7 +15,7 @@ dist/
 build/
 out/
 api
-crisk
+/crisk
 
 # Test binaries and coverage
 *.test
@@ -65,6 +65,7 @@ secrets.yml
 
 # Local development and testing
 .coderisk/
+.coderisk/repos/  # Cloned repositories for Layer 1 parsing
 tmp/
 temp/
 *.tmp

@@ -1,0 +1,97 @@
+# CodeRisk Configuration
+# Copy to .coderisk.yml and customize for your project
+
+# Pre-commit hook behavior
+pre_commit:
+  # Block commits on MEDIUM risk (default: true)
+  # Set to false to only block on HIGH/CRITICAL
+  block_on_medium: true
+
+  # Block commits on LOW risk (default: false)
+  # Enable for very strict quality enforcement
+  block_on_low: false
+
+  # Maximum check time before timeout (seconds)
+  # Hook will fail open (allow commit) if timeout exceeded
+  timeout: 5
+
+  # Log all checks to file (for audit trail)
+  log_checks: true
+  log_file: ".coderisk/hook_log.jsonl"
+
+  # Track overrides (git commit --no-verify)
+  # Logs when developers bypass risk checks
+  track_overrides: true
+
+# Team mode: solo, team, standard, enterprise
+# Determines default blocking behavior and verbosity
+#
+# solo:       Non-blocking warnings only, educational focus
+# team:       Block on HIGH/CRITICAL, allow easy override
+# standard:   Block on MEDIUM+, require override justification
+# enterprise: Block on LOW+, require approval for override
+team_mode: team
+
+# Verbosity settings
+output:
+  # Default verbosity level: quiet, standard, explain, ai-mode
+  default_verbosity: standard
+
+  # Show performance metrics in output
+  show_performance: false
+
+  # Use emojis in output (disable for CI environments)
+  use_emojis: true
+
+# Cache settings (15-minute TTL as per design)
+cache:
+  # Enable caching for faster checks
+  enabled: true
+
+  # Cache TTL in minutes (default: 15)
+  ttl_minutes: 15
+
+# Risk thresholds (0-10 scale)
+risk_thresholds:
+  # Risk score below this is LOW
+  low: 3.0
+
+  # Risk score below this is MEDIUM
+  medium: 6.0
+
+  # Risk score below this is HIGH
+  high: 8.0
+
+  # Risk score above high threshold is CRITICAL
+
+# Metric weights (how much each metric contributes to risk score)
+# Sum should equal 1.0
+metric_weights:
+  structural_coupling: 0.3
+  temporal_cochange: 0.3
+  test_coverage_ratio: 0.4
+
+# False positive tracking
+false_positives:
+  # Auto-disable metrics with FP rate above this threshold
+  disable_threshold: 0.03  # 3%
+
+  # Minimum feedback samples before auto-disable
+  min_samples: 10
+
+# File exclusions (glob patterns)
+exclude:
+  - "vendor/**"
+  - "node_modules/**"
+  - "**/*_test.go"
+  - "**/*.generated.go"
+  - ".git/**"
+  - "*.md"
+
+# Include only specific file types (empty = all files)
+# Uncomment to restrict analysis to specific languages
+# include:
+#   - "**/*.go"
+#   - "**/*.py"
+#   - "**/*.js"
+#   - "**/*.ts"

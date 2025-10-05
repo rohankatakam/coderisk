@@ -1,0 +1,379 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://coderisk.com/schemas/ai-mode/v1.0.json",
+  "title": "CodeRisk AI Mode Output",
+  "description": "Machine-readable JSON schema for AI assistant integration (Claude Code, Cursor, Copilot)",
+  "version": "1.0",
+  "type": "object",
+  "required": ["meta", "risk", "files"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "description": "Request context and metadata",
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Schema version"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Analysis completion time (ISO 8601)"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "description": "Total analysis duration in milliseconds"
+        },
+        "branch": {
+          "type": "string",
+          "description": "Current git branch"
+        },
+        "files_analyzed": {
+          "type": "integer",
+          "description": "Number of files analyzed"
+        },
+        "agent_hops": {
+          "type": "integer",
+          "description": "Number of graph traversal hops (0 = Phase 1 only)"
+        },
+        "cache_hit": {
+          "type": "boolean",
+          "description": "Whether result was cached"
+        }
+      },
+      "required": ["version", "timestamp", "duration_ms"]
+    },
+    "risk": {
+      "type": "object",
+      "description": "Summary risk assessment",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+          "description": "Risk severity level"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Numeric risk score"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence in assessment"
+        }
+      },
+      "required": ["level", "score"]
+    },
+    "files": {
+      "type": "array",
+      "description": "Per-file analysis details",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path"
+          },
+          "language": {
+            "type": "string",
+            "description": "Programming language"
+          },
+          "lines_changed": {
+            "type": "integer",
+            "description": "Lines changed in this file"
+          },
+          "risk_score": {
+            "type": "number",
+            "description": "File-specific risk score"
+          },
+          "metrics": {
+            "type": "object",
+            "description": "Calculated metrics (complexity, coverage, etc.)",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "issues": {
+            "type": "array",
+            "description": "Detected issues in this file",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Unique issue identifier"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": ["low", "medium", "high", "critical"],
+                  "description": "Issue severity"
+                },
+                "category": {
+                  "type": "string",
+                  "enum": ["quality", "security", "architecture", "performance"],
+                  "description": "Issue category"
+                },
+                "line_start": {
+                  "type": "integer",
+                  "description": "Starting line number"
+                },
+                "line_end": {
+                  "type": "integer",
+                  "description": "Ending line number"
+                },
+                "function": {
+                  "type": "string",
+                  "description": "Function name (if applicable)"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Human-readable issue description"
+                },
+                "impact_score": {
+                  "type": "number",
+                  "description": "Impact score 0-10"
+                },
+                "fix_priority": {
+                  "type": "integer",
+                  "description": "Priority ranking (1 = highest)"
+                },
+                "estimated_fix_time_min": {
+                  "type": "integer",
+                  "description": "Estimated fix time in minutes"
+                },
+                "auto_fixable": {
+                  "type": "boolean",
+                  "description": "Whether AI can fix automatically"
+                },
+                "fix_command": {
+                  "type": "string",
+                  "description": "CLI command to trigger fix"
+                }
+              },
+              "required": ["id", "severity", "category", "message"]
+            }
+          }
+        },
+        "required": ["path", "language"]
+      }
+    },
+    "graph_analysis": {
+      "type": "object",
+      "description": "Structural insights from dependency graph",
+      "properties": {
+        "blast_radius": {
+          "type": "object",
+          "properties": {
+            "total_affected_files": {
+              "type": "integer",
+              "description": "Total files that could be affected by changes"
+            }
+          }
+        },
+        "temporal_coupling": {
+          "type": "array",
+          "description": "Files that change together frequently",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file_a": {
+                "type": "string"
+              },
+              "file_b": {
+                "type": "string"
+              },
+              "strength": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "commits": {
+                "type": "integer"
+              },
+              "total_commits": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "hotspots": {
+          "type": "array",
+          "description": "High-risk file hotspots",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "investigation_trace": {
+      "type": "array",
+      "description": "Agent decision path (hop-by-hop reasoning)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "hop": {
+            "type": "integer"
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "metrics_calculated": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "duration_ms": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "recommendations": {
+      "type": "object",
+      "description": "Actionable guidance by priority",
+      "properties": {
+        "critical": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "high": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "medium": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "ai_assistant_actions": {
+      "type": "array",
+      "description": "Ready-to-execute AI prompts",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "enum": ["generate_tests", "add_error_handling", "reduce_coupling", "fix_security", "reduce_complexity"],
+            "description": "Type of fix action"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Confidence in auto-fix success"
+          },
+          "ready_to_execute": {
+            "type": "boolean",
+            "description": "Whether AI should auto-fix (confidence > 0.85)"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Ready-to-use prompt for AI assistant"
+          },
+          "expected_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Files that will be created/modified"
+          },
+          "estimated_lines": {
+            "type": "integer",
+            "description": "Estimated lines of code"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason if not ready to execute"
+          }
+        },
+        "required": ["action_type", "confidence", "ready_to_execute", "prompt"]
+      }
+    },
+    "contextual_insights": {
+      "type": "object",
+      "description": "Learning from history and team patterns",
+      "properties": {
+        "similar_past_changes": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "team_patterns": {
+          "type": "object"
+        },
+        "file_reputation": {
+          "type": "object"
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "description": "Execution metrics",
+      "properties": {
+        "total_duration_ms": {
+          "type": "integer"
+        },
+        "breakdown": {
+          "type": "object"
+        },
+        "cache_efficiency": {
+          "type": "object"
+        }
+      }
+    },
+    "should_block_commit": {
+      "type": "boolean",
+      "description": "Whether pre-commit hook should block"
+    },
+    "block_reason": {
+      "type": "string",
+      "description": "Reason code for blocking"
+    },
+    "override_allowed": {
+      "type": "boolean",
+      "description": "Whether --no-verify is allowed"
+    },
+    "override_requires_justification": {
+      "type": "boolean",
+      "description": "Whether override needs logged reason"
+    }
+  }
+}
