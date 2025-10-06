@@ -260,6 +260,84 @@ func (p *Processor) buildGraph(ctx context.Context, entities []treesitter.CodeEn
 		)
 	}
 
+	// Step 2: Create edges (CONTAINS, IMPORTS)
+	slog.Info("creating graph edges", "total_entities", len(entities))
+	if err := p.createEdges(ctx, entities); err != nil {
+		return fmt.Errorf("failed to create edges: %w", err)
+	}
+
+	return nil
+}
+
+// createEdges creates relationships between entities
+func (p *Processor) createEdges(ctx context.Context, entities []treesitter.CodeEntity) error {
+	var edges []graph.GraphEdge
+
+	// Group entities by file for efficient edge creation
+	fileToFunctions := make(map[string][]treesitter.CodeEntity)
+	fileToClasses := make(map[string][]treesitter.CodeEntity)
+	fileToImports := make(map[string][]treesitter.CodeEntity)
+
+	for _, entity := range entities {
+		switch entity.Type {
+		case "function":
+			fileToFunctions[entity.FilePath] = append(fileToFunctions[entity.FilePath], entity)
+		case "class":
+			fileToClasses[entity.FilePath] = append(fileToClasses[entity.FilePath], entity)
+		case "import":
+			fileToImports[entity.FilePath] = append(fileToImports[entity.FilePath], entity)
+		}
+	}
+
+	// Create CONTAINS edges: File -> Function, File -> Class
+	for filePath, functions := range fileToFunctions {
+		for _, fn := range functions {
+			edges = append(edges, graph.GraphEdge{
+				From:  fmt.Sprintf("file:%s", filePath),
+				To:    fmt.Sprintf("function:%s:%s:%d", fn.FilePath, fn.Name, fn.StartLine),
+				Label: "CONTAINS",
+				Properties: map[string]interface{}{
+					"entity_type": "function",
+				},
+			})
+		}
+	}
+
+	for filePath, classes := range fileToClasses {
+		for _, cls := range classes {
+			edges = append(edges, graph.GraphEdge{
+				From:  fmt.Sprintf("file:%s", filePath),
+				To:    fmt.Sprintf("class:%s:%s:%d", cls.FilePath, cls.Name, cls.StartLine),
+				Label: "CONTAINS",
+				Properties: map[string]interface{}{
+					"entity_type": "class",
+				},
+			})
+		}
+	}
+
+	// Create IMPORTS edges: File -> Import
+	for filePath, imports := range fileToImports {
+		for _, imp := range imports {
+			edges = append(edges, graph.GraphEdge{
+				From:  fmt.Sprintf("file:%s", filePath),
+				To:    fmt.Sprintf("import:%s:%s:%d", imp.FilePath, imp.Name, imp.StartLine),
+				Label: "IMPORTS",
+				Properties: map[string]interface{}{
+					"import_path": imp.ImportPath,
+				},
+			})
+		}
+	}
+
+	// Batch create edges
+	if len(edges) > 0 {
+		slog.Info("creating edges", "count", len(edges))
+		if err := p.graphClient.CreateEdges(edges); err != nil {
+			return fmt.Errorf("failed to create edges: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -271,9 +349,28 @@ func entityToGraphNode(entity treesitter.CodeEntity) graph.GraphNode {
 	properties["file_path"] = entity.FilePath
 	properties["language"] = entity.Language
 
-	// Add composite unique ID for graph operations
-	// Format: "filepath:name:line" for true uniqueness (handles multiple same-named functions in file)
-	properties["unique_id"] = fmt.Sprintf("%s:%s:%d", entity.FilePath, entity.Name, entity.StartLine)
+	// Determine label first to properly set unique_id
+	label := "File"
+	switch entity.Type {
+	case "function":
+		label = "Function"
+	case "class":
+		label = "Class"
+	case "import":
+		label = "Import"
+	}
+
+	// Generate unique_id based on entity type
+	var uniqueID string
+	if label == "File" {
+		// For Files: unique_id is the file path (no name/line needed)
+		uniqueID = entity.FilePath
+	} else {
+		// For Functions/Classes/Imports: use composite key "filepath:name:line"
+		// This handles multiple same-named functions in a file
+		uniqueID = fmt.Sprintf("%s:%s:%d", entity.FilePath, entity.Name, entity.StartLine)
+	}
+	properties["unique_id"] = uniqueID
 
 	if entity.StartLine > 0 {
 		properties["start_line"] = entity.StartLine
@@ -288,19 +385,8 @@ func entityToGraphNode(entity treesitter.CodeEntity) graph.GraphNode {
 		properties["import_path"] = entity.ImportPath
 	}
 
-	// Determine label
-	label := "File"
-	switch entity.Type {
-	case "function":
-		label = "Function"
-	case "class":
-		label = "Class"
-	case "import":
-		label = "Import"
-	}
-
 	return graph.GraphNode{
-		ID:         properties["unique_id"].(string),
+		ID:         uniqueID,
 		Label:      label,
 		Properties: properties,
 	}

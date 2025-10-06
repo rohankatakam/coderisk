@@ -253,15 +253,14 @@ func getUniqueKey(label string) string {
 		"issue":       "number",
 		"PullRequest": "number",
 		"pullrequest": "number",
-		"File":        "path",
-		"file":        "path",
 		// Tree-sitter entity types (from Layer 1)
-		// Use unique_id which combines file_path:name for uniqueness
-		"Function": "unique_id",
+		"File":     "unique_id", // For Files, unique_id = file_path
+		"file":     "unique_id",
+		"Function": "unique_id", // For Functions, unique_id = filepath:name:line
 		"function": "unique_id",
-		"Class":    "unique_id",
+		"Class":    "unique_id", // For Classes, unique_id = filepath:name:line
 		"class":    "unique_id",
-		"Import":   "unique_id",
+		"Import":   "unique_id", // For Imports, unique_id = filepath:name:line
 		"import":   "unique_id",
 	}
 
