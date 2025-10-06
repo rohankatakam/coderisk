@@ -147,7 +147,12 @@ func runInitLocal(cmd *cobra.Command, args []string) error {
 	reportProgress("Parsing source code with Tree-sitter", "start")
 
 	processorConfig := ingestion.DefaultProcessorConfig()
-	processor := ingestion.NewProcessor(processorConfig, graphBackend)
+	var graphBuilder *graph.Builder
+	if graphBackend != nil {
+		// Create graph builder for Layer 2 temporal analysis
+		graphBuilder = graph.NewBuilder(nil, graphBackend)
+	}
+	processor := ingestion.NewProcessor(processorConfig, graphBackend, graphBuilder)
 
 	parseStart := time.Now()
 	result, err := processor.ProcessRepository(ctx, repoURL)

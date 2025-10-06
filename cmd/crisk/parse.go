@@ -92,7 +92,11 @@ func runParse(cmd *cobra.Command, args []string) error {
 		Timeout:    30 * time.Second,
 		GraphBatch: 100,
 	}
-	processor := ingestion.NewProcessor(processorConfig, graphClient)
+	var graphBuilder *graph.Builder
+	if graphClient != nil {
+		graphBuilder = graph.NewBuilder(nil, graphClient)
+	}
+	processor := ingestion.NewProcessor(processorConfig, graphClient, graphBuilder)
 
 	// Process repository
 	fmt.Printf("⏳ Processing repository...\n\n")

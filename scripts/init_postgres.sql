@@ -67,3 +67,56 @@ INSERT INTO metric_stats (metric_name, is_enabled) VALUES
     ('ownership_churn', TRUE),
     ('incident_similarity', TRUE)
 ON CONFLICT (metric_name) DO NOTHING;
+
+-- ========================================
+-- Layer 3: Incident Database (Session B)
+-- Reference: ADR-003, graph_ontology.md Layer 3
+-- ========================================
+
+-- Incidents table with full-text search support
+CREATE TABLE IF NOT EXISTS incidents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    severity VARCHAR(20) NOT NULL CHECK (severity IN ('critical', 'high', 'medium', 'low')),
+    occurred_at TIMESTAMP NOT NULL,
+    resolved_at TIMESTAMP,
+    root_cause TEXT,
+    impact TEXT,
+
+    -- Full-text search columns (BM25-style ranking)
+    search_vector tsvector GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+        setweight(to_tsvector('english', coalesce(description, '')), 'B') ||
+        setweight(to_tsvector('english', coalesce(root_cause, '')), 'C')
+    ) STORED,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- GIN index for fast full-text search (BM25 ranking)
+CREATE INDEX IF NOT EXISTS idx_incidents_search ON incidents USING GIN(search_vector);
+
+-- Index for time-based queries (recent incidents)
+CREATE INDEX IF NOT EXISTS idx_incidents_occurred_at ON incidents(occurred_at DESC);
+
+-- Index for severity-based queries
+CREATE INDEX IF NOT EXISTS idx_incidents_severity ON incidents(severity);
+
+-- Incident-to-file links (many-to-many)
+CREATE TABLE IF NOT EXISTS incident_files (
+    incident_id UUID REFERENCES incidents(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    line_number INT DEFAULT 0,
+    blamed_function TEXT DEFAULT '',
+    confidence FLOAT DEFAULT 1.0 CHECK (confidence >= 0.0 AND confidence <= 1.0),
+
+    PRIMARY KEY (incident_id, file_path)
+);
+
+-- Index for file-based queries (get incidents for a file)
+CREATE INDEX IF NOT EXISTS idx_incident_files_path ON incident_files(file_path);
+
+-- Index for incident-based queries (get files for an incident)
+CREATE INDEX IF NOT EXISTS idx_incident_files_incident ON incident_files(incident_id);

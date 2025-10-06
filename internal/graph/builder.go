@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/coderisk/coderisk-go/internal/database"
+	"github.com/coderisk/coderisk-go/internal/temporal"
 )
 
 // Builder orchestrates graph construction from PostgreSQL staging tables
@@ -423,4 +424,84 @@ func extractIssueReferences(title, body string) []int {
 	}
 
 	return issueNumbers
+}
+
+// AddLayer2CoChangedEdges creates CO_CHANGED edges from temporal analysis
+func (b *Builder) AddLayer2CoChangedEdges(ctx context.Context, coChanges []temporal.CoChangeResult) (*BuildStats, error) {
+	stats := &BuildStats{}
+	var edges []GraphEdge
+
+	for _, cc := range coChanges {
+		edge := GraphEdge{
+			Label: "CO_CHANGED",
+			From:  fmt.Sprintf("file:%s", cc.FileA),
+			To:    fmt.Sprintf("file:%s", cc.FileB),
+			Properties: map[string]interface{}{
+				"frequency":   cc.Frequency,
+				"co_changes":  cc.CoChanges,
+				"window_days": cc.WindowDays,
+			},
+		}
+		edges = append(edges, edge)
+
+		// CO_CHANGED is bidirectional, so create reverse edge too
+		reverseEdge := GraphEdge{
+			Label: "CO_CHANGED",
+			From:  fmt.Sprintf("file:%s", cc.FileB),
+			To:    fmt.Sprintf("file:%s", cc.FileA),
+			Properties: map[string]interface{}{
+				"frequency":   cc.Frequency,
+				"co_changes":  cc.CoChanges,
+				"window_days": cc.WindowDays,
+			},
+		}
+		edges = append(edges, reverseEdge)
+	}
+
+	// Batch create edges
+	if len(edges) > 0 {
+		if err := b.backend.CreateEdges(edges); err != nil {
+			return stats, fmt.Errorf("failed to create CO_CHANGED edges: %w", err)
+		}
+		stats.Edges = len(edges)
+		log.Printf("  ✓ Created %d CO_CHANGED edges", len(edges))
+	}
+
+	return stats, nil
+}
+
+// AddLayer3IncidentNodes creates Incident nodes in the graph
+// This is called from the incidents package when creating manual incident links
+func (b *Builder) AddLayer3IncidentNodes(ctx context.Context, incidents []GraphNode) (*BuildStats, error) {
+	stats := &BuildStats{}
+
+	if len(incidents) == 0 {
+		return stats, nil
+	}
+
+	// Create incident nodes
+	if _, err := b.backend.CreateNodes(incidents); err != nil {
+		return stats, fmt.Errorf("failed to create incident nodes: %w", err)
+	}
+
+	stats.Nodes = len(incidents)
+	return stats, nil
+}
+
+// AddLayer3CausedByEdges creates CAUSED_BY edges between incidents and files
+// This is called from the incidents package when creating manual incident links
+func (b *Builder) AddLayer3CausedByEdges(ctx context.Context, edges []GraphEdge) (*BuildStats, error) {
+	stats := &BuildStats{}
+
+	if len(edges) == 0 {
+		return stats, nil
+	}
+
+	// Create CAUSED_BY edges
+	if err := b.backend.CreateEdges(edges); err != nil {
+		return stats, fmt.Errorf("failed to create CAUSED_BY edges: %w", err)
+	}
+
+	stats.Edges = len(edges)
+	return stats, nil
 }

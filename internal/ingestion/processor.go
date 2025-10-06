@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coderisk/coderisk-go/internal/graph"
+	"github.com/coderisk/coderisk-go/internal/temporal"
 	"github.com/coderisk/coderisk-go/internal/treesitter"
 )
 
@@ -29,18 +30,20 @@ func DefaultProcessorConfig() *ProcessorConfig {
 
 // Processor orchestrates: clone → parse → graph construction
 type Processor struct {
-	config      *ProcessorConfig
-	graphClient graph.Backend
+	config       *ProcessorConfig
+	graphClient  graph.Backend
+	graphBuilder *graph.Builder
 }
 
 // NewProcessor creates a new repository processor
-func NewProcessor(config *ProcessorConfig, graphClient graph.Backend) *Processor {
+func NewProcessor(config *ProcessorConfig, graphClient graph.Backend, graphBuilder *graph.Builder) *Processor {
 	if config == nil {
 		config = DefaultProcessorConfig()
 	}
 	return &Processor{
-		config:      config,
-		graphClient: graphClient,
+		config:       config,
+		graphClient:  graphClient,
+		graphBuilder: graphBuilder,
 	}
 }
 
@@ -135,6 +138,27 @@ func (p *Processor) ProcessRepository(ctx context.Context, repoURL string) (*Pro
 			return nil, fmt.Errorf("failed to build graph: %w", err)
 		}
 		slog.Info("graph construction complete")
+
+		// Step 6: Add Layer 2 (Temporal Analysis)
+		slog.Info("starting temporal analysis", "window_days", 90)
+		commits, err := temporal.ParseGitHistory(repoPath, 90)
+		if err != nil {
+			slog.Warn("temporal analysis failed", "error", err)
+		} else {
+			developers := temporal.ExtractDevelopers(commits)
+			coChanges := temporal.CalculateCoChanges(commits, 0.3) // min 30% frequency
+
+			if p.graphBuilder != nil {
+				if stats, err := p.graphBuilder.AddLayer2CoChangedEdges(ctx, coChanges); err != nil {
+					slog.Warn("failed to store temporal data", "error", err)
+				} else {
+					slog.Info("temporal analysis complete",
+						"commits", len(commits),
+						"developers", len(developers),
+						"co_change_edges", stats.Edges)
+				}
+			}
+		}
 	}
 
 	result.Duration = time.Since(startTime)
