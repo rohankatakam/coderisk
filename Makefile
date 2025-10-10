@@ -28,43 +28,93 @@ help:
 ## all: Build everything
 all: clean fmt lint test build
 
-## build: Build the CLI and server binaries
-build: build-cli build-server
+## build: Build the crisk CLI binary (recommended for testing)
+build: build-cli
+	@echo ""
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "✅ Build complete!"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo ""
+	@echo "📦 Binary: $(BUILD_DIR)/$(BINARY_NAME)"
+	@echo ""
+	@echo "🚀 Next steps:"
+	@echo "   1. Start services:  make start"
+	@echo "   2. Run crisk:       $(BUILD_DIR)/$(BINARY_NAME) init-local"
+	@echo ""
+	@echo "📋 Useful commands:"
+	@echo "   make start    - Start Docker services (required)"
+	@echo "   make stop     - Stop Docker services"
+	@echo "   make status   - Check service status"
+	@echo "   make logs     - View service logs"
+	@echo "   make test     - Run unit tests"
+	@echo ""
 
 ## build-cli: Build the CLI binary with version info
 build-cli:
-	@echo "Building CLI..."
+	@echo "🔨 Building crisk CLI..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
+	@$(GO) build $(GOFLAGS) -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
+	@echo "   ✓ CLI: $(BUILD_DIR)/$(BINARY_NAME)"
 
-## build-server: Build the server binary
-build-server:
-	@echo "Building server..."
+## build-api: Build the API server binary (optional - for health monitoring)
+build-api:
+	@echo "🔨 Building API server..."
 	@mkdir -p $(BUILD_DIR)
-	@if [ -f "$(CMD_DIR)/crisk-server/main.go" ]; then \
-		$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(SERVER_NAME) $(CMD_DIR)/crisk-server; \
-	else \
-		echo "⚠️  Server not implemented yet - skipping"; \
-	fi
+	@$(GO) build $(GOFLAGS) -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/crisk-api $(CMD_DIR)/api
+	@echo "   ✓ API: $(BUILD_DIR)/crisk-api"
 
-## clean: Remove build artifacts
+## build-all: Build both CLI and API server
+build-all: build-cli build-api
+	@echo ""
+	@echo "✅ All binaries built successfully"
+	@echo "   - CLI: $(BUILD_DIR)/$(BINARY_NAME)"
+	@echo "   - API: $(BUILD_DIR)/crisk-api"
+
+## clean: Remove build artifacts and binaries
 clean:
-	@echo "Cleaning..."
+	@echo "🧹 Cleaning build artifacts..."
 	@rm -rf $(BUILD_DIR)
+	@rm -f $(BINARY_NAME) $(SERVER_NAME)
 	@rm -f $(COVERAGE_FILE)
+	@echo "✅ Build artifacts cleaned"
 
-## clean-all: Deep clean for fresh repository state (OSS friendly)
-clean-all:
+## clean-docker: Stop and remove Docker containers and volumes
+clean-docker:
+	@echo "🐳 Cleaning Docker environment..."
+	@echo "   Stopping containers..."
+	@docker compose down 2>/dev/null || true
+	@echo "   Removing containers..."
+	@docker rm -f coderisk-neo4j coderisk-postgres coderisk-redis 2>/dev/null || true
+	@echo "   Removing volumes..."
+	@docker volume rm -f coderisk-go_neo4j_data coderisk-go_postgres_data coderisk-go_redis_data 2>/dev/null || true
+	@docker volume rm -f coderisk_neo4j_data coderisk_postgres_data coderisk_redis_data 2>/dev/null || true
+	@echo "   Pruning dangling volumes..."
+	@docker volume prune -f 2>/dev/null || true
+	@echo "✅ Docker environment cleaned"
+
+## clean-all: Complete cleanup (binaries + Docker + temp files)
+clean-all: clean clean-docker
 	@echo "🧹 Deep cleaning repository..."
-	@rm -rf $(BUILD_DIR)
 	@rm -f $(COVERAGE_FILE) coverage.html
 	@rm -rf vendor/
-	@rm -f go.sum
 	@rm -rf tmp/ temp/ local/ .cache/ .scratch/
 	@rm -f *.log *.tmp *.test *.prof *.pprof
-	@rm -rf ~/.coderisk/ # Remove local development cache
 	@rm -f cpu.prof mem.prof profile.out
-	@echo "✨ Repository cleaned for fresh state - ready for OSS contribution!"
+	@echo "✨ Complete cleanup finished!"
+	@echo ""
+	@echo "📋 What was cleaned:"
+	@echo "   ✓ Build artifacts and binaries"
+	@echo "   ✓ Docker containers and volumes"
+	@echo "   ✓ Test coverage files"
+	@echo "   ✓ Temporary and cache directories"
+	@echo "   ✓ Log and profile files"
+	@echo ""
+	@echo "📌 Preserved:"
+	@echo "   ✓ .env (configuration)"
+	@echo "   ✓ go.mod and go.sum (dependencies)"
+	@echo "   ✓ ~/.coderisk/ (user data)"
+	@echo ""
+	@echo "🚀 Ready for fresh start!"
 
 ## test: Run tests
 test:
@@ -131,15 +181,25 @@ install: build
 	@cp $(BUILD_DIR)/$(BINARY_NAME) $(GOPATH)/bin/
 	@echo "Installed to $(GOPATH)/bin/$(BINARY_NAME)"
 
-## run-cli: Run the CLI directly
+## run-cli: Run the CLI directly (without building)
 run-cli:
-	@echo "Running CLI..."
+	@echo "🚀 Running CLI..."
 	$(GO) run $(CMD_DIR)/crisk/... $(ARGS)
 
-## run-server: Run the server directly
-run-server:
-	@echo "Running server..."
-	$(GO) run $(CMD_DIR)/crisk-server/...
+## serve: Start the API health check server
+serve: build-api
+	@echo ""
+	@echo "🌐 Starting API server on http://localhost:8080"
+	@echo ""
+	@echo "   Health check: curl http://localhost:8080/health"
+	@echo "   Stop server: Ctrl+C"
+	@echo ""
+	@$(BUILD_DIR)/crisk-api
+
+## serve-dev: Run API server in development mode (hot reload)
+serve-dev:
+	@echo "🌐 Starting API server in dev mode..."
+	$(GO) run $(CMD_DIR)/api/...
 
 ## deps: Download dependencies
 deps:
@@ -163,15 +223,68 @@ migrate-down:
 	@echo "Rolling back migrations..."
 	$(GO) run ./migrations/migrate.go down
 
+## start: Start Docker services (Neo4j, PostgreSQL, Redis)
+start:
+	@echo "🐳 Starting CodeRisk services..."
+	@docker compose up -d
+	@echo ""
+	@echo "⏳ Waiting for services to initialize..."
+	@sleep 5
+	@echo ""
+	@docker compose ps
+	@echo ""
+	@echo "✅ Services started!"
+	@echo ""
+	@echo "📋 Service URLs:"
+	@echo "   Neo4j Browser: http://localhost:7474"
+	@echo "   Neo4j Bolt:    bolt://localhost:7687"
+	@echo "   PostgreSQL:    localhost:5432"
+	@echo "   Redis:         localhost:6379"
+	@echo ""
+	@echo "🚀 Ready to use crisk:"
+	@echo "   $(BUILD_DIR)/$(BINARY_NAME) init-local"
+	@echo ""
+
+## stop: Stop Docker services
+stop:
+	@echo "🛑 Stopping CodeRisk services..."
+	@docker compose down
+	@echo "✅ Services stopped"
+
+## restart: Restart Docker services
+restart: stop start
+
+## status: Show status of Docker services
+status:
+	@echo "📊 CodeRisk Service Status:"
+	@echo ""
+	@docker compose ps
+	@echo ""
+	@echo "💾 Docker volumes:"
+	@docker volume ls | grep -E "coderisk|VOLUME" || echo "   No CodeRisk volumes found"
+
+## logs: Show logs from Docker services
+logs:
+	@echo "📜 Service logs (press Ctrl+C to exit):"
+	@docker compose logs -f
+
+## logs-neo4j: Show Neo4j logs only
+logs-neo4j:
+	@docker compose logs -f neo4j
+
+## logs-postgres: Show PostgreSQL logs only
+logs-postgres:
+	@docker compose logs -f postgres
+
 ## docker-build: Build Docker image
 docker-build:
 	@echo "Building Docker image..."
-	docker build -t coderisk:$(GIT_TAG) -t coderisk:latest .
+	@docker build -t coderisk:$(GIT_TAG) -t coderisk:latest .
 
 ## docker-run: Run Docker container
 docker-run:
 	@echo "Running Docker container..."
-	docker run -it --rm \
+	@docker run -it --rm \
 		-v ~/.coderisk:/root/.coderisk \
 		-e GITHUB_TOKEN \
 		-e OPENAI_API_KEY \

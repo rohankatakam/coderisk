@@ -192,6 +192,30 @@ func (p *Processor) ProcessRepository(ctx context.Context, repoURL string) (*Pro
 				"total_pairs", len(coChanges),
 				"min_frequency", 0.3)
 
+			// Convert relative git paths to absolute paths for graph matching
+			// Git history returns paths like "apps/web/src/page.tsx"
+			// But File nodes have absolute paths like "/Users/.../apps/web/src/page.tsx"
+			slog.Info("converting co-change paths",
+				"before_conversion", len(coChanges),
+				"repo_path", repoPath)
+
+			// Log sample paths before conversion (debug)
+			if len(coChanges) > 0 {
+				slog.Debug("sample co-change before conversion",
+					"fileA", coChanges[0].FileA,
+					"fileB", coChanges[0].FileB)
+			}
+
+			coChanges = p.convertCoChangePaths(coChanges, repoPath)
+
+			// Log sample paths after conversion (debug)
+			if len(coChanges) > 0 {
+				slog.Info("sample co-change after conversion",
+					"fileA", coChanges[0].FileA,
+					"fileB", coChanges[0].FileB,
+					"total_pairs", len(coChanges))
+			}
+
 			// Store in Neo4j
 			if p.graphBuilder != nil && len(coChanges) > 0 {
 				slog.Info("storing CO_CHANGED edges", "count", len(coChanges))
@@ -238,6 +262,29 @@ func (p *Processor) ProcessRepository(ctx context.Context, repoURL string) (*Pro
 	)
 
 	return result, nil
+}
+
+// convertCoChangePaths converts relative git paths to absolute file paths
+// Git history returns paths like "apps/web/src/page.tsx"
+// File nodes use absolute paths like "/Users/.../apps/web/src/page.tsx"
+func (p *Processor) convertCoChangePaths(coChanges []temporal.CoChangeResult, repoPath string) []temporal.CoChangeResult {
+	converted := make([]temporal.CoChangeResult, 0, len(coChanges))
+
+	for _, cc := range coChanges {
+		// Convert relative paths to absolute by joining with repo path
+		absoluteA := fmt.Sprintf("%s/%s", repoPath, cc.FileA)
+		absoluteB := fmt.Sprintf("%s/%s", repoPath, cc.FileB)
+
+		converted = append(converted, temporal.CoChangeResult{
+			FileA:      absoluteA,
+			FileB:      absoluteB,
+			Frequency:  cc.Frequency,
+			CoChanges:  cc.CoChanges,
+			WindowDays: cc.WindowDays,
+		})
+	}
+
+	return converted
 }
 
 // verifyCoChangedEdges queries Neo4j to confirm edges were created

@@ -111,12 +111,12 @@ func (c *Client) QueryCoChange(ctx context.Context, filePath string) (int, error
 	// Query CO_CHANGED edges (created during graph construction)
 	// Reference: graph_ontology.md §3.2.4 - CO_CHANGED relationship
 	query := `
-		MATCH (f:File {path: $path})-[r:CO_CHANGED]-(other)
+		MATCH (f:File {file_path: $file_path})-[r:CO_CHANGED]-(other)
 		WHERE r.window_days = 90
 		RETURN count(DISTINCT other) as count
 	`
 
-	result, err := session.Run(ctx, query, map[string]any{"path": filePath})
+	result, err := session.Run(ctx, query, map[string]any{"file_path": filePath})
 	if err != nil {
 		return 0, fmt.Errorf("co-change query failed for %s: %w", filePath, err)
 	}

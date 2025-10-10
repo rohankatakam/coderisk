@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coderisk/coderisk-go/internal/agent"
@@ -156,8 +158,16 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	repoID := "local" // TODO: Get from git repo
 	hasHighRisk := false
 
-	for _, file := range files {
-		result, err := registry.CalculatePhase1(ctx, repoID, file)
+	// Resolve relative paths to absolute paths in cloned repo
+	// This is needed because the graph stores absolute paths from init-local
+	resolvedFiles, err := resolveFilePaths(files)
+	if err != nil {
+		return fmt.Errorf("failed to resolve file paths: %w", err)
+	}
+
+	for i, file := range files {
+		resolvedPath := resolvedFiles[i]
+		result, err := registry.CalculatePhase1(ctx, repoID, resolvedPath)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			continue
@@ -231,7 +241,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			investigator := agent.NewInvestigator(llmClient, temporalClient, incidentsClient, nil)
 
 			// Build investigation request from Phase 1 result
-			invCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			// Timeout increased to 60s to accommodate complex file analysis and API latency
+			invCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
 
 			slog.Info("phase 2 escalation",
@@ -350,6 +361,53 @@ func getRepoPath() string {
 		return "."
 	}
 	return cwd
+}
+
+// resolveFilePaths converts relative file paths to absolute paths in the cloned repo
+// This matches the absolute paths stored in the graph during init-local
+func resolveFilePaths(files []string) ([]string, error) {
+	// Get the current git remote URL
+	remoteURL, err := git.GetRemoteURL()
+	if err != nil {
+		// Not in a git repo - paths might already be absolute or this will fail later
+		return files, nil
+	}
+
+	// Generate the repo hash (same logic as clone.go)
+	repoHash := generateRepoHashForCheck(remoteURL)
+
+	// Get home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	// Build the cloned repo path
+	clonedRepoPath := fmt.Sprintf("%s/.coderisk/repos/%s", homeDir, repoHash)
+
+	// Resolve each file path
+	resolved := make([]string, len(files))
+	for i, file := range files {
+		// Convert to absolute path in cloned repo
+		resolved[i] = fmt.Sprintf("%s/%s", clonedRepoPath, file)
+	}
+
+	return resolved, nil
+}
+
+// generateRepoHashForCheck creates repo hash (duplicates logic from clone.go)
+func generateRepoHashForCheck(url string) string {
+	// Normalize URL
+	url = strings.TrimSuffix(url, ".git")
+	url = strings.TrimSuffix(url, "/")
+
+	// Generate SHA256 hash
+	h := sha256.New()
+	h.Write([]byte(url))
+	hashBytes := h.Sum(nil)
+
+	// Use first 16 characters of hex
+	return fmt.Sprintf("%x", hashBytes)[:16]
 }
 
 // getCouplingScore extracts coupling score from Phase 1 result

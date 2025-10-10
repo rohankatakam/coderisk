@@ -114,8 +114,8 @@ func (l *Linker) LinkIncident(ctx context.Context, incidentID string, filePath s
 
 	edge := GraphEdge{
 		Label:      "CAUSED_BY",
-		From:       incident.ID.String(), // Incident node ID
-		To:         filePath,             // File node path
+		From:       fmt.Sprintf("incident:%s", incident.ID.String()), // Incident node ID with prefix
+		To:         fmt.Sprintf("file:%s", filePath),                 // File node path with prefix
 		Properties: edgeProps,
 	}
 

@@ -87,9 +87,21 @@ func (n *Neo4jBackend) CreateEdge(edge GraphEdge) error {
 	session := n.driver.NewSession(n.ctx, neo4j.SessionConfig{})
 	defer session.Close(n.ctx)
 
-	_, err := session.Run(n.ctx, cypher, nil)
+	result, err := session.Run(n.ctx, cypher, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create edge: %w", err)
+		// Enhanced error with diagnostic info
+		fromLabel, fromID := parseNodeID(edge.From)
+		toLabel, toID := parseNodeID(edge.To)
+		return fmt.Errorf("failed to create edge %s: from=%s:%s to=%s:%s: %w",
+			edge.Label, fromLabel, fromID, toLabel, toID, err)
+	}
+
+	// Check if any records were returned (nodes found and edge created)
+	if !result.Next(n.ctx) {
+		fromLabel, fromID := parseNodeID(edge.From)
+		toLabel, toID := parseNodeID(edge.To)
+		return fmt.Errorf("edge creation returned no results (nodes may not exist): %s: from=%s:%s to=%s:%s",
+			edge.Label, fromLabel, fromID, toLabel, toID)
 	}
 
 	return nil
@@ -101,10 +113,23 @@ func (n *Neo4jBackend) CreateEdges(edges []GraphEdge) error {
 		return nil
 	}
 
+	// Log diagnostic info for first edge (helps debug path issues)
+	if len(edges) > 0 {
+		fromLabel, fromID := parseNodeID(edges[0].From)
+		toLabel, toID := parseNodeID(edges[0].To)
+		fmt.Printf("DEBUG: Creating %d edges. First edge: %s (%s:%s) -> %s (%s:%s)\n",
+			len(edges), edges[0].Label, fromLabel, fromID, edges[0].Label, toLabel, toID)
+	}
+
 	// Generate all Cypher commands
 	commands := make([]string, len(edges))
 	for i, edge := range edges {
 		commands[i] = generateCypherEdge(edge)
+	}
+
+	// Log first Cypher query for debugging
+	if len(commands) > 0 {
+		fmt.Printf("DEBUG: First Cypher query: %s\n", commands[0][:200])
 	}
 
 	// Execute in single transaction
@@ -178,6 +203,7 @@ func generateCypherNode(node GraphNode) string {
 }
 
 // generateCypherEdge creates Cypher MERGE query for idempotent edge creation
+// Returns both the query and a verification query to check if nodes exist
 func generateCypherEdge(edge GraphEdge) string {
 	fromLabel, fromID := parseNodeID(edge.From)
 	toLabel, toID := parseNodeID(edge.To)
@@ -196,8 +222,10 @@ func generateCypherEdge(edge GraphEdge) string {
 		propsStr = "SET " + strings.Join(propClauses, ", ")
 	}
 
+	// Use OPTIONAL MATCH to detect missing nodes and return diagnostics
+	// This helps debug silent edge creation failures
 	return fmt.Sprintf(
-		"MATCH (from:%s {%s: %s}) MATCH (to:%s {%s: %s}) MERGE (from)-[r:%s]->(to) %s",
+		"MATCH (from:%s {%s: %s}) MATCH (to:%s {%s: %s}) MERGE (from)-[r:%s]->(to) %s RETURN from, to",
 		fromLabel, fromKey, formatCypherValue(fromID),
 		toLabel, toKey, formatCypherValue(toID),
 		edge.Label,
@@ -264,8 +292,8 @@ func getUniqueKey(label string) string {
 		"Incident": "id", // For Incidents, id = UUID string
 		"incident": "id",
 		// Tree-sitter entity types (Layer 1)
-		"File":     "path", // For Files, use path for matching
-		"file":     "path",
+		"File":     "file_path", // For Files, use file_path for matching
+		"file":     "file_path",
 		"Function": "unique_id", // For Functions, unique_id = filepath:name:line
 		"function": "unique_id",
 		"Class":    "unique_id", // For Classes, unique_id = filepath:name:line
