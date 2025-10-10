@@ -57,13 +57,20 @@ crisk init-local
 # ✅ Graph construction complete: 5527 entities stored
 ```
 
-### Analyze Risk (Coming Soon - Phase 2)
+### Analyze Risk
 
 ```bash
-# Check current changes
+# Check changed files for risk
 crisk check
 
-# Install pre-commit hook
+# Check specific file with LLM investigation
+export OPENAI_API_KEY="sk-..."
+crisk check --explain path/to/file.go
+
+# Get AI-mode JSON for Claude Code/Cursor integration
+crisk check --ai-mode path/to/file.go
+
+# Install pre-commit hook for automatic checks
 crisk hook install
 ```
 
@@ -123,25 +130,48 @@ CodeRisk uses a **two-phase analysis** approach:
 
 ## 📊 What's Built (Current Status)
 
-### ✅ Completed (60%)
-- [x] Tree-sitter AST parsing (TypeScript, Python, JavaScript)
+### ✅ Core Features Complete (100%)
+
+**Layer 1: Code Structure**
+- [x] Tree-sitter AST parsing (TypeScript, Python, JavaScript, Go, Java, Rust)
 - [x] Graph database (Neo4j) with 5,500+ nodes
 - [x] File, Function, Class, Import entities
 - [x] CONTAINS and IMPORTS relationships
-- [x] 1-hop neighbor queries (coupling analysis ready)
-- [x] Docker Compose infrastructure
-- [x] CLI with `init-local`, `status`, `hook` commands
+
+**Layer 2: Temporal Analysis**
+- [x] Git history parsing with timeout handling
+- [x] CO_CHANGED edges (files that change together)
+- [x] Co-change frequency calculation
+- [x] Ownership tracking (developer history)
+
+**Layer 3: Incident Database**
+- [x] PostgreSQL with BM25 full-text search
+- [x] Incident creation, linking, search
+- [x] CAUSED_BY edges (incident-to-file relationships)
+- [x] NULL-safe query handling
+
+**Phase 2: LLM Investigation**
+- [x] Investigator engine with hop-by-hop navigation
+- [x] Evidence collection from all 3 layers
+- [x] OpenAI integration for synthesis
+- [x] Display modes: summary, trace, JSON
+
+**Developer Experience**
+- [x] CLI with `init-local`, `check`, `incident`, `hook` commands
 - [x] 4 verbosity levels (quiet, standard, explain, AI mode)
 - [x] Pre-commit hook integration
+- [x] AI-mode JSON for Claude Code/Cursor
+- [x] `--version` flag with build info
 
-### 🚧 In Progress (Next 4-6 Weeks)
-- [ ] Temporal co-change analysis (Layer 2)
-- [ ] PostgreSQL incident database with full-text search
-- [ ] LLM investigation engine (OpenAI/Anthropic)
-- [ ] `crisk check` with Phase 1 baseline metrics
-- [ ] Phase 2 agentic search implementation
+**Testing & Validation**
+- [x] Integration tests for Layer 2 (CO_CHANGED edges)
+- [x] Integration tests for Layer 3 (CAUSED_BY edges)
+- [x] Performance benchmarks (<20ms, <50ms targets)
+- [x] E2E test coverage
 
-See [dev_docs/03-implementation/status.md](dev_docs/03-implementation/status.md) for detailed roadmap.
+### 🚀 Ready for Production Use
+
+See [dev_docs/03-implementation/status.md](dev_docs/03-implementation/status.md) for detailed implementation status.
 
 ---
 

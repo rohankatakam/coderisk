@@ -3,7 +3,10 @@ package incidents
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -75,9 +78,9 @@ func (l *Linker) LinkIncident(ctx context.Context, incidentID string, filePath s
 		Label: "Incident",
 		ID:    incident.ID.String(),
 		Properties: map[string]interface{}{
-			"id":         incident.ID.String(),
-			"title":      incident.Title,
-			"severity":   string(incident.Severity),
+			"id":          incident.ID.String(),
+			"title":       incident.Title,
+			"severity":    string(incident.Severity),
 			"occurred_at": incident.OccurredAt.Unix(),
 		},
 	}
@@ -95,9 +98,13 @@ func (l *Linker) LinkIncident(ctx context.Context, incidentID string, filePath s
 	}
 
 	// Create CAUSED_BY edge in Neo4j: (Incident)-[:CAUSED_BY]->(File)
+	// 12-Factor Principle - Factor 10: Dev/prod parity
+	// Ensure consistent edge creation across all environments
 	edgeProps := map[string]interface{}{
 		"confidence": link.Confidence,
+		"created_at": time.Now().Unix(),
 	}
+
 	if lineNumber > 0 {
 		edgeProps["line_number"] = lineNumber
 	}
@@ -107,13 +114,22 @@ func (l *Linker) LinkIncident(ctx context.Context, incidentID string, filePath s
 
 	edge := GraphEdge{
 		Label:      "CAUSED_BY",
-		From:       incident.ID.String(),
-		To:         filePath,
+		From:       incident.ID.String(), // Incident node ID
+		To:         filePath,             // File node path
 		Properties: edgeProps,
 	}
 
+	// Create edge in Neo4j with error handling
+	log.Printf("Creating CAUSED_BY edge: incident=%s -> file=%s", incident.ID, filePath)
+
 	if err := l.graph.CreateEdge(edge); err != nil {
-		return fmt.Errorf("create CAUSED_BY edge: %w", err)
+		return fmt.Errorf("create CAUSED_BY edge: incident=%s file=%s: %w",
+			incident.ID, filePath, err)
+	}
+
+	// Verify edge was created (development/debug only)
+	if os.Getenv("CODERISK_DEBUG") == "true" {
+		log.Printf("✓ CAUSED_BY edge created: %s -> %s", incident.ID, filePath)
 	}
 
 	return nil
@@ -226,9 +242,9 @@ func (l *Linker) CreateIncidentNode(ctx context.Context, incident *Incident) err
 		Label: "Incident",
 		ID:    incident.ID.String(),
 		Properties: map[string]interface{}{
-			"id":         incident.ID.String(),
-			"title":      incident.Title,
-			"severity":   string(incident.Severity),
+			"id":          incident.ID.String(),
+			"title":       incident.Title,
+			"severity":    string(incident.Severity),
 			"occurred_at": incident.OccurredAt.Unix(),
 		},
 	}

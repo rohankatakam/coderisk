@@ -152,19 +152,18 @@ func DetectLanguage(filePath string) string {
 	ext := filepath.Ext(filePath)
 
 	langMap := map[string]string{
-		".js":   "javascript",
-		".jsx":  "jsx",
-		".ts":   "typescript",
-		".tsx":  "tsx",
-		".mjs":  "javascript",
-		".cjs":  "javascript",
-		".mts":  "typescript",
-		".cts":  "typescript",
-		".py":   "python",
-		".pyi":  "python",
-		".pyw":  "python",
+		".js":  "javascript",
+		".jsx": "jsx",
+		".ts":  "typescript",
+		".tsx": "tsx",
+		".mjs": "javascript",
+		".cjs": "javascript",
+		".mts": "typescript",
+		".cts": "typescript",
+		".py":  "python",
+		".pyi": "python",
+		".pyw": "python",
 	}
 
 	return langMap[ext]
 }
-

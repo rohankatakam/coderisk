@@ -8,17 +8,17 @@ import (
 
 // Incident represents a production incident or bug
 type Incident struct {
-	ID                       uuid.UUID  `db:"id"`
-	Title                    string     `db:"title"`
-	Description              string     `db:"description"`
-	Severity                 Severity   `db:"severity"`
-	OccurredAt               time.Time  `db:"occurred_at"`
-	ResolvedAt               *time.Time `db:"resolved_at"`
-	RootCause                string     `db:"root_cause"`
-	Impact                   string     `db:"impact"`
-	SearchVectorPlaceholder  string     `db:"search_vector"` // Generated column, placeholder for scanning
-	CreatedAt                time.Time  `db:"created_at"`
-	UpdatedAt                time.Time  `db:"updated_at"`
+	ID                      uuid.UUID  `db:"id"`
+	Title                   string     `db:"title"`
+	Description             string     `db:"description"`
+	Severity                Severity   `db:"severity"`
+	OccurredAt              time.Time  `db:"occurred_at"`
+	ResolvedAt              *time.Time `db:"resolved_at"`
+	RootCause               string     `db:"root_cause"`
+	Impact                  string     `db:"impact"`
+	SearchVectorPlaceholder string     `db:"search_vector"` // Generated column, placeholder for scanning
+	CreatedAt               time.Time  `db:"created_at"`
+	UpdatedAt               time.Time  `db:"updated_at"`
 
 	// Linked files (populated on query)
 	LinkedFiles []IncidentFile `db:"-"`
@@ -48,9 +48,9 @@ func (s Severity) Validate() bool {
 type IncidentFile struct {
 	IncidentID     uuid.UUID `db:"incident_id"`
 	FilePath       string    `db:"file_path"`
-	LineNumber     int       `db:"line_number"`      // 0 if entire file
-	BlamedFunction string    `db:"blamed_function"`  // empty if entire file
-	Confidence     float64   `db:"confidence"`       // 0.0-1.0 (1.0 = manual link, <1.0 = auto-inferred)
+	LineNumber     int       `db:"line_number"`     // 0 if entire file
+	BlamedFunction string    `db:"blamed_function"` // empty if entire file
+	Confidence     float64   `db:"confidence"`      // 0.0-1.0 (1.0 = manual link, <1.0 = auto-inferred)
 }
 
 // SearchResult represents BM25 similarity search result

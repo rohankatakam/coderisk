@@ -61,11 +61,11 @@ type Evidence struct {
 type EvidenceType string
 
 const (
-	EvidenceCoChange     EvidenceType = "co_change"      // Files change together
-	EvidenceIncident     EvidenceType = "incident"       // Past production incidents
-	EvidenceOwnership    EvidenceType = "ownership"      // Ownership transition
-	EvidenceCoupling     EvidenceType = "coupling"       // High structural coupling
-	EvidenceComplexity   EvidenceType = "complexity"     // High cyclomatic complexity
+	EvidenceCoChange     EvidenceType = "co_change"     // Files change together
+	EvidenceIncident     EvidenceType = "incident"      // Past production incidents
+	EvidenceOwnership    EvidenceType = "ownership"     // Ownership transition
+	EvidenceCoupling     EvidenceType = "coupling"      // High structural coupling
+	EvidenceComplexity   EvidenceType = "complexity"    // High cyclomatic complexity
 	EvidenceMissingTests EvidenceType = "missing_tests" // No test coverage
 )
 

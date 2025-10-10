@@ -3,17 +3,23 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
+	"time"
 
+	"github.com/coderisk/coderisk-go/internal/agent"
 	"github.com/coderisk/coderisk-go/internal/ai"
 	"github.com/coderisk/coderisk-go/internal/cache"
 	"github.com/coderisk/coderisk-go/internal/database"
 	"github.com/coderisk/coderisk-go/internal/git"
 	"github.com/coderisk/coderisk-go/internal/graph"
+	"github.com/coderisk/coderisk-go/internal/incidents"
 	"github.com/coderisk/coderisk-go/internal/metrics"
 	"github.com/coderisk/coderisk-go/internal/models"
 	"github.com/coderisk/coderisk-go/internal/output"
+	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver for sqlx
+	"github.com/jmoiron/sqlx"
 	"github.com/spf13/cobra"
 )
 
@@ -100,6 +106,17 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 	defer pgClient.Close()
 
+	// Create sqlx connection for incidents database (Phase 2)
+	// Note: Using same connection config as pgClient but with sqlx for incidents API
+	sqlxDB, err := initPostgresSQLX()
+	if err != nil {
+		return fmt.Errorf("sqlx postgres initialization failed: %w", err)
+	}
+	defer sqlxDB.Close()
+
+	// Create incidents database for Phase 2
+	incidentsDB := incidents.NewDatabase(sqlxDB)
+
 	// Create metrics registry
 	registry := metrics.NewRegistry(neo4jClient, redisClient, pgClient)
 
@@ -127,6 +144,14 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Create formatter
 	formatter := output.NewFormatter(level)
 
+	// If AI mode, configure formatter with additional context
+	// 12-factor: Factor 4 - Tools are structured outputs
+	if aiMode {
+		if aiFormatter, ok := formatter.(*output.AIFormatter); ok {
+			aiFormatter.SetGraphClient(neo4jClient)
+		}
+	}
+
 	// Assess each file
 	repoID := "local" // TODO: Get from git repo
 	hasHighRisk := false
@@ -144,6 +169,10 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		// If AI mode, enhance with AI prompts and confidence scores
 		if aiMode {
 			enrichWithAIData(riskResult)
+			// Pass Phase 1 result to formatter for enhanced analysis
+			if aiFormatter, ok := formatter.(*output.AIFormatter); ok {
+				aiFormatter.SetPhase1Result(result)
+			}
 		}
 
 		if err := formatter.Format(riskResult, os.Stdout); err != nil {
@@ -152,9 +181,97 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 		if result.ShouldEscalate {
 			hasHighRisk = true
+
+			// Get OpenAI API key from environment
+			// 12-factor: Factor 3 - Configuration from environment
+			apiKey := os.Getenv("OPENAI_API_KEY")
+
+			if apiKey == "" {
+				// No API key - show message and continue
+				if !preCommit {
+					fmt.Println("\n⚠️  HIGH RISK detected")
+					fmt.Println("    Set OPENAI_API_KEY to enable Phase 2 LLM investigation")
+					fmt.Println("    Example: export OPENAI_API_KEY=sk-...")
+				}
+				continue
+			}
+
+			// Phase 2: LLM Investigation
+			// 12-factor: Factor 8 - Own your control flow (selective investigation)
 			if !preCommit {
-				fmt.Println("\n⚠️  HIGH RISK - Would escalate to Phase 2 (LLM investigation)")
-				fmt.Println("    Phase 2 requires LLM API key (set PHASE2_ENABLED=true)")
+				fmt.Println("\n🔍 Escalating to Phase 2 (LLM investigation)...")
+			}
+
+			// Get repository path for temporal analysis
+			repoPath := getRepoPath()
+
+			// Create real clients for evidence collection
+			temporalClient, err := agent.NewRealTemporalClient(repoPath)
+			if err != nil {
+				slog.Warn("temporal client creation failed", "error", err)
+				temporalClient = nil // Continue without temporal data
+			}
+
+			// Create incidents client
+			var incidentsClient *agent.RealIncidentsClient
+			if incidentsDB != nil {
+				incidentsClient = agent.NewRealIncidentsClient(incidentsDB)
+			}
+
+			// Create LLM client
+			llmClient, err := agent.NewLLMClient(apiKey)
+			if err != nil {
+				fmt.Printf("❌ LLM client error: %v\n", err)
+				continue
+			}
+
+			// Create investigator
+			// 12-factor: Factor 10 - Small, focused agents (investigator is specialized)
+			// Note: Passing nil for graph client as GetNeighbors not yet implemented in graph.Client
+			investigator := agent.NewInvestigator(llmClient, temporalClient, incidentsClient, nil)
+
+			// Build investigation request from Phase 1 result
+			invCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			slog.Info("phase 2 escalation",
+				"file", file,
+				"phase1_risk", result.OverallRisk,
+				"api_key_present", true)
+
+			// Create investigation request
+			invReq := agent.InvestigationRequest{
+				FilePath:   file,
+				ChangeType: "modify", // TODO: detect from git diff
+				Baseline: agent.BaselineMetrics{
+					CouplingScore:     getCouplingScore(result),
+					CoChangeFrequency: getCoChangeScore(result),
+					IncidentCount:     0, // TODO: extract from Phase 1
+				},
+			}
+
+			// Run Phase 2 investigation
+			assessment, err := investigator.Investigate(invCtx, invReq)
+			if err != nil {
+				fmt.Printf("⚠️  Investigation failed: %v\n", err)
+				continue
+			}
+
+			slog.Info("phase 2 complete",
+				"file", file,
+				"final_risk", assessment.RiskLevel,
+				"confidence", assessment.Confidence)
+
+			// Display results based on verbosity mode
+			if aiMode {
+				// AI Mode: Include investigation trace in JSON
+				output.DisplayPhase2JSON(assessment)
+			} else if explain {
+				// Explain Mode: Show full hop-by-hop trace
+				output.DisplayPhase2Trace(assessment)
+			} else {
+				// Standard Mode: Show summary with recommendations
+				output.DisplayPhase2Summary(assessment)
 			}
 		}
 	}
@@ -208,6 +325,53 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// initPostgresSQLX creates a sqlx Postgres connection for incidents database
+func initPostgresSQLX() (*sqlx.DB, error) {
+	port, _ := strconv.Atoi(getEnvOrDefault("POSTGRES_PORT_EXTERNAL", "5433"))
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+		getEnvOrDefault("POSTGRES_USER", "coderisk"),
+		getEnvOrDefault("POSTGRES_PASSWORD", "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123"),
+		getEnvOrDefault("POSTGRES_HOST", "localhost"),
+		port,
+		getEnvOrDefault("POSTGRES_DB", "coderisk"),
+	)
+
+	return sqlx.Connect("pgx", dsn)
+}
+
+// getRepoPath retrieves the git repository root path
+func getRepoPath() string {
+	// For now, use current working directory
+	// TODO: Add git.GetRepoRoot() to find actual repo root
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
+}
+
+// getCouplingScore extracts coupling score from Phase 1 result
+func getCouplingScore(result *metrics.Phase1Result) float64 {
+	if result.Coupling == nil {
+		return 0.0
+	}
+	// Normalize count to 0-1 score (max 20 dependencies = 1.0)
+	score := float64(result.Coupling.Count) / 20.0
+	if score > 1.0 {
+		score = 1.0
+	}
+	return score
+}
+
+// getCoChangeScore extracts co-change frequency from Phase 1 result
+func getCoChangeScore(result *metrics.Phase1Result) float64 {
+	if result.CoChange == nil {
+		return 0.0
+	}
+	// Use the max co-change frequency (already 0-1)
+	return result.CoChange.MaxFrequency
 }
 
 // enrichWithAIData adds AI-specific fields to RiskResult for AI Mode

@@ -47,6 +47,11 @@ func (d *Database) SearchIncidents(ctx context.Context, query string, limit int)
 		var incident Incident
 		var rank float64
 
+		// Use sql.NullString for nullable fields
+		// 12-Factor Principle - Factor 10: Dev/prod parity
+		// Handle NULL values consistently across environments
+		var rootCause, impact sql.NullString
+
 		err := rows.Scan(
 			&incident.ID,
 			&incident.Title,
@@ -54,8 +59,8 @@ func (d *Database) SearchIncidents(ctx context.Context, query string, limit int)
 			&incident.Severity,
 			&incident.OccurredAt,
 			&incident.ResolvedAt,
-			&incident.RootCause,
-			&incident.Impact,
+			&rootCause,                        // Changed to sql.NullString
+			&impact,                           // Changed to sql.NullString
 			&incident.SearchVectorPlaceholder, // Generated column, we don't need the value
 			&incident.CreatedAt,
 			&incident.UpdatedAt,
@@ -63,6 +68,14 @@ func (d *Database) SearchIncidents(ctx context.Context, query string, limit int)
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+
+		// Convert nullable fields
+		if rootCause.Valid {
+			incident.RootCause = rootCause.String
+		}
+		if impact.Valid {
+			incident.Impact = impact.String
 		}
 
 		// Map rank to relevance level
@@ -218,6 +231,9 @@ func (d *Database) SearchByTimeRange(ctx context.Context, query string, startTim
 		var incident Incident
 		var rank float64
 
+		// Use sql.NullString for nullable fields
+		var rootCause, impact sql.NullString
+
 		err := rows.Scan(
 			&incident.ID,
 			&incident.Title,
@@ -225,8 +241,8 @@ func (d *Database) SearchByTimeRange(ctx context.Context, query string, startTim
 			&incident.Severity,
 			&incident.OccurredAt,
 			&incident.ResolvedAt,
-			&incident.RootCause,
-			&incident.Impact,
+			&rootCause, // Changed to sql.NullString
+			&impact,    // Changed to sql.NullString
 			&incident.SearchVectorPlaceholder,
 			&incident.CreatedAt,
 			&incident.UpdatedAt,
@@ -234,6 +250,14 @@ func (d *Database) SearchByTimeRange(ctx context.Context, query string, startTim
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+
+		// Convert nullable fields
+		if rootCause.Valid {
+			incident.RootCause = rootCause.String
+		}
+		if impact.Valid {
+			incident.Impact = impact.String
 		}
 
 		relevance := "low"

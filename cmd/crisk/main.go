@@ -10,6 +10,11 @@ import (
 )
 
 var (
+	// Version information (set by build flags)
+	Version   = "dev"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+
 	cfgFile string
 	verbose bool
 	logger  *logrus.Logger
@@ -28,6 +33,7 @@ var rootCmd = &cobra.Command{
 	Short: "CodeRisk - Lightning-fast risk assessment for code changes",
 	Long: `CodeRisk performs sub-5-second risk analysis on your code changes,
 helping you catch potential issues before they reach production.`,
+	Version: Version,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Initialize logger
 		logger = logrus.New()
@@ -50,6 +56,12 @@ helping you catch potential issues before they reach production.`,
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: .coderisk/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+
+	// Set custom version template
+	rootCmd.SetVersionTemplate(`CodeRisk {{.Version}}
+Build time: ` + BuildTime + `
+Git commit: ` + GitCommit + `
+`)
 
 	// Add subcommands
 	rootCmd.AddCommand(initCmd)

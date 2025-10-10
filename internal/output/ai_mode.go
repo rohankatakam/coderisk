@@ -1,17 +1,23 @@
 package output
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"time"
 
+	"github.com/coderisk/coderisk-go/internal/graph"
+	"github.com/coderisk/coderisk-go/internal/metrics"
 	"github.com/coderisk/coderisk-go/internal/models"
 )
 
 // AIFormatter outputs machine-readable JSON for AI assistants
 // Schema v1.0: https://coderisk.com/schemas/ai-mode/v1.0.json
+// 12-factor: Factor 4 - Tools are structured outputs
 type AIFormatter struct {
-	Version string
+	Version     string
+	Phase1      *metrics.Phase1Result
+	GraphClient *graph.Client
 }
 
 // NewAIFormatter creates a new AI mode formatter
@@ -19,9 +25,30 @@ func NewAIFormatter() *AIFormatter {
 	return &AIFormatter{Version: "1.0"}
 }
 
+// SetPhase1Result sets the Phase 1 result for enhanced analysis
+func (f *AIFormatter) SetPhase1Result(phase1 *metrics.Phase1Result) {
+	f.Phase1 = phase1
+}
+
+// SetGraphClient sets the graph client for graph analysis
+func (f *AIFormatter) SetGraphClient(client *graph.Client) {
+	f.GraphClient = client
+}
+
 // Format outputs structured JSON following AI Mode schema v1.0
+// 12-factor: Factor 4 - Tools are structured outputs
 func (f *AIFormatter) Format(result *models.RiskResult, w io.Writer) error {
-	output := f.buildAIModeOutput(result)
+	var output interface{}
+
+	// Use new ToAIMode converter if Phase1 result is available
+	if f.Phase1 != nil {
+		ctx := context.Background()
+		aiOutput := ToAIMode(ctx, f.Phase1, result, f.GraphClient)
+		output = aiOutput
+	} else {
+		// Fallback to legacy output format
+		output = f.buildAIModeOutput(result)
+	}
 
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
@@ -30,19 +57,19 @@ func (f *AIFormatter) Format(result *models.RiskResult, w io.Writer) error {
 
 func (f *AIFormatter) buildAIModeOutput(result *models.RiskResult) map[string]interface{} {
 	return map[string]interface{}{
-		"meta":                                f.buildMeta(result),
-		"risk":                                f.buildRisk(result),
-		"files":                               f.buildFiles(result),
-		"graph_analysis":                      f.buildGraphAnalysis(result),
-		"investigation_trace":                 f.buildTrace(result),
-		"recommendations":                     f.buildRecommendations(result),
-		"ai_assistant_actions":                f.buildAIActions(result),
-		"contextual_insights":                 f.buildInsights(result),
-		"performance":                         f.buildPerformance(result),
-		"should_block_commit":                 result.ShouldBlock,
-		"block_reason":                        result.BlockReason,
-		"override_allowed":                    result.OverrideAllowed,
-		"override_requires_justification":     result.OverrideRequiresJustification,
+		"meta":                            f.buildMeta(result),
+		"risk":                            f.buildRisk(result),
+		"files":                           f.buildFiles(result),
+		"graph_analysis":                  f.buildGraphAnalysis(result),
+		"investigation_trace":             f.buildTrace(result),
+		"recommendations":                 f.buildRecommendations(result),
+		"ai_assistant_actions":            f.buildAIActions(result),
+		"contextual_insights":             f.buildInsights(result),
+		"performance":                     f.buildPerformance(result),
+		"should_block_commit":             result.ShouldBlock,
+		"block_reason":                    result.BlockReason,
+		"override_allowed":                result.OverrideAllowed,
+		"override_requires_justification": result.OverrideRequiresJustification,
 	}
 }
 
@@ -320,7 +347,7 @@ func (f *AIFormatter) buildPerformance(result *models.RiskResult) map[string]int
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
 		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-		containsMiddle(s, substr)))
+			containsMiddle(s, substr)))
 }
 
 func containsMiddle(s, substr string) bool {

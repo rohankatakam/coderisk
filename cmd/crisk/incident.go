@@ -12,13 +12,13 @@ import (
 )
 
 var (
-	incidentSeverity   string
-	incidentResolved   bool
-	incidentRootCause  string
-	incidentImpact     string
-	linkLineNumber     int
-	linkFunction       string
-	searchLimit        int
+	incidentSeverity  string
+	incidentResolved  bool
+	incidentRootCause string
+	incidentImpact    string
+	linkLineNumber    int
+	linkFunction      string
+	searchLimit       int
 )
 
 // Incident management commands
@@ -398,7 +398,7 @@ func getPostgresDB() (*sqlx.DB, error) {
 
 func getGraphBackend() (graph.Backend, error) {
 	// Use hardcoded Neo4j configuration for now (will be configurable in future)
-	uri := "bolt://localhost:7688"  // Note: Uses port 7688 based on docker ps output
+	uri := "bolt://localhost:7688" // Note: Uses port 7688 based on docker ps output
 	username := "neo4j"
 	password := "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123"
 

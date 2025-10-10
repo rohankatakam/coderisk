@@ -147,17 +147,17 @@ type RiskResult struct {
 	CacheHit     bool          `json:"cache_hit"`
 
 	// Analysis results
-	Files               []FileRisk          `json:"files"`
-	Issues              []RiskIssue         `json:"issues"`
-	Recommendations     []string            `json:"recommendations"`
-	Evidence            []string            `json:"evidence"`
-	NextSteps           []string            `json:"next_steps"`
-	InvestigationTrace  []InvestigationHop  `json:"investigation_trace"`
+	Files              []FileRisk         `json:"files"`
+	Issues             []RiskIssue        `json:"issues"`
+	Recommendations    []string           `json:"recommendations"`
+	Evidence           []string           `json:"evidence"`
+	NextSteps          []string           `json:"next_steps"`
+	InvestigationTrace []InvestigationHop `json:"investigation_trace"`
 
 	// Graph metrics
-	BlastRadius      int               `json:"blast_radius"`
-	TemporalCoupling []CouplingPair    `json:"temporal_coupling"`
-	Hotspots         []Hotspot         `json:"hotspots"`
+	BlastRadius      int            `json:"blast_radius"`
+	TemporalCoupling []CouplingPair `json:"temporal_coupling"`
+	Hotspots         []Hotspot      `json:"hotspots"`
 
 	// Commit control (Session 3 - AI Mode)
 	ShouldBlock                   bool   `json:"should_block_commit,omitempty"`
@@ -169,8 +169,8 @@ type RiskResult struct {
 	Performance Performance `json:"performance,omitempty"`
 
 	// Contextual insights (Session 3 - AI Mode)
-	SimilarPastChanges []SimilarChange      `json:"similar_past_changes,omitempty"`
-	TeamPatterns       *TeamPatterns        `json:"team_patterns,omitempty"`
+	SimilarPastChanges []SimilarChange       `json:"similar_past_changes,omitempty"`
+	TeamPatterns       *TeamPatterns         `json:"team_patterns,omitempty"`
 	FileReputation     map[string]Reputation `json:"file_reputation,omitempty"`
 }
 
@@ -228,14 +228,14 @@ type Metric struct {
 
 // RiskIssue represents a detected risk issue
 type RiskIssue struct {
-	ID       string   `json:"id"`
-	Severity string   `json:"severity"`
-	Category string   `json:"category"`
-	File     string   `json:"file"`
-	Message  string   `json:"message"`
-	LineStart int     `json:"line_start,omitempty"`
-	LineEnd   int     `json:"line_end,omitempty"`
-	Function  string  `json:"function,omitempty"`
+	ID        string `json:"id"`
+	Severity  string `json:"severity"`
+	Category  string `json:"category"`
+	File      string `json:"file"`
+	Message   string `json:"message"`
+	LineStart int    `json:"line_start,omitempty"`
+	LineEnd   int    `json:"line_end,omitempty"`
+	Function  string `json:"function,omitempty"`
 
 	// AI Mode specific fields (Session 3)
 	ImpactScore         float64  `json:"impact_score,omitempty"`
@@ -252,14 +252,14 @@ type RiskIssue struct {
 
 // InvestigationHop represents one step in the agent investigation
 type InvestigationHop struct {
-	NodeID          string            `json:"node_id"`
-	NodeType        string            `json:"node_type"`
-	ChangedEntities []ChangedEntity   `json:"changed_entities"`
-	Metrics         []Metric          `json:"metrics"`
-	Decision        string            `json:"decision"`
-	Reasoning       string            `json:"reasoning"`
-	Confidence      float64           `json:"confidence"`
-	DurationMS      int64             `json:"duration_ms"`
+	NodeID          string          `json:"node_id"`
+	NodeType        string          `json:"node_type"`
+	ChangedEntities []ChangedEntity `json:"changed_entities"`
+	Metrics         []Metric        `json:"metrics"`
+	Decision        string          `json:"decision"`
+	Reasoning       string          `json:"reasoning"`
+	Confidence      float64         `json:"confidence"`
+	DurationMS      int64           `json:"duration_ms"`
 }
 
 // ChangedEntity represents a changed function or class
@@ -271,12 +271,12 @@ type ChangedEntity struct {
 
 // CouplingPair represents temporal coupling between two files
 type CouplingPair struct {
-	FileA       string    `json:"file_a"`
-	FileB       string    `json:"file_b"`
-	Strength    float64   `json:"strength"`
-	Commits     int       `json:"commits"`
-	TotalCommits int      `json:"total_commits"`
-	WindowDays  int       `json:"window_days"`
+	FileA        string    `json:"file_a"`
+	FileB        string    `json:"file_b"`
+	Strength     float64   `json:"strength"`
+	Commits      int       `json:"commits"`
+	TotalCommits int       `json:"total_commits"`
+	WindowDays   int       `json:"window_days"`
 	LastCoChange time.Time `json:"last_co_change"`
 }
 

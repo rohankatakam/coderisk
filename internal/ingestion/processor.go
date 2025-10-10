@@ -140,23 +140,90 @@ func (p *Processor) ProcessRepository(ctx context.Context, repoURL string) (*Pro
 		slog.Info("graph construction complete")
 
 		// Step 6: Add Layer 2 (Temporal Analysis)
+		// 12-Factor Principle - Factor 8: Concurrency via process model
+		// Use timeout to prevent blocking the entire init-local operation
 		slog.Info("starting temporal analysis", "window_days", 90)
-		commits, err := temporal.ParseGitHistory(repoPath, 90)
-		if err != nil {
-			slog.Warn("temporal analysis failed", "error", err)
-		} else {
-			developers := temporal.ExtractDevelopers(commits)
-			coChanges := temporal.CalculateCoChanges(commits, 0.3) // min 30% frequency
 
-			if p.graphBuilder != nil {
-				if stats, err := p.graphBuilder.AddLayer2CoChangedEdges(ctx, coChanges); err != nil {
-					slog.Warn("failed to store temporal data", "error", err)
+		// Add timeout for git history parsing
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+
+		// Parse git history with timeout
+		type parseResult struct {
+			commits []temporal.Commit
+			err     error
+		}
+
+		resultChan := make(chan parseResult, 1)
+		go func() {
+			commits, err := temporal.ParseGitHistory(repoPath, 90)
+			resultChan <- parseResult{commits: commits, err: err}
+		}()
+
+		var commits []temporal.Commit
+		var err error
+
+		select {
+		case <-timeoutCtx.Done():
+			slog.Warn("temporal analysis timeout",
+				"timeout", "3 minutes",
+				"recommendation", "reduce window_days or optimize git parsing")
+			// Don't fail entire init-local, continue without Layer 2
+		case res := <-resultChan:
+			commits = res.commits
+			err = res.err
+		}
+
+		if err != nil {
+			slog.Error("temporal analysis failed", "error", err)
+			// Continue without Layer 2
+		} else if len(commits) == 0 {
+			slog.Warn("no commits found in git history", "window_days", 90)
+		} else {
+			slog.Info("git history parsed",
+				"commits", len(commits),
+				"window_days", 90)
+
+			// Calculate co-changes and ownership
+			developers := temporal.ExtractDevelopers(commits)
+			coChanges := temporal.CalculateCoChanges(commits, 0.3) // 30% frequency threshold
+
+			slog.Info("co-changes calculated",
+				"total_pairs", len(coChanges),
+				"min_frequency", 0.3)
+
+			// Store in Neo4j
+			if p.graphBuilder != nil && len(coChanges) > 0 {
+				slog.Info("storing CO_CHANGED edges", "count", len(coChanges))
+
+				stats, err := p.graphBuilder.AddLayer2CoChangedEdges(ctx, coChanges)
+				if err != nil {
+					slog.Error("failed to store CO_CHANGED edges", "error", err, "count", len(coChanges))
+					// Continue - don't fail entire init-local
 				} else {
 					slog.Info("temporal analysis complete",
 						"commits", len(commits),
 						"developers", len(developers),
 						"co_change_edges", stats.Edges)
+
+					// Verify edges were actually created
+					verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer verifyCancel()
+
+					verifyCount, verifyErr := p.verifyCoChangedEdges(verifyCtx)
+					if verifyErr != nil {
+						slog.Error("edge verification failed", "error", verifyErr)
+					} else if verifyCount != stats.Edges {
+						slog.Warn("edge count mismatch",
+							"expected", stats.Edges,
+							"actual", verifyCount,
+							"possible_transaction_issue", true)
+					} else {
+						slog.Info("edge verification passed", "count", verifyCount)
+					}
 				}
+			} else if len(coChanges) == 0 {
+				slog.Warn("no co-changes found", "min_frequency", 0.3)
 			}
 		}
 	}
@@ -171,6 +238,33 @@ func (p *Processor) ProcessRepository(ctx context.Context, repoURL string) (*Pro
 	)
 
 	return result, nil
+}
+
+// verifyCoChangedEdges queries Neo4j to confirm edges were created
+// 12-Factor Principle - Factor 10: Dev/prod parity
+// Verification ensures data consistency across environments
+func (p *Processor) verifyCoChangedEdges(ctx context.Context) (int, error) {
+	if p.graphClient == nil {
+		return 0, fmt.Errorf("graph backend not available")
+	}
+
+	// Query Neo4j directly to count CO_CHANGED edges
+	query := "MATCH ()-[r:CO_CHANGED]->() RETURN count(r) as count"
+
+	result, err := p.graphClient.Query(query)
+	if err != nil {
+		return 0, fmt.Errorf("verification query failed: %w", err)
+	}
+
+	// Extract count from result
+	// Neo4j returns results as []map[string]interface{}
+	if resultSlice, ok := result.([]map[string]interface{}); ok && len(resultSlice) > 0 {
+		if count, ok := resultSlice[0]["count"].(int64); ok {
+			return int(count), nil
+		}
+	}
+
+	return 0, fmt.Errorf("unexpected query result format")
 }
 
 // parseFilesParallel parses files using worker pool pattern

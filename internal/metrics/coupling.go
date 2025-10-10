@@ -11,10 +11,10 @@ import (
 // CouplingResult represents the structural coupling metric result
 // Reference: risk_assessment_methodology.md §2.1 - Structural Coupling
 type CouplingResult struct {
-	FilePath     string   `json:"file_path"`
-	Count        int      `json:"count"`         // Number of dependencies
+	FilePath     string    `json:"file_path"`
+	Count        int       `json:"count"`        // Number of dependencies
 	RiskLevel    RiskLevel `json:"risk_level"`   // LOW, MEDIUM, HIGH
-	Dependencies []string `json:"dependencies"` // List of dependent files (optional)
+	Dependencies []string  `json:"dependencies"` // List of dependent files (optional)
 }
 
 // CalculateCoupling computes structural coupling for a file

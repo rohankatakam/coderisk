@@ -75,7 +75,6 @@ func HighRiskFunction(ctx context.Context, db *sql.DB, apiURL string, redisClien
 	// Complex processing (uses multiple internal packages)
 	_ = &graph.Client{}
 	_ = &database.Client{}
-	_ = &git.Repository{}
 	_ = &metrics.Registry{}
 	_ = &models.RiskResult{}
 	_ = &output.QuietFormatter{}

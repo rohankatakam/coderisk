@@ -23,11 +23,11 @@ const (
 // Reference: agentic_design.md §2.2 - LLM investigation flow
 // Reference: spec.md §1.3 - BYOK (Bring Your Own Key) model
 type Client struct {
-	provider       Provider
-	openaiClient   *openai.Client
+	provider        Provider
+	openaiClient    *openai.Client
 	anthropicClient *anthropic.Client
-	logger         *slog.Logger
-	enabled        bool
+	logger          *slog.Logger
+	enabled         bool
 }
 
 // NewClient creates an LLM client based on available API keys

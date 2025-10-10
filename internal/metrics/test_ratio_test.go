@@ -63,11 +63,11 @@ func TestCalculateSmoothedRatio(t *testing.T) {
 		wantMin   float64
 		wantMax   float64
 	}{
-		{"No tests, no source", 0, 0, 0.99, 1.01}, // (0+1)/(0+1) = 1.0
+		{"No tests, no source", 0, 0, 0.99, 1.01},        // (0+1)/(0+1) = 1.0
 		{"No tests, has source", 0, 100, 0.0099, 0.0100}, // (0+1)/(100+1) ≈ 0.0099
-		{"Equal LOC", 100, 100, 0.999, 1.001}, // (100+1)/(100+1) ≈ 1.0
+		{"Equal LOC", 100, 100, 0.999, 1.001},            // (100+1)/(100+1) ≈ 1.0
 		{"More tests than source", 200, 100, 1.99, 2.00}, // (200+1)/(100+1) ≈ 1.99
-		{"Minimal test", 10, 100, 0.108, 0.110}, // (10+1)/(100+1) ≈ 0.109
+		{"Minimal test", 10, 100, 0.108, 0.110},          // (10+1)/(100+1) ≈ 0.109
 	}
 
 	for _, tt := range tests {

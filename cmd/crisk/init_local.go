@@ -182,7 +182,7 @@ func runInitLocal(cmd *cobra.Command, args []string) error {
 	// ========== Phase 5: Completion Summary ==========
 	totalDuration := time.Since(startTime)
 
-	fmt.Println("\n🎉 Initialization complete!\n")
+	fmt.Println("\n🎉 Initialization complete!")
 	fmt.Println("📊 Statistics:")
 	fmt.Printf("   Repository:   %s/%s\n", org, repo)
 	fmt.Printf("   Files parsed: %d\n", result.FilesParsed)

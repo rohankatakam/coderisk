@@ -271,7 +271,7 @@ func (f *Fetcher) FetchIssues(ctx context.Context, repoID int64, owner, repo str
 
 			// Apply 90-day filter: open OR closed within 90 days
 			if issue.GetState() == "open" ||
-			   (issue.ClosedAt != nil && issue.GetClosedAt().Time.After(cutoff)) {
+				(issue.ClosedAt != nil && issue.GetClosedAt().Time.After(cutoff)) {
 				if err := f.storeIssue(ctx, repoID, issue); err != nil {
 					log.Printf("  ⚠️  Failed to store issue #%d: %v", issue.GetNumber(), err)
 					continue
@@ -354,8 +354,8 @@ func (f *Fetcher) FetchPullRequests(ctx context.Context, repoID int64, owner, re
 		for _, pr := range prs {
 			// Apply 90-day filter: open OR merged/closed within 90 days
 			if pr.GetState() == "open" ||
-			   (pr.MergedAt != nil && pr.GetMergedAt().Time.After(cutoff)) ||
-			   (pr.ClosedAt != nil && pr.GetClosedAt().Time.After(cutoff)) {
+				(pr.MergedAt != nil && pr.GetMergedAt().Time.After(cutoff)) ||
+				(pr.ClosedAt != nil && pr.GetClosedAt().Time.After(cutoff)) {
 				if err := f.storePR(ctx, repoID, pr); err != nil {
 					log.Printf("  ⚠️  Failed to store PR #%d: %v", pr.GetNumber(), err)
 					continue

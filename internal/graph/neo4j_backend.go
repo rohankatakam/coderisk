@@ -239,6 +239,13 @@ func parseNodeID(nodeID string) (label, id string) {
 		label = strings.ToUpper(string(parts[0][0])) + parts[0][1:]
 		return label, parts[1]
 	}
+
+	// If no prefix, assume it's a file path (backwards compatibility)
+	// File paths don't have colons at the start but may have them in the path
+	if strings.Contains(nodeID, "/") || strings.Contains(nodeID, ".") {
+		return "File", nodeID
+	}
+
 	return "Unknown", nodeID
 }
 
@@ -253,9 +260,12 @@ func getUniqueKey(label string) string {
 		"issue":       "number",
 		"PullRequest": "number",
 		"pullrequest": "number",
-		// Tree-sitter entity types (from Layer 1)
-		"File":     "unique_id", // For Files, unique_id = file_path
-		"file":     "unique_id",
+		// Incident nodes (Layer 3)
+		"Incident": "id", // For Incidents, id = UUID string
+		"incident": "id",
+		// Tree-sitter entity types (Layer 1)
+		"File":     "path", // For Files, use path for matching
+		"file":     "path",
 		"Function": "unique_id", // For Functions, unique_id = filepath:name:line
 		"function": "unique_id",
 		"Class":    "unique_id", // For Classes, unique_id = filepath:name:line

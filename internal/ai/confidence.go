@@ -41,11 +41,11 @@ func (c *ConfidenceCalculator) Calculate(issue models.RiskIssue, file models.Fil
 func (c *ConfidenceCalculator) baseConfidenceByType(fixType string) float64 {
 	// Base confidence by fix type (based on task clarity and risk)
 	baseScores := map[string]float64{
-		"generate_tests":      0.92, // High confidence (well-defined task)
-		"add_error_handling":  0.85, // Medium-high (straightforward patterns)
-		"fix_security":        0.80, // Medium (requires domain knowledge)
-		"reduce_coupling":     0.65, // Low-medium (architectural decision)
-		"reduce_complexity":   0.60, // Low (subjective refactoring)
+		"generate_tests":     0.92, // High confidence (well-defined task)
+		"add_error_handling": 0.85, // Medium-high (straightforward patterns)
+		"fix_security":       0.80, // Medium (requires domain knowledge)
+		"reduce_coupling":    0.65, // Low-medium (architectural decision)
+		"reduce_complexity":  0.60, // Low (subjective refactoring)
 	}
 
 	if score, ok := baseScores[fixType]; ok {
@@ -132,11 +132,11 @@ func (c *ConfidenceCalculator) GetConfidenceLevel(confidence float64) string {
 // EstimateFixTime estimates time to fix in minutes based on fix type and complexity
 func (c *ConfidenceCalculator) EstimateFixTime(fixType string, complexity float64) int {
 	baseTime := map[string]int{
-		"generate_tests":      30,  // 30 min for test generation
-		"add_error_handling":  15,  // 15 min for error handling
-		"fix_security":        45,  // 45 min for security fixes
-		"reduce_coupling":     120, // 2 hours for architectural changes
-		"reduce_complexity":   90,  // 1.5 hours for refactoring
+		"generate_tests":     30,  // 30 min for test generation
+		"add_error_handling": 15,  // 15 min for error handling
+		"fix_security":       45,  // 45 min for security fixes
+		"reduce_coupling":    120, // 2 hours for architectural changes
+		"reduce_complexity":  90,  // 1.5 hours for refactoring
 	}
 
 	base, ok := baseTime[fixType]
@@ -159,11 +159,11 @@ func (c *ConfidenceCalculator) EstimateFixTime(fixType string, complexity float6
 // EstimateLines estimates lines of code that will be added/changed
 func (c *ConfidenceCalculator) EstimateLines(fixType string) int {
 	estimates := map[string]int{
-		"generate_tests":      80,  // Typical test file
-		"add_error_handling":  10,  // Try-catch blocks
-		"fix_security":        20,  // Security validation
-		"reduce_coupling":     50,  // Interface + refactoring
-		"reduce_complexity":   30,  // Code reorganization
+		"generate_tests":     80, // Typical test file
+		"add_error_handling": 10, // Try-catch blocks
+		"fix_security":       20, // Security validation
+		"reduce_coupling":    50, // Interface + refactoring
+		"reduce_complexity":  30, // Code reorganization
 	}
 
 	if est, ok := estimates[fixType]; ok {

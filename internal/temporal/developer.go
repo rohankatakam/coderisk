@@ -97,20 +97,20 @@ func calculateFileOwnership(filePath string, devCounts map[string]*DeveloperComm
 func findTransitionDate(devA, devB *DeveloperCommitCount) time.Time {
 	// Sort commits by timestamp
 	allCommits := make([]struct {
-		Time  time.Time
+		Time   time.Time
 		IsDevA bool
 	}, 0, len(devA.Commits)+len(devB.Commits))
 
 	for _, t := range devA.Commits {
 		allCommits = append(allCommits, struct {
-			Time  time.Time
+			Time   time.Time
 			IsDevA bool
 		}{t, true})
 	}
 
 	for _, t := range devB.Commits {
 		allCommits = append(allCommits, struct {
-			Time  time.Time
+			Time   time.Time
 			IsDevA bool
 		}{t, false})
 	}

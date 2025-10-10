@@ -13,12 +13,12 @@ import (
 // TestRatioResult represents the test coverage ratio metric result
 // Reference: risk_assessment_methodology.md §2.3 - Test Coverage Ratio
 type TestRatioResult struct {
-	FilePath    string    `json:"file_path"`
-	SourceLOC   int       `json:"source_loc"`   // Lines of code in source file
-	TestLOC     int       `json:"test_loc"`     // Lines of code in test files
-	Ratio       float64   `json:"ratio"`        // test_loc / source_loc
-	RiskLevel   RiskLevel `json:"risk_level"`   // LOW, MEDIUM, HIGH
-	TestFiles   []string  `json:"test_files"`   // Related test files
+	FilePath  string    `json:"file_path"`
+	SourceLOC int       `json:"source_loc"` // Lines of code in source file
+	TestLOC   int       `json:"test_loc"`   // Lines of code in test files
+	Ratio     float64   `json:"ratio"`      // test_loc / source_loc
+	RiskLevel RiskLevel `json:"risk_level"` // LOW, MEDIUM, HIGH
+	TestFiles []string  `json:"test_files"` // Related test files
 }
 
 // CalculateTestRatio computes test coverage ratio for a file

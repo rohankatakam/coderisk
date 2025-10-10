@@ -16,7 +16,7 @@ GIT_TAG=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "untagged")
 BUILD_DATE=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 
 # Build flags with version info
-VERSION_FLAGS=-X main.GitCommit=$(GIT_COMMIT) -X main.Version=$(GIT_TAG) -X main.BuildDate=$(BUILD_DATE)
+VERSION_FLAGS=-X main.GitCommit=$(GIT_COMMIT) -X main.Version=$(GIT_TAG) -X main.BuildTime=$(BUILD_DATE)
 
 .PHONY: all build clean test coverage lint fmt run help install docker migrate
 
@@ -31,11 +31,11 @@ all: clean fmt lint test build
 ## build: Build the CLI and server binaries
 build: build-cli build-server
 
-## build-cli: Build the CLI binary
+## build-cli: Build the CLI binary with version info
 build-cli:
 	@echo "Building CLI..."
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
+	$(GO) build $(GOFLAGS) -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
 
 ## build-server: Build the server binary
 build-server:
@@ -76,10 +76,24 @@ test-short:
 	@echo "Running short tests..."
 	$(GO) test -short -v ./...
 
-## test-integration: Run integration tests
-test-integration:
-	@echo "Running integration tests..."
-	$(GO) test -v -tags=integration ./test/integration/...
+## test-integration: Run all integration tests (Layer 2, Layer 3, Performance)
+test-integration: test-layer2 test-layer3 test-performance
+	@echo "✅ All integration tests complete"
+
+## test-layer2: Validate CO_CHANGED edge creation (Layer 2)
+test-layer2:
+	@echo "Running Layer 2 (CO_CHANGED) validation..."
+	@./test/integration/test_layer2_validation.sh
+
+## test-layer3: Validate CAUSED_BY edge creation (Layer 3)
+test-layer3:
+	@echo "Running Layer 3 (CAUSED_BY) validation..."
+	@./test/integration/test_layer3_validation.sh
+
+## test-performance: Run performance benchmarks
+test-performance:
+	@echo "Running performance benchmarks..."
+	@./test/integration/test_performance_benchmarks.sh
 
 ## coverage: Run tests with coverage
 coverage:

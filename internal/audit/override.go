@@ -9,13 +9,13 @@ import (
 // OverrideEvent represents a logged override when --no-verify is used
 // Reference: ux_pre_commit_hook.md - Override tracking
 type OverrideEvent struct {
-	Timestamp   time.Time `json:"timestamp"`
-	Author      string    `json:"author"`
-	CommitSHA   string    `json:"commit_sha,omitempty"`
-	RiskLevel   string    `json:"risk_level"`
-	FilesCount  int       `json:"files_count"`
-	Issues      []string  `json:"issues"`
-	Reason      string    `json:"reason,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+	Author     string    `json:"author"`
+	CommitSHA  string    `json:"commit_sha,omitempty"`
+	RiskLevel  string    `json:"risk_level"`
+	FilesCount int       `json:"files_count"`
+	Issues     []string  `json:"issues"`
+	Reason     string    `json:"reason,omitempty"`
 }
 
 // LogOverride records when --no-verify is used to bypass risk check

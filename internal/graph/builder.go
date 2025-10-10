@@ -374,9 +374,9 @@ func (b *Builder) transformPR(pr database.PRData) (GraphNode, []GraphEdge, error
 	// Create MERGED_TO edge if merged
 	if pr.Merged && pr.MergeCommitSHA != nil {
 		mergedToEdge := GraphEdge{
-			Label: "MERGED_TO",
-			From:  node.ID,
-			To:    fmt.Sprintf("commit:%s", *pr.MergeCommitSHA),
+			Label:      "MERGED_TO",
+			From:       node.ID,
+			To:         fmt.Sprintf("commit:%s", *pr.MergeCommitSHA),
 			Properties: map[string]interface{}{},
 		}
 		if pr.MergedAt != nil {
@@ -427,11 +427,15 @@ func extractIssueReferences(title, body string) []int {
 }
 
 // AddLayer2CoChangedEdges creates CO_CHANGED edges from temporal analysis
+// 12-Factor Principle - Factor 8: Concurrency via process model
+// Use batching to avoid overwhelming the database with large transactions
 func (b *Builder) AddLayer2CoChangedEdges(ctx context.Context, coChanges []temporal.CoChangeResult) (*BuildStats, error) {
 	stats := &BuildStats{}
 	var edges []GraphEdge
 
+	// Build all edges (forward + reverse for bidirectional relationship)
 	for _, cc := range coChanges {
+		// Forward edge
 		edge := GraphEdge{
 			Label: "CO_CHANGED",
 			From:  fmt.Sprintf("file:%s", cc.FileA),
@@ -444,7 +448,7 @@ func (b *Builder) AddLayer2CoChangedEdges(ctx context.Context, coChanges []tempo
 		}
 		edges = append(edges, edge)
 
-		// CO_CHANGED is bidirectional, so create reverse edge too
+		// Reverse edge (CO_CHANGED is bidirectional)
 		reverseEdge := GraphEdge{
 			Label: "CO_CHANGED",
 			From:  fmt.Sprintf("file:%s", cc.FileB),
@@ -458,13 +462,28 @@ func (b *Builder) AddLayer2CoChangedEdges(ctx context.Context, coChanges []tempo
 		edges = append(edges, reverseEdge)
 	}
 
-	// Batch create edges
+	// Batch create edges to avoid large transactions
 	if len(edges) > 0 {
-		if err := b.backend.CreateEdges(edges); err != nil {
-			return stats, fmt.Errorf("failed to create CO_CHANGED edges: %w", err)
+		log.Printf("Creating %d CO_CHANGED edges in batches...", len(edges))
+
+		// Create in batches of 100 to avoid large transactions
+		batchSize := 100
+		for i := 0; i < len(edges); i += batchSize {
+			end := i + batchSize
+			if end > len(edges) {
+				end = len(edges)
+			}
+
+			batch := edges[i:end]
+			if err := b.backend.CreateEdges(batch); err != nil {
+				return stats, fmt.Errorf("failed to create CO_CHANGED edges (batch %d-%d): %w", i, end, err)
+			}
+
+			log.Printf("  ✓ Created batch %d-%d (%d edges)", i, end, len(batch))
 		}
+
 		stats.Edges = len(edges)
-		log.Printf("  ✓ Created %d CO_CHANGED edges", len(edges))
+		log.Printf("  ✓ Created %d CO_CHANGED edges total", len(edges))
 	}
 
 	return stats, nil

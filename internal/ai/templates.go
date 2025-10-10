@@ -75,18 +75,18 @@ Context:
 
 // FixTypeDescriptions provides human-readable descriptions for each fix type
 var FixTypeDescriptions = map[string]string{
-	"generate_tests":      "Generate comprehensive test coverage",
-	"add_error_handling":  "Add robust error handling and retry logic",
-	"reduce_coupling":     "Refactor to reduce dependencies",
-	"fix_security":        "Fix security vulnerability",
-	"reduce_complexity":   "Simplify complex code",
+	"generate_tests":     "Generate comprehensive test coverage",
+	"add_error_handling": "Add robust error handling and retry logic",
+	"reduce_coupling":    "Refactor to reduce dependencies",
+	"fix_security":       "Fix security vulnerability",
+	"reduce_complexity":  "Simplify complex code",
 }
 
 // FixTypeCategories maps fix types to categories
 var FixTypeCategories = map[string]string{
-	"generate_tests":      "quality",
-	"add_error_handling":  "reliability",
-	"reduce_coupling":     "architecture",
-	"fix_security":        "security",
-	"reduce_complexity":   "maintainability",
+	"generate_tests":     "quality",
+	"add_error_handling": "reliability",
+	"reduce_coupling":    "architecture",
+	"fix_security":       "security",
+	"reduce_complexity":  "maintainability",
 }

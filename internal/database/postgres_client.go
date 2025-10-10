@@ -30,13 +30,13 @@ type MetricValidation struct {
 // MetricStats represents aggregate statistics for a metric
 // Maps to metric_stats table in PostgreSQL
 type MetricStats struct {
-	MetricName      string  `json:"metric_name"`
-	TotalUses       int     `json:"total_uses"`
-	FalsePositives  int     `json:"false_positives"`
-	TruePositives   int     `json:"true_positives"`
-	FPRate          float64 `json:"fp_rate"`
-	IsEnabled       bool    `json:"is_enabled"`
-	LastUpdated     string  `json:"last_updated"`
+	MetricName     string  `json:"metric_name"`
+	TotalUses      int     `json:"total_uses"`
+	FalsePositives int     `json:"false_positives"`
+	TruePositives  int     `json:"true_positives"`
+	FPRate         float64 `json:"fp_rate"`
+	IsEnabled      bool    `json:"is_enabled"`
+	LastUpdated    string  `json:"last_updated"`
 }
 
 // NewClient creates a PostgreSQL client from connection parameters
