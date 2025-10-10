@@ -13,7 +13,6 @@ import (
 
 	"github.com/coderisk/coderisk-go/internal/cache"
 	"github.com/coderisk/coderisk-go/internal/database"
-	"github.com/coderisk/coderisk-go/internal/git"
 	"github.com/coderisk/coderisk-go/internal/graph"
 	"github.com/coderisk/coderisk-go/internal/metrics"
 	"github.com/coderisk/coderisk-go/internal/models"
