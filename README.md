@@ -13,17 +13,17 @@ AI-powered code risk assessment that catches risky changes before they reach pro
 ### Setup
 
 ```bash
-# Clone and build
+# Clone and install
 git clone https://github.com/rohankatakam/coderisk-go.git
 cd coderisk-go
-go build -o crisk ./cmd/crisk
+./install.sh
 
 # Start infrastructure (Neo4j, PostgreSQL, Redis)
 docker compose up -d
 
 # Initialize on your repository
 cd /path/to/your/repo
-/path/to/coderisk-go/crisk init-local
+crisk init-local
 ```
 
 ## Usage
