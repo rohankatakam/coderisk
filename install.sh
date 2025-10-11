@@ -54,9 +54,89 @@ echo "✅ CodeRisk installed successfully!"
 echo ""
 echo "📍 Installation location: ~/.local/bin/crisk"
 echo ""
-echo "🎯 Next steps:"
-echo "   1. Start infrastructure: docker compose up -d"
-echo "   2. Initialize a repository: cd /path/to/repo && crisk init-local"
-echo "   3. Check for risks: crisk check"
+
+# Setup OpenAI API Key for Phase 2 LLM analysis
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🔑 API Key Setup (Optional but Recommended)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "CodeRisk uses OpenAI for deep risk investigation (Phase 2)."
+echo "Without an API key, you'll only get Phase 1 baseline checks."
+echo ""
+read -p "Do you have an OpenAI API key? (y/n): " -n 1 -r
+echo ""
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo ""
+    read -p "Enter your OpenAI API key (starts with sk-...): " -r OPENAI_KEY
+
+    if [ -n "$OPENAI_KEY" ]; then
+        # Detect shell and add to appropriate config file
+        SHELL_CONFIG=""
+        if [ -n "$ZSH_VERSION" ] || [ "$SHELL" = "/bin/zsh" ] || [ "$SHELL" = "/usr/bin/zsh" ]; then
+            SHELL_CONFIG="$HOME/.zshrc"
+        elif [ -n "$BASH_VERSION" ] || [ "$SHELL" = "/bin/bash" ] || [ "$SHELL" = "/usr/bin/bash" ]; then
+            SHELL_CONFIG="$HOME/.bashrc"
+        else
+            SHELL_CONFIG="$HOME/.profile"
+        fi
+
+        # Check if already exists
+        if grep -q "export OPENAI_API_KEY=" "$SHELL_CONFIG" 2>/dev/null; then
+            echo ""
+            echo "⚠️  OPENAI_API_KEY already exists in $SHELL_CONFIG"
+            read -p "Do you want to update it? (y/n): " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                # Remove old entry and add new one
+                grep -v "export OPENAI_API_KEY=" "$SHELL_CONFIG" > "${SHELL_CONFIG}.tmp" 2>/dev/null || true
+                mv "${SHELL_CONFIG}.tmp" "$SHELL_CONFIG"
+                echo "export OPENAI_API_KEY=\"$OPENAI_KEY\"" >> "$SHELL_CONFIG"
+                echo "✅ Updated OPENAI_API_KEY in $SHELL_CONFIG"
+            fi
+        else
+            echo "export OPENAI_API_KEY=\"$OPENAI_KEY\"" >> "$SHELL_CONFIG"
+            echo "✅ Added OPENAI_API_KEY to $SHELL_CONFIG"
+        fi
+
+        # Export for current session
+        export OPENAI_API_KEY="$OPENAI_KEY"
+        echo "✅ API key set for current session"
+        echo ""
+        echo "💡 Restart your shell or run: source $SHELL_CONFIG"
+    fi
+else
+    echo ""
+    echo "⏭️  Skipping API key setup."
+    echo ""
+    echo "To add it later, run:"
+    echo "  export OPENAI_API_KEY=\"sk-your-key-here\""
+    echo ""
+    echo "Or add this line to your shell config (~/.zshrc or ~/.bashrc):"
+    echo "  export OPENAI_API_KEY=\"sk-your-key-here\""
+    echo ""
+    echo "Get your API key at: https://platform.openai.com/api-keys"
+fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🎯 Next Steps"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "1. Start infrastructure:"
+echo "   docker compose up -d"
+echo ""
+echo "2. Initialize a repository:"
+echo "   cd /path/to/your/repo"
+echo "   crisk init-local"
+echo ""
+echo "3. Check for risks:"
+echo "   crisk check                    # Quick baseline check"
+echo "   crisk check --explain          # With Phase 2 LLM analysis"
+echo "   crisk check --ai-mode          # JSON output for AI tools"
+echo ""
+echo "4. Install pre-commit hook (optional):"
+echo "   crisk hook install"
 echo ""
 echo "📚 Full documentation: https://github.com/rohankatakam/coderisk-go"
+echo ""

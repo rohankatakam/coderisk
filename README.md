@@ -16,7 +16,7 @@ AI-powered code risk assessment that catches risky changes before they reach pro
 # Clone and install
 git clone https://github.com/rohankatakam/coderisk-go.git
 cd coderisk-go
-./install.sh
+./install.sh  # Will prompt for OpenAI API key (optional but recommended)
 
 # Start infrastructure (Neo4j, PostgreSQL, Redis)
 docker compose up -d
@@ -25,6 +25,8 @@ docker compose up -d
 cd /path/to/your/repo
 crisk init-local
 ```
+
+> **Note:** The installer will ask if you want to set up your OpenAI API key. This enables Phase 2 deep risk investigation. You can skip this and add it later if needed.
 
 ## Usage
 
@@ -46,12 +48,20 @@ crisk status
 
 ### AI-Powered Analysis
 
-For LLM-powered deep investigation, set your OpenAI API key:
+For deep LLM investigation of high-risk changes:
 
 ```bash
-export OPENAI_API_KEY="sk-..."
+# Phase 2 with detailed explanation
+crisk check --explain path/to/file.go
+
+# JSON output for AI tools (Claude Code, Cursor, etc.)
 crisk check --ai-mode path/to/file.go
 ```
+
+> **Note:** Requires `OPENAI_API_KEY` environment variable. Set during installation or add manually:
+> ```bash
+> export OPENAI_API_KEY="sk-..."  # Add to ~/.zshrc or ~/.bashrc
+> ```
 
 ### View Graph Data
 
