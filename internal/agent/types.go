@@ -8,12 +8,14 @@ import (
 
 // InvestigationRequest represents a Phase 2 escalation
 type InvestigationRequest struct {
-	RequestID   uuid.UUID
-	FilePath    string
-	ChangeType  string // "modify" | "create" | "delete"
-	DiffPreview string // First 50 lines of git diff
-	Baseline    BaselineMetrics
-	StartedAt   time.Time
+	RequestID          uuid.UUID
+	FilePath           string
+	ChangeType         string // "modify" | "create" | "delete"
+	DiffPreview        string // First 50 lines of git diff
+	Baseline           BaselineMetrics
+	ModificationType   string // From Phase 0 classification (e.g., "SECURITY", "DOCUMENTATION")
+	ModificationReason string // Why this type was assigned
+	StartedAt          time.Time
 }
 
 // BaselineMetrics from Phase 1 (provided by ingestion package)
@@ -27,14 +29,17 @@ type BaselineMetrics struct {
 
 // Investigation represents the full investigation state
 type Investigation struct {
-	Request     InvestigationRequest
-	Hops        []HopResult
-	Evidence    []Evidence
-	RiskScore   float64 // 0.0-1.0
-	Confidence  float64 // 0.0-1.0
-	Summary     string
-	CompletedAt time.Time
-	TotalTokens int
+	Request            InvestigationRequest
+	Hops               []HopResult
+	Evidence           []Evidence
+	RiskScore          float64 // 0.0-1.0
+	Confidence         float64 // 0.0-1.0 (final confidence)
+	ConfidenceHistory  []ConfidencePoint // Confidence progression per hop
+	Breakthroughs      []Breakthrough // Significant risk level changes
+	StoppingReason     string // Why investigation stopped
+	Summary            string
+	CompletedAt        time.Time
+	TotalTokens        int
 }
 
 // HopResult represents the result of a single hop
@@ -46,6 +51,18 @@ type HopResult struct {
 	EdgesTraversed []string // Edge types traversed
 	TokensUsed     int
 	Duration       time.Duration
+	Confidence     float64  // Confidence after this hop (0.0-1.0)
+	NextAction     string   // FINALIZE, GATHER_MORE_EVIDENCE, EXPAND_GRAPH
+}
+
+// ConfidencePoint tracks confidence at a specific hop
+type ConfidencePoint struct {
+	HopNumber  int
+	Confidence float64 // 0.0-1.0
+	RiskScore  float64 // Risk score at this point
+	RiskLevel  RiskLevel
+	Reasoning  string // Why this confidence level
+	NextAction string // What action was decided
 }
 
 // Evidence represents a single piece of risk evidence

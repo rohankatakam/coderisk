@@ -1,0 +1,13 @@
+2025/10/10 13:51:20 INFO neo4j client connected component=neo4j uri=bolt://localhost:7688 user=neo4j
+2025/10/10 13:51:20 INFO redis client connected component=redis addr=localhost:6380
+2025/10/10 13:51:20 INFO postgres client connected component=postgres host=localhost port=5433 database=coderisk
+2025/10/10 13:51:20 INFO starting phase 1 assessment component=metrics file=/Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b//Users/rohankatakam/Documents/brain/coderisk-go/test_sandbox/omnara/src/backend/auth/routes.py
+2025/10/10 13:51:21 INFO phase 1 complete component=metrics file=/Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b//Users/rohankatakam/Documents/brain/coderisk-go/test_sandbox/omnara/src/backend/auth/routes.py risk=LOW escalate=false duration_ms=116
+🔍 CodeRisk Analysis
+Branch: main
+Files changed: 1
+Risk level: LOW
+
+2025/10/10 13:51:21 INFO postgres client closed component=postgres
+2025/10/10 13:51:21 INFO redis client closed component=redis
+2025/10/10 13:51:21 INFO neo4j client closed component=neo4j

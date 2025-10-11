@@ -16,9 +16,9 @@ type Investigator struct {
 	synthesizer *Synthesizer
 }
 
-// NewInvestigator creates a new investigator
+// NewInvestigator creates a new investigator with confidence-driven navigation
 func NewInvestigator(llm LLMClientInterface, temporal TemporalClient, incidents IncidentsClient, graph GraphClient) *Investigator {
-	navigator := NewHopNavigator(llm, graph, 3)
+	navigator := NewHopNavigator(llm, graph, 5) // Max 5 hops (up from 3)
 	collector := NewEvidenceCollector(temporal, incidents, graph)
 	synthesizer := NewSynthesizer(llm)
 
@@ -53,15 +53,24 @@ func (inv *Investigator) Investigate(ctx context.Context, req InvestigationReque
 		return RiskAssessment{}, fmt.Errorf("navigation failed: %w", err)
 	}
 
-	// Step 4: Build investigation object
+	// Step 4: Build investigation object with confidence history and breakthroughs
+	finalConfidence := inv.calculateConfidence(hops, evidence)
+	if len(hops) > 0 && hops[len(hops)-1].Confidence > 0 {
+		// Use confidence from last hop if available and valid
+		finalConfidence = hops[len(hops)-1].Confidence
+	}
+
 	investigation := Investigation{
-		Request:     req,
-		Hops:        hops,
-		Evidence:    evidence,
-		RiskScore:   riskScore,
-		Confidence:  inv.calculateConfidence(hops, evidence),
-		CompletedAt: time.Now(),
-		TotalTokens: sumTokens(hops),
+		Request:           req,
+		Hops:              hops,
+		Evidence:          evidence,
+		RiskScore:         riskScore,
+		Confidence:        finalConfidence,
+		ConfidenceHistory: inv.navigator.GetConfidenceHistory(),
+		Breakthroughs:     inv.navigator.GetBreakthroughs(),
+		StoppingReason:    inv.navigator.GetStoppingReason(hops),
+		CompletedAt:       time.Now(),
+		TotalTokens:       sumTokens(hops),
 	}
 
 	// Step 5: Synthesize final assessment

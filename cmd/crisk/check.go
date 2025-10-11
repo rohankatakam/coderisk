@@ -12,6 +12,8 @@ import (
 
 	"github.com/coderisk/coderisk-go/internal/agent"
 	"github.com/coderisk/coderisk-go/internal/ai"
+	"github.com/coderisk/coderisk-go/internal/analysis/config"
+	"github.com/coderisk/coderisk-go/internal/analysis/phase0"
 	"github.com/coderisk/coderisk-go/internal/cache"
 	"github.com/coderisk/coderisk-go/internal/database"
 	"github.com/coderisk/coderisk-go/internal/git"
@@ -119,8 +121,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Create incidents database for Phase 2
 	incidentsDB := incidents.NewDatabase(sqlxDB)
 
-	// Create metrics registry
-	registry := metrics.NewRegistry(neo4jClient, redisClient, pgClient)
+	// Note: No longer using metrics.Registry - using adaptive config directly
+	// registry := metrics.NewRegistry(neo4jClient, redisClient, pgClient)
 
 	// Determine verbosity level
 	var level output.VerbosityLevel
@@ -158,6 +160,20 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	repoID := "local" // TODO: Get from git repo
 	hasHighRisk := false
 
+	// Select adaptive configuration based on repository characteristics
+	// Reference: ADR-005 §2 - Adaptive Configuration Selection
+	repoMetadata := collectRepoMetadata()
+	riskConfig, configReason := config.SelectConfigWithReason(repoMetadata)
+
+	if !quiet && !preCommit {
+		inferredDomain := config.InferDomain(repoMetadata)
+		slog.Info("adaptive config selected",
+			"config", riskConfig.ConfigKey,
+			"language", repoMetadata.PrimaryLanguage,
+			"domain", string(inferredDomain),
+			"reason", configReason)
+	}
+
 	// Resolve relative paths to absolute paths in cloned repo
 	// This is needed because the graph stores absolute paths from init-local
 	resolvedFiles, err := resolveFilePaths(files)
@@ -167,21 +183,68 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	for i, file := range files {
 		resolvedPath := resolvedFiles[i]
-		result, err := registry.CalculatePhase1(ctx, repoID, resolvedPath)
+
+		// Phase 0: Pre-Analysis (security, docs, config detection)
+		// Reference: ADR-005 §1 - Phase 0 Adaptive Pre-Analysis
+		phase0Start := time.Now()
+
+		// TODO: Get actual file diff for more accurate Phase 0 analysis
+		// For now, Phase 0 works with just file path and extension
+		phase0Result := phase0.RunPhase0(file, "")
+		phase0Duration := time.Since(phase0Start)
+
+		if !quiet && !preCommit {
+			slog.Info("phase 0 complete",
+				"file", file,
+				"duration_us", phase0Duration.Microseconds(),
+				"modification_types", phase0Result.ModificationTypes,
+				"skip_analysis", phase0Result.SkipAnalysis,
+				"force_escalate", phase0Result.ForceEscalate)
+		}
+
+		// If Phase 0 says skip all analysis (e.g., documentation-only)
+		if phase0Result.SkipAnalysis {
+			// Create simple result for documentation skip
+			skipResult := &metrics.Phase1Result{
+				FilePath:       file,
+				OverallRisk:    metrics.RiskLevel(phase0Result.AggregatedRisk),
+				ShouldEscalate: false,
+				DurationMS:     phase0Duration.Milliseconds(),
+			}
+			riskResult := output.ConvertPhase1ToRiskResult(skipResult)
+
+			if err := formatter.Format(riskResult, os.Stdout); err != nil {
+				return fmt.Errorf("formatting error: %w", err)
+			}
+			continue
+		}
+
+		// Phase 1: Baseline Assessment with Adaptive Config
+		// Reference: ADR-005 §2 - Adaptive Configuration Selection
+		adaptiveResult, err := metrics.CalculatePhase1WithConfig(ctx, neo4jClient, redisClient, repoID, resolvedPath, riskConfig)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			continue
 		}
 
+		// If Phase 0 forces escalation, override Phase 1 decision
+		if phase0Result.ForceEscalate {
+			adaptiveResult.ShouldEscalate = true
+			// Override risk level if Phase 0 detected higher risk
+			if phase0Result.AggregatedRisk == "CRITICAL" || phase0Result.AggregatedRisk == "HIGH" {
+				adaptiveResult.OverallRisk = metrics.RiskLevel(phase0Result.AggregatedRisk)
+			}
+		}
+
 		// Convert to RiskResult and format
-		riskResult := output.ConvertPhase1ToRiskResult(result)
+		riskResult := output.ConvertPhase1ToRiskResult(adaptiveResult.Phase1Result)
 
 		// If AI mode, enhance with AI prompts and confidence scores
 		if aiMode {
 			enrichWithAIData(riskResult)
 			// Pass Phase 1 result to formatter for enhanced analysis
 			if aiFormatter, ok := formatter.(*output.AIFormatter); ok {
-				aiFormatter.SetPhase1Result(result)
+				aiFormatter.SetPhase1Result(adaptiveResult.Phase1Result)
 			}
 		}
 
@@ -189,7 +252,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("formatting error: %w", err)
 		}
 
-		if result.ShouldEscalate {
+		if adaptiveResult.ShouldEscalate {
 			hasHighRisk = true
 
 			// Get OpenAI API key from environment
@@ -247,7 +310,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 			slog.Info("phase 2 escalation",
 				"file", file,
-				"phase1_risk", result.OverallRisk,
+				"phase1_risk", adaptiveResult.OverallRisk,
 				"api_key_present", true)
 
 			// Create investigation request
@@ -255,8 +318,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				FilePath:   file,
 				ChangeType: "modify", // TODO: detect from git diff
 				Baseline: agent.BaselineMetrics{
-					CouplingScore:     getCouplingScore(result),
-					CoChangeFrequency: getCoChangeScore(result),
+					CouplingScore:     getCouplingScore(adaptiveResult.Phase1Result),
+					CoChangeFrequency: getCoChangeScore(adaptiveResult.Phase1Result),
 					IncidentCount:     0, // TODO: extract from Phase 1
 				},
 			}
@@ -511,4 +574,133 @@ func enrichWithAIData(result *models.RiskResult) {
 			"cache_hit": result.CacheHit,
 		},
 	}
+}
+
+// collectRepoMetadata gathers repository characteristics for adaptive config selection
+// Reference: ADR-005 §2 - Adaptive Configuration Selection
+func collectRepoMetadata() config.RepoMetadata {
+	repoPath := getRepoPath()
+
+	// Detect primary language from file extensions
+	language := detectPrimaryLanguage(repoPath)
+
+	// Detect dependencies (as map for version tracking)
+	depsMap := make(map[string]string)
+	deps := detectDependencies(repoPath)
+	for _, dep := range deps {
+		depsMap[dep] = "detected" // Version info not available in simple scan
+	}
+
+	// Get directory names
+	dirNames := getTopLevelDirectories(repoPath)
+
+	// Read requirements.txt if exists
+	var reqLines []string
+	if data, err := os.ReadFile(repoPath + "/requirements.txt"); err == nil {
+		reqLines = strings.Split(string(data), "\n")
+	}
+
+	// Read go.mod if exists
+	var goModLines []string
+	if data, err := os.ReadFile(repoPath + "/go.mod"); err == nil {
+		goModLines = strings.Split(string(data), "\n")
+	}
+
+	return config.RepoMetadata{
+		PrimaryLanguage: language,
+		Dependencies:    depsMap,
+		DirectoryNames:  dirNames,
+		RequirementsTxt: reqLines,
+		GoMod:           goModLines,
+	}
+}
+
+// detectPrimaryLanguage determines the primary programming language
+func detectPrimaryLanguage(repoPath string) string {
+	// Check for language-specific files in priority order
+	languageMarkers := map[string][]string{
+		"python":     {"requirements.txt", "setup.py", "pyproject.toml", "Pipfile"},
+		"go":         {"go.mod", "go.sum"},
+		"javascript": {"package.json"},
+		"typescript": {"tsconfig.json"},
+		"rust":       {"Cargo.toml"},
+		"java":       {"pom.xml", "build.gradle"},
+	}
+
+	for lang, markers := range languageMarkers {
+		for _, marker := range markers {
+			if _, err := os.Stat(repoPath + "/" + marker); err == nil {
+				return lang
+			}
+		}
+	}
+
+	return "unknown"
+}
+
+// detectDependencies extracts framework and library information
+func detectDependencies(repoPath string) []string {
+	var deps []string
+
+	// Python: read requirements.txt or pyproject.toml
+	if data, err := os.ReadFile(repoPath + "/requirements.txt"); err == nil {
+		content := string(data)
+		if strings.Contains(content, "flask") || strings.Contains(content, "Flask") {
+			deps = append(deps, "flask")
+		}
+		if strings.Contains(content, "django") || strings.Contains(content, "Django") {
+			deps = append(deps, "django")
+		}
+		if strings.Contains(content, "fastapi") || strings.Contains(content, "FastAPI") {
+			deps = append(deps, "fastapi")
+		}
+		if strings.Contains(content, "pandas") || strings.Contains(content, "numpy") {
+			deps = append(deps, "pandas")
+		}
+	}
+
+	// Go: read go.mod
+	if data, err := os.ReadFile(repoPath + "/go.mod"); err == nil {
+		content := string(data)
+		if strings.Contains(content, "gin-gonic/gin") {
+			deps = append(deps, "gin")
+		}
+		if strings.Contains(content, "labstack/echo") {
+			deps = append(deps, "echo")
+		}
+	}
+
+	// JavaScript/TypeScript: read package.json
+	if data, err := os.ReadFile(repoPath + "/package.json"); err == nil {
+		content := string(data)
+		if strings.Contains(content, "\"react\"") {
+			deps = append(deps, "react")
+		}
+		if strings.Contains(content, "\"vue\"") {
+			deps = append(deps, "vue")
+		}
+		if strings.Contains(content, "\"express\"") {
+			deps = append(deps, "express")
+		}
+	}
+
+	return deps
+}
+
+// getTopLevelDirectories gets the top-level directory names in the repository
+func getTopLevelDirectories(repoPath string) []string {
+	var dirs []string
+
+	entries, err := os.ReadDir(repoPath)
+	if err != nil {
+		return dirs
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			dirs = append(dirs, entry.Name())
+		}
+	}
+
+	return dirs
 }

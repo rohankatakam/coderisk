@@ -1,0 +1,34 @@
+2025/10/10 12:52:47 INFO neo4j client connected component=neo4j uri=bolt://localhost:7688 user=neo4j
+2025/10/10 12:52:47 INFO redis client connected component=redis addr=localhost:6380
+2025/10/10 12:52:48 INFO postgres client connected component=postgres host=localhost port=5433 database=coderisk
+2025/10/10 12:52:48 INFO starting phase 1 assessment component=metrics file=/Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b/test_sandbox/omnara/.env.production
+2025/10/10 12:52:48 INFO phase 1 complete component=metrics file=/Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b/test_sandbox/omnara/.env.production risk=HIGH escalate=true duration_ms=24
+🔍 CodeRisk Analysis
+Branch: main
+Files changed: 1
+Risk level: HIGH
+
+Issues:
+1. 🔴 /Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b/test_sandbox/omnara/.env.production - No test files found (1% coverage - HIGH)
+
+Recommendations:
+- Add test coverage for this file
+
+Run 'crisk check --explain' for investigation trace
+
+🔍 Escalating to Phase 2 (LLM investigation)...
+2025/10/10 12:52:48 INFO phase 2 escalation file=test_sandbox/omnara/.env.production phase1_risk=HIGH api_key_present=true
+2025/10/10 12:53:16 INFO phase 2 complete file=test_sandbox/omnara/.env.production final_risk=MINIMAL confidence=0.4
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 Investigation Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Risk Level: MINIMAL (confidence: 40%)
+
+Summary: The primary risk factor when modifying `test_sandbox/omnara/.env.production` is the recent ownership transition, which might introduce unfamiliarity with the file's context despite its stable history and lack of direct dependencies. While the immediate impact seems low, it is crucial to verify that no indirect dependencies or systemic issues are overlooked. Before merging, ensure that all related files or systems with potential INCIDENTS_BY or CO_CHANGED edges have been reviewed for recent high-severity incidents or frequent changes that might indirectly affect this file.
+
+Investigation completed in 25.7s (3 hops, 2881 tokens)
+2025/10/10 12:53:16 INFO postgres client closed component=postgres
+2025/10/10 12:53:16 INFO redis client closed component=redis
+2025/10/10 12:53:16 INFO neo4j client closed component=neo4j

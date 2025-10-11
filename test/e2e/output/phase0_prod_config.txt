@@ -1,0 +1,38 @@
+2025/10/10 13:51:56 INFO neo4j client connected component=neo4j uri=bolt://localhost:7688 user=neo4j
+2025/10/10 13:51:56 INFO redis client connected component=redis addr=localhost:6380
+2025/10/10 13:51:56 INFO postgres client connected component=postgres host=localhost port=5433 database=coderisk
+2025/10/10 13:51:56 INFO starting phase 1 assessment component=metrics file=/Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b//Users/rohankatakam/Documents/brain/coderisk-go/test_sandbox/omnara/.env.production
+2025/10/10 13:51:56 INFO phase 1 complete component=metrics file=/Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b//Users/rohankatakam/Documents/brain/coderisk-go/test_sandbox/omnara/.env.production risk=HIGH escalate=true duration_ms=26
+🔍 CodeRisk Analysis
+Branch: main
+Files changed: 1
+Risk level: HIGH
+
+Issues:
+1. 🔴 /Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b//Users/rohankatakam/Documents/brain/coderisk-go/test_sandbox/omnara/.env.production - No test files found (1% coverage - HIGH)
+
+Recommendations:
+- Add test coverage for this file
+
+Run 'crisk check --explain' for investigation trace
+
+🔍 Escalating to Phase 2 (LLM investigation)...
+2025/10/10 13:51:56 INFO phase 2 escalation file=/Users/rohankatakam/Documents/brain/coderisk-go/test_sandbox/omnara/.env.production phase1_risk=HIGH api_key_present=true
+2025/10/10 13:52:29 INFO phase 2 complete file=/Users/rohankatakam/Documents/brain/coderisk-go/test_sandbox/omnara/.env.production final_risk=MINIMAL confidence=0.4
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 Investigation Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Risk Level: MINIMAL (confidence: 40%)
+
+Summary: Primary risk factor: Hidden dependencies in broader system architecture could introduce indirect vulnerabilities from changes to the .env.production file.
+
+Why it matters (impact): Unforeseen interactions with other configuration files or components could lead to system misconfigurations, security issues, or unstable behavior.
+
+What to check before merging: Carefully review the new data or configurations added to ensure they align with current production standards and verify there are no indirect dependencies that could be affected by these changes.
+
+Investigation completed in 30.2s (3 hops, 2676 tokens)
+2025/10/10 13:52:29 INFO postgres client closed component=postgres
+2025/10/10 13:52:29 INFO redis client closed component=redis
+2025/10/10 13:52:29 INFO neo4j client closed component=neo4j

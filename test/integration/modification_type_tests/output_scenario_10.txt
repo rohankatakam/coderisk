@@ -1,0 +1,34 @@
+2025/10/10 12:52:30 INFO neo4j client connected component=neo4j uri=bolt://localhost:7688 user=neo4j
+2025/10/10 12:52:30 INFO redis client connected component=redis addr=localhost:6380
+2025/10/10 12:52:30 INFO postgres client connected component=postgres host=localhost port=5433 database=coderisk
+2025/10/10 12:52:31 INFO starting phase 1 assessment component=metrics file=/Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b/test_sandbox/omnara/README.md
+2025/10/10 12:52:31 INFO phase 1 complete component=metrics file=/Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b/test_sandbox/omnara/README.md risk=HIGH escalate=true duration_ms=17
+🔍 CodeRisk Analysis
+Branch: main
+Files changed: 1
+Risk level: HIGH
+
+Issues:
+1. 🔴 /Users/rohankatakam/.coderisk/repos/ff523c814e1cba1b/test_sandbox/omnara/README.md - No test files found (1% coverage - HIGH)
+
+Recommendations:
+- Add test coverage for this file
+
+Run 'crisk check --explain' for investigation trace
+
+🔍 Escalating to Phase 2 (LLM investigation)...
+2025/10/10 12:52:31 INFO phase 2 escalation file=test_sandbox/omnara/README.md phase1_risk=HIGH api_key_present=true
+2025/10/10 12:52:47 INFO phase 2 complete file=test_sandbox/omnara/README.md final_risk=MINIMAL confidence=0.26666666666666666
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 Investigation Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Risk Level: MINIMAL (confidence: 27%)
+
+Summary: The primary risk factor for modifying `test_sandbox/omnara/README.md` lies in potential historical severe incidents or ownership transitions that might introduce unforeseen issues. While the coupling and co-change frequencies are zero, which minimizes immediate risk, it's crucial to check for any past severe incidents or recent ownership changes involving this file before merging, as they could indicate underlying vulnerabilities or inconsistencies. Verifying these aspects will ensure stability and mitigate latent risks associated with this modification.
+
+Investigation completed in 13.5s (2 hops, 1575 tokens)
+2025/10/10 12:52:47 INFO postgres client closed component=postgres
+2025/10/10 12:52:47 INFO redis client closed component=redis
+2025/10/10 12:52:47 INFO neo4j client closed component=neo4j

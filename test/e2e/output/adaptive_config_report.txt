@@ -1,0 +1,51 @@
+Adaptive Configuration Validation Report
+Generated: 2025-10-10 14:10:36
+========================================
+
+Test Objectives:
+1. Validate domain inference accuracy (Python web app detection)
+2. Verify config selection logic (python_web config selected)
+3. Test adaptive threshold behavior (coupling, co-change, test ratio)
+4. Measure false positive reduction vs fixed thresholds
+
+Expected Outcomes:
+- Domain inference: 90%+ accuracy
+- Config selection: Appropriate for repository type
+- FP reduction: 20-30% vs fixed thresholds
+
+========================================
+
+
+Test 1: Domain Inference
+  Domain: 
+  Config: 
+  Coupling Threshold: 
+  Result: FAILED
+
+Test 2: Adaptive Threshold Behavior
+  Same metrics (12 coupling, 0.65 co-change) classified differently by domain
+  Result: PASSED
+
+Test 3: Config Selection Reasoning
+  Tested 4 different repository types
+  Result: PASSED
+
+Test 4: Phase 1 Integration
+  Adaptive metrics implementation: Complete
+  Integration into check command: Pending
+Total Tests: 4
+Passed: 3
+Failed: 1
+Success Rate: 75%
+
+Performance Metrics:
+  Test 1: Domain Inference Accuracy: 0ms
+  Test 2: Adaptive Threshold Behavior: 0ms
+  Test 3: Config Selection Reasoning: 0ms
+  Test 4: Phase 1 Integration (if available): 0ms
+
+Test Results Detail:
+  Test 1: Domain Inference Accuracy: FAILED
+  Test 2: Adaptive Threshold Behavior: PASSED
+  Test 3: Config Selection Reasoning: PASSED
+  Test 4: Phase 1 Integration (if available): PASSED

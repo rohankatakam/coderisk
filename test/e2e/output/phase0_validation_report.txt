@@ -1,0 +1,31 @@
+Phase 0 Validation Test Report
+Generated: 2025-10-10 13:51:20
+========================================
+
+Test Scenarios:
+1. Security-Sensitive Change (auth.py) - Should detect security keywords and force CRITICAL
+2. Documentation-Only Change (README.md) - Should skip Phase 1/2 and return LOW <50ms
+3. Production Config Change (.env.production) - Should detect production env and force HIGH/CRITICAL
+
+Expected Outcomes:
+- 70-80% FP reduction vs baseline
+- Phase 0 decisions <50ms
+- 100% accuracy on security/docs/env detection
+
+========================================
+
+
+Test 1: Security-Sensitive Change
+  Risk Level: NOT FOUND
+  Latency: ms
+  Result: FAILED
+
+Test 2: Documentation-Only Change
+  Risk Level: MINIMAL (confidence: 40%)
+  Latency: ms (target: <50ms with Phase 0)
+  Result: PASSED
+
+Test 3: Production Config Change
+  Risk Level: MINIMAL (confidence: 40%)
+  Latency: ms
+  Result: FAILED
