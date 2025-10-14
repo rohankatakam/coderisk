@@ -16,8 +16,9 @@ import (
 // Builder orchestrates graph construction from PostgreSQL staging tables
 // Reference: dev_docs/03-implementation/integration_guides/layers_2_3_graph_construction.md
 type Builder struct {
-	stagingDB *database.StagingClient
-	backend   Backend
+	stagingDB       *database.StagingClient
+	backend         Backend
+	processedCommits []temporal.Commit // Track commits for co-change calculation
 }
 
 // NewBuilder creates a graph builder instance
@@ -36,12 +37,16 @@ type BuildStats struct {
 
 // BuildGraph constructs the complete graph for a repository
 // This is Priority 6B: PostgreSQL → Neo4j/Neptune
-func (b *Builder) BuildGraph(ctx context.Context, repoID int64) (*BuildStats, error) {
-	log.Printf("🔨 Building graph for repo %d...", repoID)
+// repoPath is the absolute path to the cloned repository (needed to resolve file paths)
+func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string) (*BuildStats, error) {
+	log.Printf("🔨 Building graph for repo %d (path: %s)...", repoID, repoPath)
 	stats := &BuildStats{}
 
+	// Initialize commit tracking for co-change calculation
+	b.processedCommits = make([]temporal.Commit, 0)
+
 	// Process commits (Layer 2: Temporal)
-	commitStats, err := b.processCommits(ctx, repoID)
+	commitStats, err := b.processCommits(ctx, repoID, repoPath)
 	if err != nil {
 		return stats, fmt.Errorf("process commits failed: %w", err)
 	}
@@ -67,11 +72,22 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64) (*BuildStats, er
 	stats.Edges += prStats.Edges
 	log.Printf("  ✓ Processed PRs: %d nodes, %d edges", prStats.Nodes, prStats.Edges)
 
+	// Calculate CO_CHANGED edges from commit patterns
+	log.Printf("  ℹ️  Calculating co-change patterns from commits...")
+	coChangeStats, err := b.calculateCoChangedEdges(ctx, repoID, repoPath)
+	if err != nil {
+		// Don't fail the entire build if co-change calculation fails
+		log.Printf("  ⚠️  CO_CHANGED edge calculation failed (non-fatal): %v", err)
+	} else {
+		stats.Edges += coChangeStats.Edges
+		log.Printf("  ✓ Created CO_CHANGED edges: %d pairs", coChangeStats.Edges/2) // Bidirectional, so divide by 2
+	}
+
 	return stats, nil
 }
 
 // processCommits transforms commits from PostgreSQL to graph nodes/edges
-func (b *Builder) processCommits(ctx context.Context, repoID int64) (*BuildStats, error) {
+func (b *Builder) processCommits(ctx context.Context, repoID int64, repoPath string) (*BuildStats, error) {
 	batchSize := 100
 	stats := &BuildStats{}
 
@@ -92,7 +108,7 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64) (*BuildStats
 		var commitIDs []int64
 
 		for _, commit := range commits {
-			nodes, edges, err := b.transformCommit(commit)
+			nodes, edges, err := b.transformCommit(commit, repoPath)
 			if err != nil {
 				log.Printf("  ⚠️  Failed to transform commit %s: %v", commit.SHA, err)
 				continue
@@ -131,7 +147,8 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64) (*BuildStats
 }
 
 // transformCommit converts a commit into graph nodes and edges
-func (b *Builder) transformCommit(commit database.CommitData) ([]GraphNode, []GraphEdge, error) {
+// repoPath is used to convert relative file paths from GitHub to absolute paths matching File nodes
+func (b *Builder) transformCommit(commit database.CommitData, repoPath string) ([]GraphNode, []GraphEdge, error) {
 	var nodes []GraphNode
 	var edges []GraphEdge
 
@@ -193,11 +210,16 @@ func (b *Builder) transformCommit(commit database.CommitData) ([]GraphNode, []Gr
 	edges = append(edges, authoredEdge)
 
 	// 4. Create MODIFIES edges for each file
+	// Convert relative GitHub paths to absolute paths matching File nodes
+	fileChanges := make([]temporal.FileChange, 0, len(fullCommit.Files))
 	for _, file := range fullCommit.Files {
+		// Convert relative path (e.g., "src/main.go") to absolute (e.g., "/path/to/repo/src/main.go")
+		absolutePath := fmt.Sprintf("%s/%s", repoPath, file.Filename)
+
 		modifiesEdge := GraphEdge{
 			Label: "MODIFIES",
 			From:  commitNode.ID,
-			To:    fmt.Sprintf("file:%s", file.Filename),
+			To:    fmt.Sprintf("file:%s", absolutePath),
 			Properties: map[string]interface{}{
 				"status":    file.Status,
 				"additions": file.Additions,
@@ -206,7 +228,24 @@ func (b *Builder) transformCommit(commit database.CommitData) ([]GraphNode, []Gr
 			},
 		}
 		edges = append(edges, modifiesEdge)
+
+		// Track for co-change calculation
+		fileChanges = append(fileChanges, temporal.FileChange{
+			Path:      absolutePath,
+			Additions: file.Additions,
+			Deletions: file.Deletions,
+		})
 	}
+
+	// Store commit for later co-change calculation
+	b.processedCommits = append(b.processedCommits, temporal.Commit{
+		SHA:          commit.SHA,
+		Author:       commit.AuthorName,
+		Email:        commit.AuthorEmail,
+		Timestamp:    commit.AuthorDate,
+		Message:      commit.Message,
+		FilesChanged: fileChanges,
+	})
 
 	return nodes, edges, nil
 }
@@ -523,4 +562,21 @@ func (b *Builder) AddLayer3CausedByEdges(ctx context.Context, edges []GraphEdge)
 
 	stats.Edges = len(edges)
 	return stats, nil
+}
+
+// calculateCoChangedEdges calculates co-change patterns from processed commits
+func (b *Builder) calculateCoChangedEdges(ctx context.Context, repoID int64, repoPath string) (*BuildStats, error) {
+	if len(b.processedCommits) == 0 {
+		log.Printf("    No commits to analyze for co-change patterns")
+		return &BuildStats{}, nil
+	}
+
+	log.Printf("    Analyzing %d commits for co-change patterns...", len(b.processedCommits))
+
+	// Calculate co-changes with 30% frequency threshold
+	coChanges := temporal.CalculateCoChanges(b.processedCommits, 0.3)
+	log.Printf("    Found %d co-change pairs (frequency >= 30%%)", len(coChanges))
+
+	// Create CO_CHANGED edges
+	return b.AddLayer2CoChangedEdges(ctx, coChanges)
 }

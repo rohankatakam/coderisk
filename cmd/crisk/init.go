@@ -199,7 +199,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 	graphStart := time.Now()
 
 	// Reuse graphBuilder from Layer 1
-	buildStats, err := graphBuilder.BuildGraph(ctx, repoID)
+	// Pass repoPath to resolve file paths from GitHub commits
+	buildStats, err := graphBuilder.BuildGraph(ctx, repoID, repoPath)
 	if err != nil {
 		return fmt.Errorf("graph construction failed: %w", err)
 	}
