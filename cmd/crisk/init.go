@@ -117,16 +117,21 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Connected to PostgreSQL\n")
 	fmt.Printf("  ✓ Connected to %s\n", backendType)
 
-	// Stage 0: Clone repository and parse with tree-sitter (Layer 1: Structure)
-	fmt.Printf("\n[0/4] Cloning and parsing repository (Layer 1: Structure)...\n")
-	parseStart := time.Now()
+	// Stage 0: Clone repository with FULL history (needed for Layer 2 temporal analysis)
+	fmt.Printf("\n[0/4] Cloning repository with full git history...\n")
+	cloneStart := time.Now()
 
 	repoURL := fmt.Sprintf("https://github.com/%s/%s", owner, repo)
-	repoPath, err := ingestion.CloneRepository(ctx, repoURL)
+	repoPath, err := ingestion.CloneRepositoryFull(ctx, repoURL)
 	if err != nil {
 		return fmt.Errorf("clone failed: %w", err)
 	}
-	fmt.Printf("  ✓ Repository cloned to %s\n", repoPath)
+	cloneDuration := time.Since(cloneStart)
+	fmt.Printf("  ✓ Repository cloned to %s (took %v)\n", repoPath, cloneDuration)
+
+	// Parse with tree-sitter (Layer 1: Structure)
+	fmt.Printf("\n[0.5/4] Parsing code structure (Layer 1)...\n")
+	parseStart := time.Now()
 
 	// Count files before parsing
 	fileStats, err := ingestion.CountFiles(repoPath)
@@ -149,8 +154,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		fileStats.JavaScript+fileStats.TypeScript+fileStats.Python,
 		strings.Join(languages, ", "))
 
-	// Parse with tree-sitter
+	// Parse with tree-sitter (Layer 1 only, disable temporal analysis)
 	processorConfig := ingestion.DefaultProcessorConfig()
+	processorConfig.EnableTemporal = false // Disable git history analysis (Layer 2 & 3 come from GitHub API)
 	graphBuilder := graph.NewBuilder(stagingDB, graphBackend)
 	processor := ingestion.NewProcessor(processorConfig, graphBackend, graphBuilder)
 

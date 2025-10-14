@@ -58,6 +58,54 @@ func CloneRepository(ctx context.Context, url string) (string, error) {
 	return repoPath, nil
 }
 
+// CloneRepositoryFull performs full clone with complete git history
+// Used by `crisk init` for Layer 2 (Temporal) analysis
+// Stores repos in ~/.coderisk/repos/<repo-hash>-full/ for persistence
+func CloneRepositoryFull(ctx context.Context, url string) (string, error) {
+	// Generate unique hash for storage (different from shallow clone)
+	hash := generateRepoHash(url) + "-full"
+
+	// Get home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	repoPath := filepath.Join(homeDir, ".coderisk", "repos", hash)
+
+	// Check if already cloned
+	if _, err := os.Stat(repoPath); err == nil {
+		// Repository already exists, verify it's valid
+		if isValidGitRepo(repoPath) {
+			// Pull latest changes if already exists
+			cmd := exec.CommandContext(ctx, "git", "pull", "--all")
+			cmd.Dir = repoPath
+			cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+			_ = cmd.Run() // Ignore errors, continue with existing repo
+			return repoPath, nil
+		}
+		// Invalid repo, remove and re-clone
+		os.RemoveAll(repoPath)
+	}
+
+	// Create parent directory
+	parentDir := filepath.Dir(repoPath)
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create repos directory: %w", err)
+	}
+
+	// Full clone (no --depth) for complete git history
+	cmd := exec.CommandContext(ctx, "git", "clone", url, repoPath)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git clone failed: %w, output: %s", err, string(output))
+	}
+
+	return repoPath, nil
+}
+
 // CloneRepositoryWithBranch clones a specific branch
 func CloneRepositoryWithBranch(ctx context.Context, url string, branch string) (string, error) {
 	hash := generateRepoHash(url + "#" + branch)

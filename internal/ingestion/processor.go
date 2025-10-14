@@ -14,17 +14,19 @@ import (
 
 // ProcessorConfig holds configuration for repository processing
 type ProcessorConfig struct {
-	Workers    int           // Number of concurrent parsers (default: 20)
-	Timeout    time.Duration // Per-file parsing timeout (default: 30s)
-	GraphBatch int           // Batch size for graph writes (default: 100)
+	Workers           int           // Number of concurrent parsers (default: 20)
+	Timeout           time.Duration // Per-file parsing timeout (default: 30s)
+	GraphBatch        int           // Batch size for graph writes (default: 100)
+	EnableTemporal    bool          // Enable Layer 2 (Temporal) analysis (default: true for init-local, false for init)
 }
 
 // DefaultProcessorConfig returns default configuration
 func DefaultProcessorConfig() *ProcessorConfig {
 	return &ProcessorConfig{
-		Workers:    20,
-		Timeout:    30 * time.Second,
-		GraphBatch: 100,
+		Workers:        20,
+		Timeout:        30 * time.Second,
+		GraphBatch:     100,
+		EnableTemporal: true, // Default: enabled for backward compatibility with init-local
 	}
 }
 
@@ -139,10 +141,15 @@ func (p *Processor) ProcessRepository(ctx context.Context, repoURL string) (*Pro
 		}
 		slog.Info("graph construction complete")
 
-		// Step 6: Add Layer 2 (Temporal Analysis)
-		// 12-Factor Principle - Factor 8: Concurrency via process model
-		// Use timeout to prevent blocking the entire init-local operation
-		slog.Info("starting temporal analysis", "window_days", 90)
+		// Step 6: Add Layer 2 (Temporal Analysis) - only if enabled
+		// For `crisk init`, this is disabled because Layer 2 & 3 come from GitHub API
+		// For `crisk init-local`, this is enabled for basic temporal analysis
+		if !p.config.EnableTemporal {
+			slog.Info("temporal analysis disabled (Layer 2 will come from GitHub API)")
+		} else {
+			// 12-Factor Principle - Factor 8: Concurrency via process model
+			// Use timeout to prevent blocking the entire init-local operation
+			slog.Info("starting temporal analysis", "window_days", 90)
 
 		// Add timeout for git history parsing
 		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -250,6 +257,7 @@ func (p *Processor) ProcessRepository(ctx context.Context, repoURL string) (*Pro
 				slog.Warn("no co-changes found", "min_frequency", 0.3)
 			}
 		}
+		} // End of EnableTemporal check
 	}
 
 	result.Duration = time.Since(startTime)
