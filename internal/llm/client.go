@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/coderisk/coderisk-go/internal/config"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -33,7 +34,8 @@ type Client struct {
 // NewClient creates an LLM client based on available API keys
 // Security: NEVER hardcode API keys (DEVELOPMENT_WORKFLOW.md §3.3)
 // Reference: local_deployment.md - LLM configuration
-func NewClient(ctx context.Context) (*Client, error) {
+// Now uses config system with OS keychain support
+func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
 	logger := slog.Default().With("component", "llm")
 
 	// Check if Phase 2 is enabled
@@ -47,11 +49,12 @@ func NewClient(ctx context.Context) (*Client, error) {
 		}, nil
 	}
 
-	// Check for OpenAI API key first
-	openaiKey := os.Getenv("OPENAI_API_KEY")
+	// Get OpenAI API key from config (which already checked env var and keychain)
+	openaiKey := cfg.API.OpenAIKey
 	if openaiKey != "" {
 		client := openai.NewClient(openaiKey)
-		logger.Info("openai client initialized")
+		keySource := getKeySource(cfg)
+		logger.Info("openai client initialized", "key_source", keySource)
 		return &Client{
 			provider:     ProviderOpenAI,
 			openaiClient: client,
@@ -60,12 +63,12 @@ func NewClient(ctx context.Context) (*Client, error) {
 		}, nil
 	}
 
-	// Check for Anthropic API key
+	// Check for Anthropic API key (still from env var for now)
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 	if anthropicKey != "" {
 		// NewClient reads ANTHROPIC_API_KEY from environment automatically
 		client := anthropic.NewClient()
-		logger.Info("anthropic client initialized")
+		logger.Info("anthropic client initialized", "key_source", "environment")
 		return &Client{
 			provider:        ProviderAnthropic,
 			anthropicClient: &client,
@@ -74,13 +77,25 @@ func NewClient(ctx context.Context) (*Client, error) {
 		}, nil
 	}
 
-	// No API keys configured but Phase 2 enabled - warning
-	logger.Warn("phase 2 enabled but no LLM API key configured (set OPENAI_API_KEY or ANTHROPIC_API_KEY)")
+	// No API keys configured but Phase 2 enabled - helpful message
+	logger.Warn("phase 2 enabled but no LLM API key configured")
+	logger.Info("run 'crisk configure' to set up your API key securely")
 	return &Client{
 		provider: ProviderNone,
 		logger:   logger,
 		enabled:  false,
 	}, nil
+}
+
+// getKeySource returns a string indicating where the API key came from
+func getKeySource(cfg *config.Config) string {
+	if os.Getenv("OPENAI_API_KEY") != "" {
+		return "environment"
+	}
+	if cfg.API.UseKeychain {
+		return "keychain"
+	}
+	return "config_file"
 }
 
 // IsEnabled returns true if an LLM client is configured and ready

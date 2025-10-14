@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/coderisk/coderisk-go/internal/config"
 	"github.com/spf13/cobra"
@@ -18,15 +19,39 @@ var configCmd = &cobra.Command{
 var configGetCmd = &cobra.Command{
 	Use:   "get [key]",
 	Short: "Get configuration value",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runConfigGet,
+	Long: `Get a configuration value, optionally showing where it's stored.
+
+Examples:
+  # Get API key value
+  crisk config get api.openai_key
+
+  # Show where the API key is stored
+  crisk config get api.openai_key --show-source`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runConfigGet,
 }
+
+var (
+	useKeychain bool
+	noKeychain  bool
+	showSource  bool
+)
 
 var configSetCmd = &cobra.Command{
 	Use:   "set [key] [value]",
 	Short: "Set configuration value",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runConfigSet,
+	Long: `Set a configuration value with optional keychain storage.
+
+Examples:
+  # Store API key in OS keychain (secure, recommended)
+  crisk config set api.openai_key sk-... --use-keychain
+
+  # Store API key in config file (plaintext, for CI/CD)
+  crisk config set api.openai_key sk-... --no-keychain
+
+  # If neither flag specified, will prompt user`,
+	Args: cobra.ExactArgs(2),
+	RunE: runConfigSet,
 }
 
 var configListCmd = &cobra.Command{
@@ -53,6 +78,11 @@ func init() {
 	configCmd.AddCommand(configListCmd)
 	configCmd.AddCommand(configEditCmd)
 	configCmd.AddCommand(configInitCmd)
+
+	// Add flags
+	configSetCmd.Flags().BoolVar(&useKeychain, "use-keychain", false, "Store API key in OS keychain (secure)")
+	configSetCmd.Flags().BoolVar(&noKeychain, "no-keychain", false, "Store API key in config file (plaintext)")
+	configGetCmd.Flags().BoolVar(&showSource, "show-source", false, "Show where the value is stored")
 }
 
 func runConfigGet(cmd *cobra.Command, args []string) error {
@@ -61,6 +91,22 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 	}
 
 	key := args[0]
+
+	// Special handling for api.openai_key with source info
+	if key == "api.openai_key" && showSource {
+		km := config.NewKeyringManager()
+		sourceInfo := km.GetAPIKeySource(cfg)
+
+		fmt.Printf("%s\n", config.MaskAPIKey(cfg.API.OpenAIKey))
+		fmt.Printf("Source: %s\n", sourceInfo.Source)
+		if sourceInfo.Secure {
+			fmt.Println("Security: ✅ Secure")
+		} else {
+			fmt.Println("Security: ⚠️  Plaintext")
+		}
+		return nil
+	}
+
 	value := getConfigValue(cfg, key)
 	if value == nil {
 		fmt.Printf("Configuration key '%s' not found\n", key)
@@ -75,6 +121,58 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	key := args[0]
 	value := args[1]
 
+	// Handle API key specially (with keychain support)
+	if key == "api.openai_key" {
+		km := config.NewKeyringManager()
+
+		// Determine storage method
+		var storeInKeychain bool
+		if useKeychain {
+			storeInKeychain = true
+		} else if noKeychain {
+			storeInKeychain = false
+		} else {
+			// Ask user if keychain is available
+			if km.IsAvailable() {
+				fmt.Print("Store in OS keychain (secure)? (Y/n): ")
+				var response string
+				fmt.Scanln(&response)
+				storeInKeychain = (response == "" || strings.ToLower(response) == "y")
+			}
+		}
+
+		if storeInKeychain && km.IsAvailable() {
+			// Save to keychain
+			if err := km.SaveAPIKey(value); err != nil {
+				fmt.Printf("⚠️  Failed to save to keychain: %v\n", err)
+				fmt.Println("Saving to config file instead...")
+				cfg.API.OpenAIKey = value
+				cfg.API.UseKeychain = false
+			} else {
+				fmt.Println("✅ API key saved to OS keychain (secure)")
+				cfg.API.OpenAIKey = "" // Don't save in config file
+				cfg.API.UseKeychain = true
+			}
+		} else {
+			// Save to config file
+			cfg.API.OpenAIKey = value
+			cfg.API.UseKeychain = false
+			fmt.Println("✅ API key saved to config file (plaintext)")
+			if km.IsAvailable() {
+				fmt.Println("   💡 For better security, use: --use-keychain flag")
+			}
+		}
+
+		// Save config file
+		configPath := getConfigPath()
+		if err := cfg.Save(configPath); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		return nil
+	}
+
+	// Handle other config keys normally
 	if err := setConfigValue(cfg, key, value); err != nil {
 		return fmt.Errorf("failed to set config: %w", err)
 	}
@@ -121,7 +219,12 @@ func runConfigList(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n🤖 API:\n")
 	if cfg.API.OpenAIKey != "" {
-		fmt.Printf("  api.openai_key = %s\n", maskToken(cfg.API.OpenAIKey))
+		km := config.NewKeyringManager()
+		sourceInfo := km.GetAPIKeySource(cfg)
+		fmt.Printf("  api.openai_key = %s\n", config.MaskAPIKey(cfg.API.OpenAIKey))
+		fmt.Printf("    Source: %s\n", sourceInfo.Recommended)
+	} else {
+		fmt.Printf("  api.openai_key = (not set)\n")
 	}
 	fmt.Printf("  api.openai_model = %s\n", cfg.API.OpenAIModel)
 	if cfg.API.CustomLLMURL != "" {

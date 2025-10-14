@@ -150,4 +150,4 @@ site/
 *.tfstate
 *.tfstate.backup
 .ansible/
-k8s/local/
+k8s/local/test_sandbox/

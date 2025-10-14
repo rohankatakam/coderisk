@@ -1,0 +1,56 @@
+MIT License
+
+Copyright (c) 2025 CodeRisk
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+SCOPE OF THIS LICENSE
+
+This MIT License applies to the following components of CodeRisk:
+
+✅ INCLUDED (Open Source):
+- CLI tool (crisk binary and source code in cmd/crisk/)
+- Local mode infrastructure (docker-compose.yml)
+- Core graph engine (internal/graph/, internal/ingestion/)
+- Phase 1 baseline metrics (internal/metrics/)
+- Pre-commit hook system (internal/hooks/)
+- Tree-sitter parsing (internal/treesitter/)
+- Local database schemas and migrations
+
+❌ NOT INCLUDED (Proprietary):
+- Cloud infrastructure and multi-tenant platform
+- ARC (Architectural Risk Catalog) database contents
+- Phase 2 LLM investigation algorithms
+- Cross-organization pattern learning system
+- AI code provenance and trust certificates
+- Insurance underwriting algorithms
+- Enterprise features (SSO, audit logs, self-hosted)
+- Commercial cloud services and APIs
+
+COMMERCIAL CLOUD PLATFORM:
+The CodeRisk cloud platform, including multi-tenant infrastructure, the ARC
+database, trust infrastructure, and enterprise features, is proprietary and
+available under separate commercial license terms. See https://coderisk.dev
+for cloud platform pricing and licensing.
+
+CONTRIBUTIONS:
+By contributing to this project, you agree that your contributions will be
+licensed under the MIT License for the open source components listed above.

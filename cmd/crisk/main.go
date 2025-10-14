@@ -69,7 +69,9 @@ Git commit: ` + GitCommit + `
 	rootCmd.AddCommand(checkCmd)
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(configureCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(migrateToKeychainCmd)
 	rootCmd.AddCommand(parseCmd)
 	rootCmd.AddCommand(incidentCmd)
 }

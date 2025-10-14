@@ -1,0 +1,224 @@
+# GoReleaser configuration for CodeRisk CLI
+# Documentation: https://goreleaser.com
+
+version: 2
+
+before:
+  hooks:
+    # Run tests before building
+    - go test ./...
+    - go mod tidy
+
+builds:
+  - id: crisk
+    main: ./cmd/crisk
+    binary: crisk
+    env:
+      - CGO_ENABLED=1
+    # For snapshot builds, only current platform
+    # For releases, GitHub Actions will build per-platform
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    # Reproducible builds
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.GitCommit={{.Commit}}
+      - -X main.BuildTime={{.Date}}
+
+archives:
+  - id: crisk
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - 'typo'
+  groups:
+    - title: '🎉 Features'
+      regexp: '^feat:'
+      order: 0
+    - title: '🐛 Bug Fixes'
+      regexp: '^fix:'
+      order: 1
+    - title: '⚡ Performance Improvements'
+      regexp: '^perf:'
+      order: 2
+    - title: '📚 Documentation'
+      regexp: '^docs:'
+      order: 3
+    - title: '🔧 Other Changes'
+      order: 999
+
+# Homebrew tap
+brews:
+  - repository:
+      owner: rohankatakam
+      name: homebrew-coderisk
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://coderisk.dev
+    description: "Lightning-fast AI-powered code risk assessment"
+    license: MIT
+    test: |
+      system "#{bin}/crisk", "--version"
+    install: |
+      bin.install "crisk"
+    caveats: |
+      CodeRisk has been installed successfully!
+
+      Quick Start:
+      1. Configure your OpenAI API key (REQUIRED):
+         $ export OPENAI_API_KEY="sk-..."
+         # Or use: crisk configure
+
+      2. Start infrastructure (REQUIRED - one-time per repo):
+         $ docker compose up -d
+
+      3. Initialize repository (REQUIRED - 10-15 min one-time):
+         $ cd your-repo
+         $ crisk init-local
+
+      4. Check for risks (2-5 seconds):
+         $ crisk check
+
+      Setup time: ~17 minutes one-time per repo
+      Check time: 2-5 seconds (after setup)
+      Cost: $0.03-0.05/check (BYOK)
+
+      Learn more: https://docs.coderisk.dev
+
+# Docker images
+dockers:
+  - image_templates:
+      - "coderisk/crisk:{{ .Tag }}"
+      - "coderisk/crisk:v{{ .Major }}"
+      - "coderisk/crisk:v{{ .Major }}.{{ .Minor }}"
+      - "coderisk/crisk:latest"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+    extra_files:
+      - LICENSE
+      - README.md
+
+  - image_templates:
+      - "coderisk/crisk:{{ .Tag }}-arm64"
+      - "coderisk/crisk:v{{ .Major }}-arm64"
+      - "coderisk/crisk:v{{ .Major }}.{{ .Minor }}-arm64"
+      - "coderisk/crisk:latest-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+    goarch: arm64
+    extra_files:
+      - LICENSE
+      - README.md
+
+# Docker manifests for multi-arch support
+docker_manifests:
+  - name_template: 'coderisk/crisk:{{ .Tag }}'
+    image_templates:
+      - 'coderisk/crisk:{{ .Tag }}'
+      - 'coderisk/crisk:{{ .Tag }}-arm64'
+
+  - name_template: 'coderisk/crisk:v{{ .Major }}'
+    image_templates:
+      - 'coderisk/crisk:v{{ .Major }}'
+      - 'coderisk/crisk:v{{ .Major }}-arm64'
+
+  - name_template: 'coderisk/crisk:v{{ .Major }}.{{ .Minor }}'
+    image_templates:
+      - 'coderisk/crisk:v{{ .Major }}.{{ .Minor }}'
+      - 'coderisk/crisk:v{{ .Major }}.{{ .Minor }}-arm64'
+
+  - name_template: 'coderisk/crisk:latest'
+    image_templates:
+      - 'coderisk/crisk:latest'
+      - 'coderisk/crisk:latest-arm64'
+
+# GitHub Release
+release:
+  github:
+    owner: rohankatakam
+    name: coderisk-go
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## CodeRisk {{ .Tag }}
+
+    Lightning-fast AI-powered code risk assessment. <3% false positive rate.
+
+    ### Installation
+
+    ```bash
+    # Homebrew (macOS/Linux)
+    brew tap rohankatakam/coderisk
+    brew install crisk
+
+    # Install script (universal)
+    curl -fsSL https://coderisk.dev/install.sh | bash
+
+    # Docker
+    docker pull coderisk/crisk:{{ .Tag }}
+    ```
+
+    ### Requirements
+    - OpenAI API key (REQUIRED): Get one at https://platform.openai.com/api-keys
+    - Docker Desktop (REQUIRED): For graph database
+    - Setup time: ~17 minutes one-time per repo
+    - Cost: $0.03-0.05/check (BYOK)
+
+  footer: |
+    **Full Changelog**: https://github.com/rohankatakam/coderisk-go/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ---
+
+    💡 **Need help?** Check out our [documentation](https://docs.coderisk.dev) or [open an issue](https://github.com/rohankatakam/coderisk-go/issues).
+
+# Announce on social media (optional - requires setup)
+# announce:
+#   twitter:
+#     enabled: true
+#     message_template: "CodeRisk {{ .Tag }} is out! Lightning-fast AI-powered code risk assessment. Download: {{ .ReleaseURL }}"

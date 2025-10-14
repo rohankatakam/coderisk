@@ -59,6 +59,7 @@ type CacheConfig struct {
 type APIConfig struct {
 	OpenAIKey    string `yaml:"openai_key"`
 	OpenAIModel  string `yaml:"openai_model"`
+	UseKeychain  bool   `yaml:"use_keychain"`  // Prefer keychain over config file
 	CustomLLMURL string `yaml:"custom_llm_url"`
 	CustomLLMKey string `yaml:"custom_llm_key"`
 	EmbeddingURL string `yaml:"embedding_url"`
@@ -219,10 +220,23 @@ func applyEnvOverrides(cfg *Config) {
 		}
 	}
 
-	// API configuration
+	// API configuration - UPDATED FOR KEYCHAIN SUPPORT
+	// Precedence: 1. Env var (highest) 2. Keychain 3. Config file (lowest)
+
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		// Environment variable has highest precedence (for CI/CD)
 		cfg.API.OpenAIKey = key
+	} else if cfg.API.OpenAIKey == "" {
+		// Try keychain if no env var and no config file value
+		// This allows config file to be used if explicitly set
+		km := NewKeyringManager()
+		if km.IsAvailable() {
+			if keychainKey, err := km.GetAPIKey(); err == nil && keychainKey != "" {
+				cfg.API.OpenAIKey = keychainKey
+			}
+		}
 	}
+
 	if model := os.Getenv("OPENAI_MODEL"); model != "" {
 		cfg.API.OpenAIModel = model
 	}
