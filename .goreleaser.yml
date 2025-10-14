@@ -10,7 +10,7 @@ before:
     - go mod tidy
 
 builds:
-  - id: crisk
+  - id: coderisk
     main: ./cmd/crisk
     binary: crisk
     env:
@@ -33,7 +33,7 @@ builds:
       - -X main.BuildTime={{.Date}}
 
 archives:
-  - id: crisk
+  - id: coderisk
     name_template: >-
       {{ .ProjectName }}_
       {{- .Os }}_
@@ -80,7 +80,8 @@ changelog:
 
 # Homebrew tap
 brews:
-  - repository:
+  - name: coderisk
+    repository:
       owner: rohankatakam
       name: homebrew-coderisk
       token: "{{ .Env.GITHUB_TOKEN }}"
@@ -119,10 +120,10 @@ brews:
 # Docker images
 dockers:
   - image_templates:
-      - "coderisk/crisk:{{ .Tag }}"
-      - "coderisk/crisk:v{{ .Major }}"
-      - "coderisk/crisk:v{{ .Major }}.{{ .Minor }}"
-      - "coderisk/crisk:latest"
+      - "coderisk/coderisk:{{ .Tag }}"
+      - "coderisk/coderisk:v{{ .Major }}"
+      - "coderisk/coderisk:v{{ .Major }}.{{ .Minor }}"
+      - "coderisk/coderisk:latest"
     dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
@@ -137,10 +138,10 @@ dockers:
       - README.md
 
   - image_templates:
-      - "coderisk/crisk:{{ .Tag }}-arm64"
-      - "coderisk/crisk:v{{ .Major }}-arm64"
-      - "coderisk/crisk:v{{ .Major }}.{{ .Minor }}-arm64"
-      - "coderisk/crisk:latest-arm64"
+      - "coderisk/coderisk:{{ .Tag }}-arm64"
+      - "coderisk/coderisk:v{{ .Major }}-arm64"
+      - "coderisk/coderisk:v{{ .Major }}.{{ .Minor }}-arm64"
+      - "coderisk/coderisk:latest-arm64"
     dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
@@ -157,25 +158,25 @@ dockers:
 
 # Docker manifests for multi-arch support
 docker_manifests:
-  - name_template: 'coderisk/crisk:{{ .Tag }}'
+  - name_template: 'coderisk/coderisk:{{ .Tag }}'
     image_templates:
-      - 'coderisk/crisk:{{ .Tag }}'
-      - 'coderisk/crisk:{{ .Tag }}-arm64'
+      - 'coderisk/coderisk:{{ .Tag }}'
+      - 'coderisk/coderisk:{{ .Tag }}-arm64'
 
-  - name_template: 'coderisk/crisk:v{{ .Major }}'
+  - name_template: 'coderisk/coderisk:v{{ .Major }}'
     image_templates:
-      - 'coderisk/crisk:v{{ .Major }}'
-      - 'coderisk/crisk:v{{ .Major }}-arm64'
+      - 'coderisk/coderisk:v{{ .Major }}'
+      - 'coderisk/coderisk:v{{ .Major }}-arm64'
 
-  - name_template: 'coderisk/crisk:v{{ .Major }}.{{ .Minor }}'
+  - name_template: 'coderisk/coderisk:v{{ .Major }}.{{ .Minor }}'
     image_templates:
-      - 'coderisk/crisk:v{{ .Major }}.{{ .Minor }}'
-      - 'coderisk/crisk:v{{ .Major }}.{{ .Minor }}-arm64'
+      - 'coderisk/coderisk:v{{ .Major }}.{{ .Minor }}'
+      - 'coderisk/coderisk:v{{ .Major }}.{{ .Minor }}-arm64'
 
-  - name_template: 'coderisk/crisk:latest'
+  - name_template: 'coderisk/coderisk:latest'
     image_templates:
-      - 'coderisk/crisk:latest'
-      - 'coderisk/crisk:latest-arm64'
+      - 'coderisk/coderisk:latest'
+      - 'coderisk/coderisk:latest-arm64'
 
 # GitHub Release
 release:
@@ -195,13 +196,13 @@ release:
     ```bash
     # Homebrew (macOS/Linux)
     brew tap rohankatakam/coderisk
-    brew install crisk
+    brew install coderisk
 
     # Install script (universal)
     curl -fsSL https://coderisk.dev/install.sh | bash
 
     # Docker
-    docker pull coderisk/crisk:{{ .Tag }}
+    docker pull coderisk/coderisk:{{ .Tag }}
     ```
 
     ### Requirements
