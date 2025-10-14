@@ -10,20 +10,51 @@ before:
     - go mod tidy
 
 builds:
-  - id: coderisk
+  # macOS builds (native CGO support)
+  - id: darwin-amd64
     main: ./cmd/crisk
     binary: crisk
     env:
       - CGO_ENABLED=1
-    # For snapshot builds, only current platform
-    # For releases, GitHub Actions will build per-platform
     goos:
       - darwin
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.GitCommit={{.Commit}}
+      - -X main.BuildTime={{.Date}}
+
+  - id: darwin-arm64
+    main: ./cmd/crisk
+    binary: crisk
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.GitCommit={{.Commit}}
+      - -X main.BuildTime={{.Date}}
+
+  # Linux amd64 only (CGO works on x86_64 runner)
+  - id: linux-amd64
+    main: ./cmd/crisk
+    binary: crisk
+    env:
+      - CGO_ENABLED=1
+    goos:
       - linux
     goarch:
       - amd64
-      - arm64
-    # Reproducible builds
     flags:
       - -trimpath
     ldflags:
@@ -34,6 +65,10 @@ builds:
 
 archives:
   - id: coderisk
+    builds:
+      - darwin-amd64
+      - darwin-arm64
+      - linux-amd64
     name_template: >-
       {{ .ProjectName }}_
       {{- .Os }}_
@@ -117,9 +152,11 @@ brews:
 
       Learn more: https://docs.coderisk.dev
 
-# Docker images
+# Docker images (Linux amd64 only - ARM64 requires cross-compilation toolchain)
 dockers:
-  - image_templates:
+  - ids:
+      - linux-amd64
+    image_templates:
       - "rohankatakam/coderisk:{{ .Tag }}"
       - "rohankatakam/coderisk:v{{ .Major }}"
       - "rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}"
@@ -136,47 +173,6 @@ dockers:
     extra_files:
       - LICENSE
       - README.md
-
-  - image_templates:
-      - "rohankatakam/coderisk:{{ .Tag }}-arm64"
-      - "rohankatakam/coderisk:v{{ .Major }}-arm64"
-      - "rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}-arm64"
-      - "rohankatakam/coderisk:latest-arm64"
-    dockerfile: Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-    goarch: arm64
-    extra_files:
-      - LICENSE
-      - README.md
-
-# Docker manifests for multi-arch support
-docker_manifests:
-  - name_template: 'rohankatakam/coderisk:{{ .Tag }}'
-    image_templates:
-      - 'rohankatakam/coderisk:{{ .Tag }}'
-      - 'rohankatakam/coderisk:{{ .Tag }}-arm64'
-
-  - name_template: 'rohankatakam/coderisk:v{{ .Major }}'
-    image_templates:
-      - 'rohankatakam/coderisk:v{{ .Major }}'
-      - 'rohankatakam/coderisk:v{{ .Major }}-arm64'
-
-  - name_template: 'rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}'
-    image_templates:
-      - 'rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}'
-      - 'rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}-arm64'
-
-  - name_template: 'rohankatakam/coderisk:latest'
-    image_templates:
-      - 'rohankatakam/coderisk:latest'
-      - 'rohankatakam/coderisk:latest-arm64'
 
 # GitHub Release
 release:
