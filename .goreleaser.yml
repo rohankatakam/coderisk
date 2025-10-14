@@ -120,10 +120,10 @@ brews:
 # Docker images
 dockers:
   - image_templates:
-      - "coderisk/coderisk:{{ .Tag }}"
-      - "coderisk/coderisk:v{{ .Major }}"
-      - "coderisk/coderisk:v{{ .Major }}.{{ .Minor }}"
-      - "coderisk/coderisk:latest"
+      - "rohankatakam/coderisk:{{ .Tag }}"
+      - "rohankatakam/coderisk:v{{ .Major }}"
+      - "rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}"
+      - "rohankatakam/coderisk:latest"
     dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
@@ -138,10 +138,10 @@ dockers:
       - README.md
 
   - image_templates:
-      - "coderisk/coderisk:{{ .Tag }}-arm64"
-      - "coderisk/coderisk:v{{ .Major }}-arm64"
-      - "coderisk/coderisk:v{{ .Major }}.{{ .Minor }}-arm64"
-      - "coderisk/coderisk:latest-arm64"
+      - "rohankatakam/coderisk:{{ .Tag }}-arm64"
+      - "rohankatakam/coderisk:v{{ .Major }}-arm64"
+      - "rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}-arm64"
+      - "rohankatakam/coderisk:latest-arm64"
     dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
@@ -158,25 +158,25 @@ dockers:
 
 # Docker manifests for multi-arch support
 docker_manifests:
-  - name_template: 'coderisk/coderisk:{{ .Tag }}'
+  - name_template: 'rohankatakam/coderisk:{{ .Tag }}'
     image_templates:
-      - 'coderisk/coderisk:{{ .Tag }}'
-      - 'coderisk/coderisk:{{ .Tag }}-arm64'
+      - 'rohankatakam/coderisk:{{ .Tag }}'
+      - 'rohankatakam/coderisk:{{ .Tag }}-arm64'
 
-  - name_template: 'coderisk/coderisk:v{{ .Major }}'
+  - name_template: 'rohankatakam/coderisk:v{{ .Major }}'
     image_templates:
-      - 'coderisk/coderisk:v{{ .Major }}'
-      - 'coderisk/coderisk:v{{ .Major }}-arm64'
+      - 'rohankatakam/coderisk:v{{ .Major }}'
+      - 'rohankatakam/coderisk:v{{ .Major }}-arm64'
 
-  - name_template: 'coderisk/coderisk:v{{ .Major }}.{{ .Minor }}'
+  - name_template: 'rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}'
     image_templates:
-      - 'coderisk/coderisk:v{{ .Major }}.{{ .Minor }}'
-      - 'coderisk/coderisk:v{{ .Major }}.{{ .Minor }}-arm64'
+      - 'rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}'
+      - 'rohankatakam/coderisk:v{{ .Major }}.{{ .Minor }}-arm64'
 
-  - name_template: 'coderisk/coderisk:latest'
+  - name_template: 'rohankatakam/coderisk:latest'
     image_templates:
-      - 'coderisk/coderisk:latest'
-      - 'coderisk/coderisk:latest-arm64'
+      - 'rohankatakam/coderisk:latest'
+      - 'rohankatakam/coderisk:latest-arm64'
 
 # GitHub Release
 release:
@@ -202,7 +202,7 @@ release:
     curl -fsSL https://coderisk.dev/install.sh | bash
 
     # Docker
-    docker pull coderisk/coderisk:{{ .Tag }}
+    docker pull rohankatakam/coderisk:{{ .Tag }}
     ```
 
     ### Requirements
