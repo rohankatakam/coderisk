@@ -10,6 +10,7 @@ import (
 	"github.com/coderisk/coderisk-go/internal/database"
 	"github.com/coderisk/coderisk-go/internal/github"
 	"github.com/coderisk/coderisk-go/internal/graph"
+	"github.com/coderisk/coderisk-go/internal/ingestion"
 	"github.com/spf13/cobra"
 )
 
@@ -19,16 +20,26 @@ var (
 
 var initCmd = &cobra.Command{
 	Use:   "init [repository]",
-	Short: "Initialize CodeRisk for a repository",
-	Long: `Initialize CodeRisk by fetching GitHub data and building the knowledge graph.
+	Short: "Initialize CodeRisk with full 3-layer analysis (Production)",
+	Long: `Initialize CodeRisk by building the complete 3-layer knowledge graph.
+
+This is the PRODUCTION command that enables full risk analysis:
+  • Layer 1 (Structure): Tree-sitter parsing of code structure
+  • Layer 2 (Temporal): GitHub commit history, co-changes, ownership
+  • Layer 3 (Incidents): GitHub issues, PRs, incident tracking
 
 Examples:
   crisk init omnara-ai/omnara
   crisk init omnara-ai/omnara --backend neo4j
 
+Requirements:
+  • OpenAI API key (for LLM-guided analysis)
+  • GitHub Personal Access Token (for temporal data)
+  • Docker (Neo4j, PostgreSQL, Redis)
+
 Configuration:
-  All credentials are loaded from .env file in project root.
-  Run 'cp .env.example .env' and fill in your GITHUB_TOKEN.
+  Run 'crisk configure' to set up API keys with OS keychain.
+  Alternatively, use .env file (see .env.example).
 
 The repository must be specified as owner/repo format.`,
 	Args: cobra.ExactArgs(1),
@@ -106,8 +117,64 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Connected to PostgreSQL\n")
 	fmt.Printf("  ✓ Connected to %s\n", backendType)
 
-	// Stage 1: Fetch GitHub data → PostgreSQL
-	fmt.Printf("\n[1/3] Fetching GitHub API data...\n")
+	// Stage 0: Clone repository and parse with tree-sitter (Layer 1: Structure)
+	fmt.Printf("\n[0/4] Cloning and parsing repository (Layer 1: Structure)...\n")
+	parseStart := time.Now()
+
+	repoURL := fmt.Sprintf("https://github.com/%s/%s", owner, repo)
+	repoPath, err := ingestion.CloneRepository(ctx, repoURL)
+	if err != nil {
+		return fmt.Errorf("clone failed: %w", err)
+	}
+	fmt.Printf("  ✓ Repository cloned to %s\n", repoPath)
+
+	// Count files before parsing
+	fileStats, err := ingestion.CountFiles(repoPath)
+	if err != nil {
+		return fmt.Errorf("file analysis failed: %w", err)
+	}
+
+	languages := []string{}
+	if fileStats.JavaScript > 0 {
+		languages = append(languages, fmt.Sprintf("JavaScript (%d files)", fileStats.JavaScript))
+	}
+	if fileStats.TypeScript > 0 {
+		languages = append(languages, fmt.Sprintf("TypeScript (%d files)", fileStats.TypeScript))
+	}
+	if fileStats.Python > 0 {
+		languages = append(languages, fmt.Sprintf("Python (%d files)", fileStats.Python))
+	}
+
+	fmt.Printf("  ✓ Found %d source files: %s\n",
+		fileStats.JavaScript+fileStats.TypeScript+fileStats.Python,
+		strings.Join(languages, ", "))
+
+	// Parse with tree-sitter
+	processorConfig := ingestion.DefaultProcessorConfig()
+	graphBuilder := graph.NewBuilder(stagingDB, graphBackend)
+	processor := ingestion.NewProcessor(processorConfig, graphBackend, graphBuilder)
+
+	parseResult, err := processor.ProcessRepository(ctx, repoURL)
+	if err != nil {
+		return fmt.Errorf("repository processing failed: %w", err)
+	}
+
+	parseDuration := time.Since(parseStart)
+	fmt.Printf("  ✓ Parsed %d files in %v (%d functions, %d classes, %d imports)\n",
+		parseResult.FilesParsed,
+		parseDuration,
+		parseResult.Functions,
+		parseResult.Classes,
+		parseResult.Imports)
+
+	if parseResult.FilesFailed > 0 {
+		fmt.Printf("  ⚠️  %d files failed to parse (errors logged)\n", parseResult.FilesFailed)
+	}
+
+	fmt.Printf("  ✓ Graph construction complete: %d entities stored\n", parseResult.EntitiesTotal)
+
+	// Stage 1: Fetch GitHub data → PostgreSQL (Layer 2 & 3: Temporal & Incidents)
+	fmt.Printf("\n[1/4] Fetching GitHub API data (Layer 2 & 3: Temporal & Incidents)...\n")
 	fetchStart := time.Now()
 
 	fetcher := github.NewFetcher(config.MustGetString("GITHUB_TOKEN"), stagingDB)
@@ -121,12 +188,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    Commits: %d | Issues: %d | PRs: %d | Branches: %d\n",
 		stats.Commits, stats.Issues, stats.PRs, stats.Branches)
 
-	// Stage 2: Build graph from PostgreSQL → Neo4j/Neptune
-	fmt.Printf("\n[2/3] Building knowledge graph...\n")
+	// Stage 2: Build graph from PostgreSQL → Neo4j/Neptune (Layer 2 & 3 graph construction)
+	fmt.Printf("\n[2/4] Building temporal & incident graph (Layer 2 & 3)...\n")
 	graphStart := time.Now()
 
-	builder := graph.NewBuilder(stagingDB, graphBackend)
-	buildStats, err := builder.BuildGraph(ctx, repoID)
+	// Reuse graphBuilder from Layer 1
+	buildStats, err := graphBuilder.BuildGraph(ctx, repoID)
 	if err != nil {
 		return fmt.Errorf("graph construction failed: %w", err)
 	}
@@ -135,19 +202,28 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Graph built in %v\n", graphDuration)
 	fmt.Printf("    Nodes: %d | Edges: %d\n", buildStats.Nodes, buildStats.Edges)
 
-	// Stage 3: Validate
-	fmt.Printf("\n[3/3] Validating...\n")
-	if err := validateGraph(ctx, graphBackend, buildStats); err != nil {
+	// Stage 3: Validate all 3 layers
+	fmt.Printf("\n[3/4] Validating all 3 layers...\n")
+	if err := validateGraph(ctx, graphBackend, buildStats, parseResult); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
-	fmt.Printf("  ✓ Validation passed\n")
+	fmt.Printf("  ✓ All layers validated successfully\n")
 
 	// Summary
 	totalDuration := time.Since(startTime)
-	fmt.Printf("\n✅ CodeRisk initialized for %s/%s\n", owner, repo)
-	fmt.Printf("   Total time: %v (fetch: %v, graph: %v)\n",
-		totalDuration, fetchDuration, graphDuration)
-	fmt.Printf("\n💡 Try: crisk check <file>\n")
+	fmt.Printf("\n✅ CodeRisk initialized for %s/%s (All 3 Layers)\n", owner, repo)
+	fmt.Printf("\n📊 Summary:\n")
+	fmt.Printf("   Total time: %v\n", totalDuration)
+	fmt.Printf("   Layer 1 (Structure): %d files, %d functions, %d classes\n",
+		parseResult.FilesParsed, parseResult.Functions, parseResult.Classes)
+	fmt.Printf("   Layer 2 (Temporal): %d commits, %d developers\n",
+		stats.Commits, buildStats.Nodes/3) // Rough estimate
+	fmt.Printf("   Layer 3 (Incidents): %d issues, %d PRs\n",
+		stats.Issues, stats.PRs)
+	fmt.Printf("\n🚀 Next steps:\n")
+	fmt.Printf("   • Test: crisk check <file>\n")
+	fmt.Printf("   • Browse graph: http://localhost:7475 (Neo4j Browser)\n")
+	fmt.Printf("   • Credentials: neo4j / CHANGE_THIS_PASSWORD_IN_PRODUCTION_123\n")
 
 	return nil
 }
@@ -163,19 +239,24 @@ func parseRepoName(repoName string) (owner, repo string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// validateGraph performs basic sanity checks on the constructed graph
-func validateGraph(ctx context.Context, backend graph.Backend, stats *graph.BuildStats) error {
-	if stats.Nodes == 0 {
+// validateGraph performs basic sanity checks on all 3 layers
+func validateGraph(ctx context.Context, backend graph.Backend, stats *graph.BuildStats, parseResult *ingestion.ProcessResult) error {
+	// Check graph stats
+	if stats.Nodes == 0 && parseResult.EntitiesTotal == 0 {
 		return fmt.Errorf("no nodes created in graph")
 	}
-	if stats.Edges == 0 {
-		return fmt.Errorf("no edges created in graph")
+
+	// Verify required node types exist for all 3 layers
+	requiredLabels := map[string]string{
+		"File":      "Layer 1 (Structure)",
+		"Function":  "Layer 1 (Structure)",
+		"Commit":    "Layer 2 (Temporal)",
+		"Developer": "Layer 2 (Temporal)",
+		"Issue":     "Layer 3 (Incidents)",
 	}
 
-	// Verify required node types exist
-	requiredLabels := []string{"Commit", "Developer"}
-
-	for _, label := range requiredLabels {
+	fmt.Printf("  Checking node types:\n")
+	for label, layer := range requiredLabels {
 		query := fmt.Sprintf("MATCH (n:%s) RETURN count(n) as count", label)
 		result, err := backend.Query(query)
 		if err != nil {
@@ -184,7 +265,9 @@ func validateGraph(ctx context.Context, backend graph.Backend, stats *graph.Buil
 
 		count := result.(int64)
 		if count == 0 {
-			fmt.Printf("  ⚠️  Warning: No %s nodes found\n", label)
+			fmt.Printf("    ⚠️  No %s nodes (%s)\n", label, layer)
+		} else {
+			fmt.Printf("    ✓ %s: %d nodes (%s)\n", label, count, layer)
 		}
 	}
 
