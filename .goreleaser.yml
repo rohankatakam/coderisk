@@ -10,42 +10,7 @@ before:
     - go mod tidy
 
 builds:
-  # macOS builds (native CGO support)
-  - id: darwin-amd64
-    main: ./cmd/crisk
-    binary: crisk
-    env:
-      - CGO_ENABLED=1
-    goos:
-      - darwin
-    goarch:
-      - amd64
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w
-      - -X main.Version={{.Version}}
-      - -X main.GitCommit={{.Commit}}
-      - -X main.BuildTime={{.Date}}
-
-  - id: darwin-arm64
-    main: ./cmd/crisk
-    binary: crisk
-    env:
-      - CGO_ENABLED=1
-    goos:
-      - darwin
-    goarch:
-      - arm64
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w
-      - -X main.Version={{.Version}}
-      - -X main.GitCommit={{.Commit}}
-      - -X main.BuildTime={{.Date}}
-
-  # Linux amd64 only (CGO works on x86_64 runner)
+  # Linux amd64 (primary platform - CGO works on Linux runner)
   - id: linux-amd64
     main: ./cmd/crisk
     binary: crisk
@@ -63,11 +28,12 @@ builds:
       - -X main.GitCommit={{.Commit}}
       - -X main.BuildTime={{.Date}}
 
+  # Note: macOS builds require native runner due to CGO + tree-sitter
+  # macOS users can use Docker or Homebrew will be updated once we add macOS runners
+
 archives:
   - id: coderisk
     builds:
-      - darwin-amd64
-      - darwin-arm64
       - linux-amd64
     name_template: >-
       {{ .ProjectName }}_
