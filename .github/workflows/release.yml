@@ -106,11 +106,11 @@ jobs:
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "# Homebrew (macOS/Linux)" >> $GITHUB_STEP_SUMMARY
           echo "brew tap rohankatakam/coderisk" >> $GITHUB_STEP_SUMMARY
-          echo "brew install crisk" >> $GITHUB_STEP_SUMMARY
+          echo "brew install coderisk" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Install script (universal)" >> $GITHUB_STEP_SUMMARY
           echo "curl -fsSL https://coderisk.dev/install.sh | bash" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Docker" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull coderisk/crisk:${{ steps.release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull rohankatakam/coderisk:${{ steps.release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
