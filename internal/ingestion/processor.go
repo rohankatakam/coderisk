@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,25 +73,32 @@ type ProcessResult struct {
 // 4. Extract entities (functions, classes, imports)
 // 5. Build graph (File, Function, Class nodes + CALLS, IMPORTS edges)
 func (p *Processor) ProcessRepository(ctx context.Context, repoURL string) (*ProcessResult, error) {
-	startTime := time.Now()
-
-	slog.Info("starting repository processing",
-		"repo", repoURL,
-		"workers", p.config.Workers,
-	)
-
-	result := &ProcessResult{
-		Errors: []error{},
-	}
-
 	// Step 1: Clone repository
 	repoPath, err := CloneRepository(ctx, repoURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone repository: %w", err)
 	}
-	result.RepoPath = repoPath
 
 	slog.Info("repository cloned", "path", repoPath)
+
+	// Process using the cloned path
+	return p.ProcessRepositoryFromPath(ctx, repoPath)
+}
+
+// ProcessRepositoryFromPath processes an already-cloned repository
+// This is used by `crisk init` to avoid double-cloning (Layer 1 uses the same clone as Layer 2)
+func (p *Processor) ProcessRepositoryFromPath(ctx context.Context, repoPath string) (*ProcessResult, error) {
+	startTime := time.Now()
+
+	slog.Info("starting repository processing",
+		"path", repoPath,
+		"workers", p.config.Workers,
+	)
+
+	result := &ProcessResult{
+		Errors:   []error{},
+		RepoPath: repoPath,
+	}
 
 	// Step 2: Walk file tree
 	files, err := WalkSourceFiles(repoPath)
@@ -439,7 +448,189 @@ func (p *Processor) buildGraph(ctx context.Context, entities []treesitter.CodeEn
 		return fmt.Errorf("failed to create edges: %w", err)
 	}
 
+	// Step 3: Create TESTS relationships (Task 5: Test coverage support)
+	// Reference: PHASE2_INVESTIGATION_ROADMAP.md Task 5
+	slog.Info("creating TESTS relationships")
+	if err := p.createTestRelationships(ctx, entities); err != nil {
+		// Don't fail entire ingestion if TESTS creation fails
+		slog.Warn("failed to create TESTS relationships (non-fatal)", "error", err)
+	}
+
 	return nil
+}
+
+// createTestRelationships creates TESTS edges between test files and source files
+// Reference: PHASE2_INVESTIGATION_ROADMAP.md Task 5 - Test coverage support
+// Detects test files by naming conventions and creates TESTS relationships
+func (p *Processor) createTestRelationships(ctx context.Context, entities []treesitter.CodeEntity) error {
+	// Extract all file entities
+	files := make(map[string]bool)
+	for _, entity := range entities {
+		if entity.Type == "file" || entity.FilePath != "" {
+			files[entity.FilePath] = true
+		}
+	}
+
+	// Identify test files and their corresponding source files
+	var testEdges []graph.GraphEdge
+
+	for filePath := range files {
+		if !isTestFileByConvention(filePath) {
+			continue
+		}
+
+		// Find the source file this test targets
+		sourceFile := inferSourceFileFromTest(filePath, files)
+		if sourceFile == "" {
+			slog.Debug("could not infer source file for test",
+				"test_file", filePath)
+			continue
+		}
+
+		// Create TESTS relationship
+		testEdge := graph.GraphEdge{
+			From:  fmt.Sprintf("file:%s", filePath),
+			To:    fmt.Sprintf("file:%s", sourceFile),
+			Label: "TESTS",
+			Properties: map[string]interface{}{
+				"test_type": detectTestFramework(filePath),
+			},
+		}
+		testEdges = append(testEdges, testEdge)
+	}
+
+	// Batch create test edges
+	if len(testEdges) > 0 {
+		slog.Info("creating TESTS edges", "count", len(testEdges))
+		if err := p.graphClient.CreateEdges(testEdges); err != nil {
+			return fmt.Errorf("failed to create TESTS edges: %w", err)
+		}
+		slog.Info("TESTS relationships created successfully", "count", len(testEdges))
+	} else {
+		slog.Info("no test files found to link")
+	}
+
+	return nil
+}
+
+// isTestFileByConvention determines if a file is a test file based on naming conventions
+// Reference: risk_assessment_methodology.md §2.3 - Test file discovery
+func isTestFileByConvention(filePath string) bool {
+	// Python: test_*.py, *_test.py, files in tests/ or __tests__/
+	if strings.HasSuffix(filePath, "_test.py") || strings.HasPrefix(filepath.Base(filePath), "test_") {
+		return true
+	}
+	if strings.Contains(filePath, "/tests/") || strings.Contains(filePath, "/__tests__/") {
+		if strings.HasSuffix(filePath, ".py") {
+			return true
+		}
+	}
+
+	// JavaScript/TypeScript: *.test.js, *.spec.js, *.test.ts, *.spec.tsx
+	if strings.Contains(filePath, ".test.") || strings.Contains(filePath, ".spec.") {
+		return true
+	}
+	if strings.Contains(filePath, "/__tests__/") {
+		if strings.HasSuffix(filePath, ".js") || strings.HasSuffix(filePath, ".jsx") ||
+			strings.HasSuffix(filePath, ".ts") || strings.HasSuffix(filePath, ".tsx") {
+			return true
+		}
+	}
+
+	// Go: *_test.go
+	if strings.HasSuffix(filePath, "_test.go") {
+		return true
+	}
+
+	return false
+}
+
+// detectTestFramework returns the test framework type based on file path
+func detectTestFramework(filePath string) string {
+	if strings.HasSuffix(filePath, ".py") {
+		return "python_unittest" // Could be pytest, unittest, etc.
+	}
+	if strings.HasSuffix(filePath, ".test.js") || strings.HasSuffix(filePath, ".test.jsx") {
+		return "jest" // Common for JS/JSX
+	}
+	if strings.HasSuffix(filePath, ".test.ts") || strings.HasSuffix(filePath, ".test.tsx") {
+		return "jest" // Common for TS/TSX
+	}
+	if strings.HasSuffix(filePath, ".spec.ts") || strings.HasSuffix(filePath, ".spec.tsx") {
+		return "jasmine_or_mocha" // Common for spec files
+	}
+	if strings.HasSuffix(filePath, "_test.go") {
+		return "go_test"
+	}
+	return "unknown"
+}
+
+// inferSourceFileFromTest infers the source file path from a test file path
+// Uses naming conventions to determine which source file a test is testing
+func inferSourceFileFromTest(testPath string, availableFiles map[string]bool) string {
+	dir := filepath.Dir(testPath)
+	base := filepath.Base(testPath)
+	ext := filepath.Ext(base)
+	nameWithoutExt := strings.TrimSuffix(base, ext)
+
+	// Python: test_foo.py -> foo.py, foo_test.py -> foo.py
+	if strings.HasPrefix(nameWithoutExt, "test_") {
+		sourceName := strings.TrimPrefix(nameWithoutExt, "test_") + ext
+		// Check same directory
+		candidate := filepath.Join(dir, sourceName)
+		if availableFiles[candidate] {
+			return candidate
+		}
+		// Check parent directory (tests/ subfolder pattern)
+		parentDir := filepath.Dir(dir)
+		candidate = filepath.Join(parentDir, sourceName)
+		if availableFiles[candidate] {
+			return candidate
+		}
+	}
+	if strings.HasSuffix(nameWithoutExt, "_test") {
+		sourceName := strings.TrimSuffix(nameWithoutExt, "_test") + ext
+		candidate := filepath.Join(dir, sourceName)
+		if availableFiles[candidate] {
+			return candidate
+		}
+	}
+
+	// JavaScript/TypeScript: foo.test.ts -> foo.ts, foo.spec.tsx -> foo.tsx
+	if strings.Contains(nameWithoutExt, ".test") {
+		sourceName := strings.Replace(nameWithoutExt, ".test", "", 1) + ext
+		candidate := filepath.Join(dir, sourceName)
+		if availableFiles[candidate] {
+			return candidate
+		}
+		// Check parent directory (__tests__/ subfolder pattern)
+		if strings.Contains(dir, "/__tests__") {
+			parentDir := strings.Replace(dir, "/__tests__", "", 1)
+			candidate = filepath.Join(parentDir, sourceName)
+			if availableFiles[candidate] {
+				return candidate
+			}
+		}
+	}
+	if strings.Contains(nameWithoutExt, ".spec") {
+		sourceName := strings.Replace(nameWithoutExt, ".spec", "", 1) + ext
+		candidate := filepath.Join(dir, sourceName)
+		if availableFiles[candidate] {
+			return candidate
+		}
+	}
+
+	// Go: foo_test.go -> foo.go
+	if strings.HasSuffix(nameWithoutExt, "_test") {
+		sourceName := strings.TrimSuffix(nameWithoutExt, "_test") + ext
+		candidate := filepath.Join(dir, sourceName)
+		if availableFiles[candidate] {
+			return candidate
+		}
+	}
+
+	// If no match found, return empty string
+	return ""
 }
 
 // createEdges creates relationships between entities

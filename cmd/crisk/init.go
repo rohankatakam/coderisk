@@ -155,12 +155,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 		strings.Join(languages, ", "))
 
 	// Parse with tree-sitter (Layer 1 only, disable temporal analysis)
+	// IMPORTANT: Use the same repoPath (-full) for both Layer 1 and Layer 2 to ensure file path consistency
 	processorConfig := ingestion.DefaultProcessorConfig()
 	processorConfig.EnableTemporal = false // Disable git history analysis (Layer 2 & 3 come from GitHub API)
 	graphBuilder := graph.NewBuilder(stagingDB, graphBackend)
 	processor := ingestion.NewProcessor(processorConfig, graphBackend, graphBuilder)
 
-	parseResult, err := processor.ProcessRepository(ctx, repoURL)
+	parseResult, err := processor.ProcessRepositoryFromPath(ctx, repoPath)
 	if err != nil {
 		return fmt.Errorf("repository processing failed: %w", err)
 	}

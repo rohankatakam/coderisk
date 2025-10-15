@@ -223,16 +223,86 @@ Optional settings:
 
 ## Development
 
+### Quick Start for Contributors
+
 ```bash
-# Build
-go build -o crisk ./cmd/crisk
+# Clone the repository
+git clone https://github.com/rohankatakam/coderisk-go.git
+cd coderisk-go
+
+# One-command setup (build + start services + install)
+make dev
+
+# Verify installation
+crisk --version
+```
+
+### Development Commands
+
+```bash
+# Build CLI binary
+make build
+
+# Quick rebuild and reinstall (fast iteration)
+make rebuild
 
 # Run tests
-go test ./...
+make test
 
-# Format code
-go fmt ./...
+# Format and lint code
+make fmt
+make lint
+
+# Clean database (keeps containers)
+make clean-db
+
+# Complete cleanup
+make clean-all
+
+# Fresh clone state (removes all local data)
+make clean-fresh
 ```
+
+### Docker Services
+
+```bash
+# Start services (Neo4j, PostgreSQL, Redis)
+make start
+
+# Check service status
+make status
+
+# View logs
+make logs
+
+# Stop services
+make stop
+```
+
+### Common Workflows
+
+**Quick Development:**
+```bash
+# Make code changes...
+make rebuild              # Rebuild and reinstall
+crisk check <file>        # Test your changes
+```
+
+**Clean Development:**
+```bash
+make clean-all           # Clean everything
+make build              # Build fresh
+make start              # Start services
+make install-global     # Install globally
+```
+
+**Database Issues:**
+```bash
+make clean-db           # Reset database
+make start              # Restart services
+```
+
+See [MAKEFILE_GUIDE.md](MAKEFILE_GUIDE.md) for comprehensive Makefile documentation.
 
 See [dev_docs/](dev_docs/) for architecture and detailed documentation.
 
