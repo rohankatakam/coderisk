@@ -223,6 +223,28 @@ Optional settings:
 
 ## Development
 
+### Build Requirements
+
+CodeRisk uses tree-sitter for AST parsing, which requires CGO and a C compiler:
+
+**macOS:**
+```bash
+# Xcode Command Line Tools (includes gcc)
+xcode-select --install
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt-get install build-essential
+```
+
+**Linux (Alpine/Docker):**
+```bash
+apk add gcc musl-dev
+```
+
+> **Why CGO?** Tree-sitter language parsers are C libraries with Go bindings for performance.
+
 ### Quick Start for Contributors
 
 ```bash
