@@ -58,9 +58,12 @@ make test
 ### Testing Graph Construction
 
 ```bash
-# From coderisk directory
-cd /tmp
-../coderisk/bin/crisk init hashicorp/terraform-exec
+# crisk init takes owner/repo and clones it for you
+cd /Users/rohankatakam/Documents/brain/coderisk
+./bin/crisk init hashicorp/terraform-exec
+
+# Repository cloned to: ~/.coderisk/repos/<hash>/
+# Graph built in: Neo4j (localhost:7475)
 
 # Verify in Neo4j browser
 open http://localhost:7475
