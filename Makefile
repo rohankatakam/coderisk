@@ -26,13 +26,14 @@ dev: clean build start
 	@echo "✅ Development environment ready!"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo ""
-	@echo "🚀 Run the CLI:"
-	@echo "   ./bin/crisk --version"
-	@echo "   ./bin/crisk init owner/repo"
+	@echo "🚀 Test the workflow:"
+	@echo "   cd /tmp"
+	@echo "   git clone https://github.com/hashicorp/terraform-exec"
+	@echo "   cd terraform-exec"
+	@echo "   $(shell pwd)/bin/crisk init"
 	@echo ""
-	@echo "💡 Add to PATH for this session:"
-	@echo "   export PATH=\"$(pwd)/bin:\$$PATH\""
-	@echo "   crisk --version  # Now works without ./bin/"
+	@echo "💡 Or use directly:"
+	@echo "   ./bin/crisk --version"
 	@echo ""
 
 ## build: Build CLI binary
@@ -99,13 +100,15 @@ test:
 test-cli: build
 	@echo "🧪 Testing CLI binary..."
 	@echo ""
-	@echo "Version:"
 	@./bin/crisk --version
+	@echo ""
+	@./bin/crisk init --help | head -15
 	@echo ""
 	@echo "✅ CLI binary works!"
 	@echo ""
 	@echo "💡 Test graph construction:"
-	@echo "   cd /tmp && ../bin/crisk init hashicorp/terraform-exec"
+	@echo "   cd /tmp && git clone https://github.com/hashicorp/terraform-exec"
+	@echo "   cd /tmp/terraform-exec && $(shell pwd)/bin/crisk init"
 	@echo ""
 
 ## coverage: Generate test coverage
