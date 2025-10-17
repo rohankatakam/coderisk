@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/graph"
-	"github.com/coderisk/coderisk-go/internal/incidents"
+	"github.com/rohankatakam/coderisk/internal/config"
+	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/incidents"
 	"github.com/jmoiron/sqlx"
 	"github.com/spf13/cobra"
 )
@@ -176,7 +177,7 @@ func runLinkIncident(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to graph database: %w", err)
 	}
-	defer graphClient.Close()
+	defer graphClient.Close(ctx)
 
 	// Create linker
 	incDB := incidents.NewDatabase(db)
@@ -216,7 +217,7 @@ func runUnlinkIncident(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to graph database: %w", err)
 	}
-	defer graphClient.Close()
+	defer graphClient.Close(ctx)
 
 	// Create linker
 	incDB := incidents.NewDatabase(db)
@@ -385,27 +386,57 @@ func runIncidentStats(cmd *cobra.Command, args []string) error {
 // Helper functions
 
 func getPostgresDB() (*sqlx.DB, error) {
-	// Use hardcoded DSN for now (will be configurable in future)
-	dsn := "postgres://coderisk:CHANGE_THIS_PASSWORD_IN_PRODUCTION_123@localhost:5433/coderisk?sslmode=disable"
+	// Load configuration
+	cfg, err := config.Load("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Validate configuration for incident context
+	mode := config.DetectMode()
+	result := cfg.ValidateWithMode(config.ValidationContextIncident, mode)
+	if result.HasErrors() {
+		return nil, fmt.Errorf("configuration validation failed:\n%s", result.Error())
+	}
+
+	// Get DSN from config
+	dsn := cfg.Storage.PostgresDSN
+	if dsn == "" {
+		return nil, fmt.Errorf("POSTGRES_DSN is required. Set it in .env file or environment variable")
+	}
 
 	db, err := sqlx.Connect("pgx", dsn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to PostgreSQL: %w", err)
 	}
 
 	return db, nil
 }
 
 func getGraphBackend() (graph.Backend, error) {
-	// Use hardcoded Neo4j configuration for now (will be configurable in future)
-	uri := "bolt://localhost:7688" // Note: Uses port 7688 based on docker ps output
-	username := "neo4j"
-	password := "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123"
+	// Load configuration
+	cfg, err := config.Load("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Validate configuration for incident context
+	mode := config.DetectMode()
+	result := cfg.ValidateWithMode(config.ValidationContextIncident, mode)
+	if result.HasErrors() {
+		return nil, fmt.Errorf("configuration validation failed:\n%s", result.Error())
+	}
+
+	// Get Neo4j credentials from config
+	uri := cfg.Neo4j.URI
+	username := cfg.Neo4j.User
+	password := cfg.Neo4j.Password
+	database := cfg.Neo4j.Database
 
 	ctx := context.Background()
-	backend, err := graph.NewNeo4jBackend(ctx, uri, username, password)
+	backend, err := graph.NewNeo4jBackend(ctx, uri, username, password, database)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to Neo4j: %w", err)
 	}
 
 	return backend, nil
@@ -422,7 +453,9 @@ func (a *graphClientAdapter) CreateNode(node incidents.GraphNode) (string, error
 		ID:         node.ID,
 		Properties: node.Properties,
 	}
-	return a.backend.CreateNode(graphNode)
+	// Use background context for adapter (incidents package doesn't propagate context)
+	ctx := context.Background()
+	return a.backend.CreateNode(ctx, graphNode)
 }
 
 func (a *graphClientAdapter) CreateEdge(edge incidents.GraphEdge) error {
@@ -432,7 +465,9 @@ func (a *graphClientAdapter) CreateEdge(edge incidents.GraphEdge) error {
 		To:         edge.To,
 		Properties: edge.Properties,
 	}
-	return a.backend.CreateEdge(graphEdge)
+	// Use background context for adapter (incidents package doesn't propagate context)
+	ctx := context.Background()
+	return a.backend.CreateEdge(ctx, graphEdge)
 }
 
 func truncate(s string, maxLen int) string {

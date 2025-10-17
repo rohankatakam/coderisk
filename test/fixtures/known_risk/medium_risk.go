@@ -3,7 +3,7 @@ package fixtures
 import (
 	"context"
 
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // MediumRiskFunction has moderate coupling, some tests

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/config"
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/config"
+	"github.com/rohankatakam/coderisk/internal/models"
 	"github.com/patrickmn/go-cache"
 	"github.com/sirupsen/logrus"
 )

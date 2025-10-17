@@ -215,21 +215,21 @@ func TestParseRepoURL(t *testing.T) {
 	}{
 		{
 			name:     "HTTPS with .git",
-			url:      "https://github.com/coderisk/coderisk-go.git",
+			url:      "https://github.com/rohankatakam/coderisk.git",
 			wantOrg:  "coderisk",
 			wantRepo: "coderisk-go",
 			wantErr:  false,
 		},
 		{
 			name:     "HTTPS without .git",
-			url:      "https://github.com/coderisk/coderisk-go",
+			url:      "https://github.com/rohankatakam/coderisk",
 			wantOrg:  "coderisk",
 			wantRepo: "coderisk-go",
 			wantErr:  false,
 		},
 		{
 			name:     "HTTP with .git",
-			url:      "http://github.com/coderisk/coderisk-go.git",
+			url:      "http://github.com/rohankatakam/coderisk.git",
 			wantOrg:  "coderisk",
 			wantRepo: "coderisk-go",
 			wantErr:  false,
@@ -250,7 +250,7 @@ func TestParseRepoURL(t *testing.T) {
 		},
 		{
 			name:     "Git protocol",
-			url:      "git://github.com/coderisk/coderisk-go.git",
+			url:      "git://github.com/rohankatakam/coderisk.git",
 			wantOrg:  "coderisk",
 			wantRepo: "coderisk-go",
 			wantErr:  false,

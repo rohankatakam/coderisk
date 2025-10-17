@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/coderisk/coderisk-go/internal/incidents"
-	"github.com/coderisk/coderisk-go/internal/temporal"
+	"github.com/rohankatakam/coderisk/internal/incidents"
+	"github.com/rohankatakam/coderisk/internal/temporal"
 )
 
 // TemporalClient interface for Session A's temporal analysis

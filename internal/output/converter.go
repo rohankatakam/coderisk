@@ -3,14 +3,21 @@ package output
 import (
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/metrics"
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/git"
+	"github.com/rohankatakam/coderisk/internal/metrics"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // ConvertPhase1ToRiskResult converts Phase1Result to RiskResult for formatting
 func ConvertPhase1ToRiskResult(phase1 *metrics.Phase1Result) *models.RiskResult {
+	// Get current branch dynamically
+	branch, err := git.GetCurrentBranch()
+	if err != nil {
+		branch = "main" // Fallback if not in git repo
+	}
+
 	result := &models.RiskResult{
-		Branch:       "main", // TODO: Get from git
+		Branch:       branch,
 		FilesChanged: 1,
 		RiskLevel:    string(phase1.OverallRisk),
 		RiskScore:    calculateRiskScore(phase1),
@@ -21,12 +28,15 @@ func ConvertPhase1ToRiskResult(phase1 *metrics.Phase1Result) *models.RiskResult 
 		CacheHit:     false,
 	}
 
+	// Detect language from file extension
+	language := git.DetectLanguage(phase1.FilePath)
+
 	// Convert to FileRisk
 	result.Files = []models.FileRisk{
 		{
 			Path:         phase1.FilePath,
-			Language:     "unknown", // TODO: Detect from file
-			LinesChanged: 0,         // TODO: Get from git diff
+			Language:     language,
+			LinesChanged: 0, // TODO: Get from git diff (requires more complex git integration)
 			RiskScore:    calculateRiskScore(phase1),
 			Metrics:      convertMetrics(phase1),
 		},

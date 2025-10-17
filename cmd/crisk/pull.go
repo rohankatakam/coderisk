@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/cache"
+	"github.com/rohankatakam/coderisk/internal/cache"
 	"github.com/spf13/cobra"
 )
 

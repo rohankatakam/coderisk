@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"github.com/coderisk/coderisk-go/internal/incidents"
-	"github.com/coderisk/coderisk-go/internal/temporal"
+	"github.com/rohankatakam/coderisk/internal/incidents"
+	"github.com/rohankatakam/coderisk/internal/temporal"
 )
 
 // RealTemporalClient implements TemporalClient using git history parsing

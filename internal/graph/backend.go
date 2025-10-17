@@ -1,29 +1,32 @@
 package graph
 
+import "context"
+
 // Backend defines the interface for graph database operations
 // Supports both Neo4j (Cypher) and Neptune (Gremlin)
 // Reference: dev_docs/03-implementation/integration_guides/layers_2_3_graph_construction.md
+// 12-factor: Factor 12 - Stateless design (context passed per-request, not stored)
 type Backend interface {
 	// CreateNode creates a single node in the graph
-	CreateNode(node GraphNode) (string, error)
+	CreateNode(ctx context.Context, node GraphNode) (string, error)
 
 	// CreateNodes creates multiple nodes in batch
-	CreateNodes(nodes []GraphNode) ([]string, error)
+	CreateNodes(ctx context.Context, nodes []GraphNode) ([]string, error)
 
 	// CreateEdge creates a single edge in the graph
-	CreateEdge(edge GraphEdge) error
+	CreateEdge(ctx context.Context, edge GraphEdge) error
 
 	// CreateEdges creates multiple edges in batch
-	CreateEdges(edges []GraphEdge) error
+	CreateEdges(ctx context.Context, edges []GraphEdge) error
 
 	// ExecuteBatch executes multiple commands in a single transaction
-	ExecuteBatch(commands []string) error
+	ExecuteBatch(ctx context.Context, commands []string) error
 
 	// Query executes a query and returns results
-	Query(query string) (interface{}, error)
+	Query(ctx context.Context, query string) (interface{}, error)
 
 	// Close closes the backend connection
-	Close() error
+	Close(ctx context.Context) error
 }
 
 // GraphNode represents a node in the graph

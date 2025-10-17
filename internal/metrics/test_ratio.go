@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/coderisk/coderisk-go/internal/cache"
-	"github.com/coderisk/coderisk-go/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/cache"
+	"github.com/rohankatakam/coderisk/internal/graph"
 )
 
 // TestRatioResult represents the test coverage ratio metric result

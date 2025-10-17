@@ -4,9 +4,9 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/coderisk/coderisk-go/internal/graph"
-	"github.com/coderisk/coderisk-go/internal/metrics"
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/metrics"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // CalculateBlastRadius determines impact of changing a file

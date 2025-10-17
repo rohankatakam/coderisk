@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
@@ -11,19 +12,42 @@ import (
 // Client wraps Neo4j driver with error handling and query helpers
 // Reference: graph_ontology.md - Three-layer ontology
 type Client struct {
-	driver neo4j.DriverWithContext
-	logger *slog.Logger
+	driver   neo4j.DriverWithContext
+	logger   *slog.Logger
+	database string // Database name for queries
 }
 
 // NewClient creates a Neo4j client from environment variables
 // Security: NEVER hardcode credentials (DEVELOPMENT_WORKFLOW.md §3.3)
 // Reference: local_deployment.md - Neo4j configuration
 func NewClient(ctx context.Context, uri, user, password string) (*Client, error) {
+	return NewClientWithDatabase(ctx, uri, user, password, "neo4j")
+}
+
+// NewClientWithDatabase creates a Neo4j client with a specific database
+func NewClientWithDatabase(ctx context.Context, uri, user, password, database string) (*Client, error) {
 	if uri == "" || user == "" || password == "" {
 		return nil, fmt.Errorf("neo4j credentials missing: uri=%s, user=%s", uri, user)
 	}
 
-	driver, err := neo4j.NewDriverWithContext(uri, neo4j.BasicAuth(user, password, ""))
+	// Configure connection pool for optimal performance
+	// Reference: NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md Phase 4
+	driver, err := neo4j.NewDriverWithContext(uri,
+		neo4j.BasicAuth(user, password, ""),
+		func(config *neo4j.Config) {
+			// Connection pool settings
+			config.MaxConnectionPoolSize = 50                         // Default: 100, reduced for medium workloads
+			config.ConnectionAcquisitionTimeout = 60 * time.Second    // Default: 60s, time to wait for connection
+			config.MaxConnectionLifetime = 3600 * time.Second         // Default: 1h, recycle connections hourly
+			config.ConnectionLivenessCheckTimeout = 5 * time.Second   // Default: 5s, liveness check timeout
+
+			// Connection timeout settings
+			config.SocketConnectTimeout = 5 * time.Second             // Default: 5s, initial connection timeout
+			config.SocketKeepalive = true                             // Enable TCP keepalive
+
+			// TLS configuration (commented out for local development)
+			// config.Encrypted = true  // Enable for neo4j+s:// URIs in production
+		})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create neo4j driver: %w", err)
 	}
@@ -35,11 +59,16 @@ func NewClient(ctx context.Context, uri, user, password string) (*Client, error)
 	}
 
 	logger := slog.Default().With("component", "neo4j")
-	logger.Info("neo4j client connected", "uri", uri, "user", user)
+	logger.Info("neo4j client connected",
+		"uri", uri,
+		"user", user,
+		"database", database,
+		"max_pool_size", 50)
 
 	return &Client{
-		driver: driver,
-		logger: logger,
+		driver:   driver,
+		logger:   logger,
+		database: database,
 	}, nil
 }
 
@@ -64,10 +93,8 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 // QueryCoupling calculates structural coupling metric for a file
 // Reference: risk_assessment_methodology.md §2.1 - Coupling metric
 // Returns: count of direct dependencies (IMPORTS, CALLS edges)
+// Uses modern ExecuteQuery API (Neo4j v5.8+) - NEO4J_MODERNIZATION_GUIDE.md §Phase 3
 func (c *Client) QueryCoupling(ctx context.Context, filePath string) (int, error) {
-	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
-
 	// Cypher query with 1-hop limit (prevents graph explosion)
 	// Reference: spec.md §6.2 constraint C-6 - MAX_HOPS limit
 	query := `
@@ -75,39 +102,52 @@ func (c *Client) QueryCoupling(ctx context.Context, filePath string) (int, error
 		RETURN count(DISTINCT dep) as count
 	`
 
-	result, err := session.Run(ctx, query, map[string]any{"path": filePath})
+	// Get transaction config for metric queries
+	// Note: Use context timeout for timeout control (ExecuteQuery doesn't support per-query config)
+	queryCtx := ctx
+	txConfig := GetConfigForOperation("metric_query")
+	if txConfig.Timeout > 0 {
+		var cancel context.CancelFunc
+		queryCtx, cancel = context.WithTimeout(ctx, txConfig.Timeout)
+		defer cancel()
+	}
+
+	// Use modern ExecuteQuery API with read routing optimization
+	result, err := neo4j.ExecuteQuery(queryCtx, c.driver, query,
+		map[string]any{"path": filePath},
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithReadersRouting())
+
 	if err != nil {
 		return 0, fmt.Errorf("coupling query failed for %s: %w", filePath, err)
 	}
 
-	record, err := result.Single(ctx)
-	if err != nil {
-		// File not found in graph - return 0 (not an error)
-		if result.Next(ctx) == false {
-			c.logger.Debug("file not found in graph", "path", filePath)
-			return 0, nil
-		}
-		return 0, fmt.Errorf("no coupling result for %s: %w", filePath, err)
+	// Handle empty results (file not found in graph)
+	if len(result.Records) == 0 {
+		c.logger.Debug("file not found in graph", "path", filePath)
+		return 0, nil
 	}
 
-	count, ok := record.Get("count")
+	// Safe type assertion
+	count, ok := result.Records[0].Get("count")
 	if !ok {
 		return 0, fmt.Errorf("coupling query returned no count for %s", filePath)
 	}
 
-	countInt := int(count.(int64))
-	c.logger.Debug("coupling calculated", "file", filePath, "count", countInt)
+	countInt, ok := count.(int64)
+	if !ok {
+		return 0, fmt.Errorf("unexpected type for count: %T (expected int64)", count)
+	}
 
-	return countInt, nil
+	c.logger.Debug("coupling calculated", "file", filePath, "count", int(countInt))
+	return int(countInt), nil
 }
 
 // QueryCoChange calculates co-change frequency for a file
 // Reference: risk_assessment_methodology.md §2.2 - Co-change metric
 // Returns: count of files that changed together in last 90 days
+// Uses modern ExecuteQuery API (Neo4j v5.8+) - NEO4J_MODERNIZATION_GUIDE.md §Phase 3
 func (c *Client) QueryCoChange(ctx context.Context, filePath string) (int, error) {
-	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
-
 	// Query CO_CHANGED edges (created during graph construction)
 	// Reference: graph_ontology.md §3.2.4 - CO_CHANGED relationship
 	query := `
@@ -116,52 +156,91 @@ func (c *Client) QueryCoChange(ctx context.Context, filePath string) (int, error
 		RETURN count(DISTINCT other) as count
 	`
 
-	result, err := session.Run(ctx, query, map[string]any{"file_path": filePath})
+	// Get transaction config for metric queries
+	// Note: Use context timeout for timeout control (ExecuteQuery doesn't support per-query config)
+	queryCtx := ctx
+	txConfig := GetConfigForOperation("metric_query")
+	if txConfig.Timeout > 0 {
+		var cancel context.CancelFunc
+		queryCtx, cancel = context.WithTimeout(ctx, txConfig.Timeout)
+		defer cancel()
+	}
+
+	// Use modern ExecuteQuery API with read routing optimization
+	result, err := neo4j.ExecuteQuery(queryCtx, c.driver, query,
+		map[string]any{"file_path": filePath},
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithReadersRouting())
+
 	if err != nil {
 		return 0, fmt.Errorf("co-change query failed for %s: %w", filePath, err)
 	}
 
-	record, err := result.Single(ctx)
-	if err != nil {
-		if result.Next(ctx) == false {
-			c.logger.Debug("no co-change data for file", "path", filePath)
-			return 0, nil
-		}
-		return 0, fmt.Errorf("no co-change result for %s: %w", filePath, err)
+	// Handle empty results (no co-change data for file)
+	if len(result.Records) == 0 {
+		c.logger.Debug("no co-change data for file", "path", filePath)
+		return 0, nil
 	}
 
-	count, ok := record.Get("count")
+	// Safe type assertion
+	count, ok := result.Records[0].Get("count")
 	if !ok {
 		return 0, fmt.Errorf("co-change query returned no count for %s", filePath)
 	}
 
-	countInt := int(count.(int64))
-	c.logger.Debug("co-change calculated", "file", filePath, "count", countInt)
+	countInt, ok := count.(int64)
+	if !ok {
+		return 0, fmt.Errorf("unexpected type for count: %T (expected int64)", count)
+	}
 
-	return countInt, nil
+	c.logger.Debug("co-change calculated", "file", filePath, "count", int(countInt))
+	return int(countInt), nil
 }
 
 // ExecuteQuery executes a generic Cypher query with parameters
 // Used by advanced metrics and custom queries
 // Reference: DEVELOPMENT_WORKFLOW.md §3.1 - Input validation
+// Uses modern ExecuteQuery API (Neo4j v5.8+) - NEO4J_MODERNIZATION_GUIDE.md §Phase 3
 func (c *Client) ExecuteQuery(ctx context.Context, query string, params map[string]any) ([]map[string]any, error) {
-	session := c.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
+	// Get transaction config for generic queries (use metric_query as default)
+	// Note: Use context timeout for timeout control (ExecuteQuery doesn't support per-query config)
+	queryCtx := ctx
+	txConfig := GetConfigForOperation("metric_query")
+	if txConfig.Timeout > 0 {
+		var cancel context.CancelFunc
+		queryCtx, cancel = context.WithTimeout(ctx, txConfig.Timeout)
+		defer cancel()
+	}
 
-	result, err := session.Run(ctx, query, params)
+	// Use modern ExecuteQuery API with read routing optimization
+	result, err := neo4j.ExecuteQuery(queryCtx, c.driver, query, params,
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithReadersRouting())
+
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 
+	// Convert records to map format
 	var records []map[string]any
-	for result.Next(ctx) {
-		records = append(records, result.Record().AsMap())
-	}
-
-	if err := result.Err(); err != nil {
-		return nil, fmt.Errorf("query iteration failed: %w", err)
+	for _, record := range result.Records {
+		records = append(records, record.AsMap())
 	}
 
 	c.logger.Debug("query executed", "record_count", len(records))
 	return records, nil
+}
+
+// Driver returns the underlying Neo4j driver
+// Used for advanced operations like lazy loading
+// Reference: NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md Phase 3
+func (c *Client) Driver() neo4j.DriverWithContext {
+	return c.driver
+}
+
+// Database returns the configured database name
+// Used for advanced operations like lazy loading
+// Reference: NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md Phase 3
+func (c *Client) Database() string {
+	return c.database
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/agent"
+	"github.com/rohankatakam/coderisk/internal/agent"
 )
 
 // DisplayPhase2Summary shows investigation summary (standard mode)

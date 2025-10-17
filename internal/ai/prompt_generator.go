@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // PromptGenerator generates AI-executable prompts for fixes

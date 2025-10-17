@@ -19,6 +19,9 @@ type Config struct {
 	// Storage configuration
 	Storage StorageConfig `yaml:"storage"`
 
+	// Neo4j configuration
+	Neo4j Neo4jConfig `yaml:"neo4j"`
+
 	// GitHub configuration
 	GitHub GitHubConfig `yaml:"github"`
 
@@ -42,6 +45,22 @@ type StorageConfig struct {
 	Type        string `yaml:"type"` // "postgres", "sqlite"
 	PostgresDSN string `yaml:"postgres_dsn"`
 	LocalPath   string `yaml:"local_path"`
+
+	// PostgreSQL connection details (parsed from DSN or set individually)
+	PostgresHost     string `yaml:"postgres_host"`
+	PostgresPort     int    `yaml:"postgres_port"`
+	PostgresDB       string `yaml:"postgres_db"`
+	PostgresUser     string `yaml:"postgres_user"`
+	PostgresPassword string `yaml:"postgres_password"`
+}
+
+// Neo4jConfig holds Neo4j connection settings
+// Reference: NEO4J_MODERNIZATION_GUIDE.md - Database configuration
+type Neo4jConfig struct {
+	URI      string `yaml:"uri" mapstructure:"NEO4J_URI"`
+	User     string `yaml:"user" mapstructure:"NEO4J_USER"`
+	Password string `yaml:"password" mapstructure:"NEO4J_PASSWORD"`
+	Database string `yaml:"database" mapstructure:"NEO4J_DATABASE"`
 }
 
 type GitHubConfig struct {
@@ -54,6 +73,11 @@ type CacheConfig struct {
 	TTL            time.Duration `yaml:"ttl"`
 	MaxSize        int64         `yaml:"max_size"` // In bytes
 	SharedCacheURL string        `yaml:"shared_cache_url"`
+
+	// Redis configuration
+	RedisHost     string `yaml:"redis_host"`
+	RedisPort     int    `yaml:"redis_port"`
+	RedisPassword string `yaml:"redis_password"`
 }
 
 type APIConfig struct {
@@ -94,16 +118,30 @@ func Default() *Config {
 	return &Config{
 		Mode: "team",
 		Storage: StorageConfig{
-			Type:      "sqlite",
-			LocalPath: filepath.Join(homeDir, ".coderisk", "local.db"),
+			Type:             "sqlite",
+			LocalPath:        filepath.Join(homeDir, ".coderisk", "local.db"),
+			PostgresHost:     "localhost",
+			PostgresPort:     5433,
+			PostgresDB:       "coderisk",
+			PostgresUser:     "coderisk",
+			PostgresPassword: "", // Must be provided via env
+		},
+		Neo4j: Neo4jConfig{
+			URI:      "bolt://localhost:7687",
+			User:     "neo4j",
+			Password: "",        // Must be provided via env or config
+			Database: "neo4j",   // Default database name
 		},
 		GitHub: GitHubConfig{
 			RateLimit: 10, // 10 requests per second
 		},
 		Cache: CacheConfig{
-			Directory: filepath.Join(homeDir, ".coderisk", "cache"),
-			TTL:       24 * time.Hour,
-			MaxSize:   2 * 1024 * 1024 * 1024, // 2GB
+			Directory:     filepath.Join(homeDir, ".coderisk", "cache"),
+			TTL:           24 * time.Hour,
+			MaxSize:       2 * 1024 * 1024 * 1024, // 2GB
+			RedisHost:     "localhost",
+			RedisPort:     6380,
+			RedisPassword: "", // Optional - empty for local dev
 		},
 		API: APIConfig{
 			OpenAIModel: "gpt-4o-mini",
@@ -210,6 +248,20 @@ func loadEnvFiles() {
 
 // applyEnvOverrides applies environment variable overrides to config
 func applyEnvOverrides(cfg *Config) {
+	// Neo4j configuration
+	if uri := os.Getenv("NEO4J_URI"); uri != "" {
+		cfg.Neo4j.URI = uri
+	}
+	if user := os.Getenv("NEO4J_USER"); user != "" {
+		cfg.Neo4j.User = user
+	}
+	if password := os.Getenv("NEO4J_PASSWORD"); password != "" {
+		cfg.Neo4j.Password = password
+	}
+	if database := os.Getenv("NEO4J_DATABASE"); database != "" {
+		cfg.Neo4j.Database = database
+	}
+
 	// GitHub configuration
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		cfg.GitHub.Token = token
@@ -264,6 +316,25 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Storage.LocalPath = expandPath(path)
 	}
 
+	// PostgreSQL individual connection details
+	if host := os.Getenv("POSTGRES_HOST"); host != "" {
+		cfg.Storage.PostgresHost = host
+	}
+	if portStr := os.Getenv("POSTGRES_PORT_EXTERNAL"); portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			cfg.Storage.PostgresPort = port
+		}
+	}
+	if db := os.Getenv("POSTGRES_DB"); db != "" {
+		cfg.Storage.PostgresDB = db
+	}
+	if user := os.Getenv("POSTGRES_USER"); user != "" {
+		cfg.Storage.PostgresUser = user
+	}
+	if password := os.Getenv("POSTGRES_PASSWORD"); password != "" {
+		cfg.Storage.PostgresPassword = password
+	}
+
 	// Cache configuration
 	if dir := os.Getenv("CACHE_DIRECTORY"); dir != "" {
 		cfg.Cache.Directory = expandPath(dir)
@@ -275,6 +346,19 @@ func applyEnvOverrides(cfg *Config) {
 		if sizeInt, err := strconv.ParseInt(size, 10, 64); err == nil {
 			cfg.Cache.MaxSize = sizeInt
 		}
+	}
+
+	// Redis configuration
+	if host := os.Getenv("REDIS_HOST"); host != "" {
+		cfg.Cache.RedisHost = host
+	}
+	if portStr := os.Getenv("REDIS_PORT_EXTERNAL"); portStr != "" {
+		if port, err := strconv.Atoi(portStr); err == nil {
+			cfg.Cache.RedisPort = port
+		}
+	}
+	if password := os.Getenv("REDIS_PASSWORD"); password != "" {
+		cfg.Cache.RedisPassword = password
 	}
 
 	// Budget configuration

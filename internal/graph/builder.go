@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/coderisk/coderisk-go/internal/database"
-	"github.com/coderisk/coderisk-go/internal/temporal"
+	"github.com/rohankatakam/coderisk/internal/database"
+	"github.com/rohankatakam/coderisk/internal/temporal"
 )
 
 // Builder orchestrates graph construction from PostgreSQL staging tables
@@ -121,7 +121,7 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64, repoPath str
 
 		// Create nodes
 		if len(allNodes) > 0 {
-			if _, err := b.backend.CreateNodes(allNodes); err != nil {
+			if _, err := b.backend.CreateNodes(ctx, allNodes); err != nil {
 				return stats, fmt.Errorf("failed to create nodes: %w", err)
 			}
 			stats.Nodes += len(allNodes)
@@ -129,7 +129,7 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64, repoPath str
 
 		// Create edges
 		if len(allEdges) > 0 {
-			if err := b.backend.CreateEdges(allEdges); err != nil {
+			if err := b.backend.CreateEdges(ctx, allEdges); err != nil {
 				return stats, fmt.Errorf("failed to create edges: %w", err)
 			}
 			stats.Edges += len(allEdges)
@@ -283,7 +283,7 @@ func (b *Builder) processIssues(ctx context.Context, repoID int64) (*BuildStats,
 
 		// Create nodes
 		if len(allNodes) > 0 {
-			if _, err := b.backend.CreateNodes(allNodes); err != nil {
+			if _, err := b.backend.CreateNodes(ctx, allNodes); err != nil {
 				return stats, fmt.Errorf("failed to create issue nodes: %w", err)
 			}
 			stats.Nodes += len(allNodes)
@@ -363,7 +363,7 @@ func (b *Builder) processPRs(ctx context.Context, repoID int64) (*BuildStats, er
 
 		// Create nodes
 		if len(allNodes) > 0 {
-			if _, err := b.backend.CreateNodes(allNodes); err != nil {
+			if _, err := b.backend.CreateNodes(ctx, allNodes); err != nil {
 				return stats, fmt.Errorf("failed to create PR nodes: %w", err)
 			}
 			stats.Nodes += len(allNodes)
@@ -371,7 +371,7 @@ func (b *Builder) processPRs(ctx context.Context, repoID int64) (*BuildStats, er
 
 		// Create edges
 		if len(allEdges) > 0 {
-			if err := b.backend.CreateEdges(allEdges); err != nil {
+			if err := b.backend.CreateEdges(ctx, allEdges); err != nil {
 				return stats, fmt.Errorf("failed to create PR edges: %w", err)
 			}
 			stats.Edges += len(allEdges)
@@ -514,7 +514,7 @@ func (b *Builder) AddLayer2CoChangedEdges(ctx context.Context, coChanges []tempo
 			}
 
 			batch := edges[i:end]
-			if err := b.backend.CreateEdges(batch); err != nil {
+			if err := b.backend.CreateEdges(ctx, batch); err != nil {
 				return stats, fmt.Errorf("failed to create CO_CHANGED edges (batch %d-%d): %w", i, end, err)
 			}
 
@@ -538,7 +538,7 @@ func (b *Builder) AddLayer3IncidentNodes(ctx context.Context, incidents []GraphN
 	}
 
 	// Create incident nodes
-	if _, err := b.backend.CreateNodes(incidents); err != nil {
+	if _, err := b.backend.CreateNodes(ctx, incidents); err != nil {
 		return stats, fmt.Errorf("failed to create incident nodes: %w", err)
 	}
 
@@ -556,7 +556,7 @@ func (b *Builder) AddLayer3CausedByEdges(ctx context.Context, edges []GraphEdge)
 	}
 
 	// Create CAUSED_BY edges
-	if err := b.backend.CreateEdges(edges); err != nil {
+	if err := b.backend.CreateEdges(ctx, edges); err != nil {
 		return stats, fmt.Errorf("failed to create CAUSED_BY edges: %w", err)
 	}
 

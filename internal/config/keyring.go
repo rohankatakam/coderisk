@@ -17,6 +17,9 @@ const (
 
 	// KeyringAPIKeyItem is the key for OpenAI API key
 	KeyringAPIKeyItem = "openai-api-key"
+
+	// KeyringGitHubTokenItem is the key for GitHub token
+	KeyringGitHubTokenItem = "github-token"
 )
 
 // KeyringManager handles secure credential storage in OS keychain
@@ -80,6 +83,59 @@ func (km *KeyringManager) DeleteAPIKey() error {
 	}
 
 	km.logger.Info("api key deleted from keychain")
+	return nil
+}
+
+// SetAPIKey is an alias for SaveAPIKey for consistency with credentials.go
+func (km *KeyringManager) SetAPIKey(apiKey string) error {
+	return km.SaveAPIKey(apiKey)
+}
+
+// GetGitHubToken retrieves GitHub token from OS keychain
+func (km *KeyringManager) GetGitHubToken() (string, error) {
+	token, err := keyring.Get(KeyringService, KeyringGitHubTokenItem)
+	if err == keyring.ErrNotFound {
+		// Not an error - just not set yet
+		return "", nil
+	}
+	if err != nil {
+		km.logger.Error("failed to get GitHub token from keychain", "error", err)
+		return "", fmt.Errorf("failed to read from OS keychain: %w", err)
+	}
+
+	km.logger.Debug("github token retrieved from keychain")
+	return token, nil
+}
+
+// SetGitHubToken stores GitHub token securely in OS keychain
+func (km *KeyringManager) SetGitHubToken(token string) error {
+	if token == "" {
+		return fmt.Errorf("github token cannot be empty")
+	}
+
+	err := keyring.Set(KeyringService, KeyringGitHubTokenItem, token)
+	if err != nil {
+		km.logger.Error("failed to save GitHub token to keychain", "error", err)
+		return fmt.Errorf("failed to save to OS keychain: %w", err)
+	}
+
+	km.logger.Info("github token saved to keychain", "service", KeyringService)
+	return nil
+}
+
+// DeleteGitHubToken removes GitHub token from OS keychain
+func (km *KeyringManager) DeleteGitHubToken() error {
+	err := keyring.Delete(KeyringService, KeyringGitHubTokenItem)
+	if err == keyring.ErrNotFound {
+		// Already deleted, not an error
+		return nil
+	}
+	if err != nil {
+		km.logger.Error("failed to delete GitHub token from keychain", "error", err)
+		return fmt.Errorf("failed to delete from OS keychain: %w", err)
+	}
+
+	km.logger.Info("github token deleted from keychain")
 	return nil
 }
 

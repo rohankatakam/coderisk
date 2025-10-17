@@ -5,17 +5,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/graph"
-	"github.com/coderisk/coderisk-go/internal/metrics"
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/git"
+	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/metrics"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // ToAIMode converts risk assessment to AI-consumable JSON
 // 12-factor: Factor 4 - Tools are structured outputs
 func ToAIMode(ctx context.Context, phase1 *metrics.Phase1Result, riskResult *models.RiskResult, graphClient *graph.Client) *AIJSONOutput {
+	// Get repository ID dynamically
+	repoID, err := git.GetRepoID()
+	if err != nil {
+		repoID = "local" // Fallback if not in git repo
+	}
+
 	output := &AIJSONOutput{
 		Branch:      riskResult.Branch,
-		Repository:  "local", // TODO: Get from git config
+		Repository:  repoID,
 		Timestamp:   time.Now(),
 		OverallRisk: string(phase1.OverallRisk),
 	}

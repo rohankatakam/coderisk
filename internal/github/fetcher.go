@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/database"
+	"github.com/rohankatakam/coderisk/internal/database"
 	"github.com/google/go-github/v57/github"
 	"golang.org/x/time/rate"
 )

@@ -3,7 +3,7 @@ package output
 import (
 	"io"
 
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // Formatter defines output formatting interface

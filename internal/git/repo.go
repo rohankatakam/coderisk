@@ -113,3 +113,42 @@ func GetAuthorEmail() (string, error) {
 
 	return strings.TrimSpace(string(output)), nil
 }
+
+// GetRepoRoot returns the absolute path to the git repository root
+func GetRepoRoot() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo root: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
+// GetRepoID returns a unique identifier for the repository
+// Format: "owner/repo" if remote exists, otherwise "local/{dirname}"
+func GetRepoID() (string, error) {
+	// Try to get from remote URL first
+	remoteURL, err := GetRemoteURL()
+	if err == nil && remoteURL != "" {
+		owner, repo, err := ParseRepoURL(remoteURL)
+		if err == nil {
+			return fmt.Sprintf("%s/%s", owner, repo), nil
+		}
+	}
+
+	// Fallback to local directory name
+	repoRoot, err := GetRepoRoot()
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo identifier: %w", err)
+	}
+
+	// Extract directory name from path
+	parts := strings.Split(repoRoot, "/")
+	if len(parts) > 0 {
+		dirName := parts[len(parts)-1]
+		return fmt.Sprintf("local/%s", dirName), nil
+	}
+
+	return "local/unknown", nil
+}

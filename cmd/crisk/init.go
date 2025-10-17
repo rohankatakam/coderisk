@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/config"
-	"github.com/coderisk/coderisk-go/internal/database"
-	"github.com/coderisk/coderisk-go/internal/github"
-	"github.com/coderisk/coderisk-go/internal/graph"
-	"github.com/coderisk/coderisk-go/internal/ingestion"
+	"github.com/rohankatakam/coderisk/internal/config"
+	"github.com/rohankatakam/coderisk/internal/database"
+	"github.com/rohankatakam/coderisk/internal/github"
+	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/ingestion"
 	"github.com/spf13/cobra"
 )
 
@@ -74,15 +74,27 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   Backend: %s\n", backendType)
 	fmt.Printf("   Config: %s\n", envLoader.GetPath())
 
+	// Load and validate configuration
+	cfg, err := config.Load("")
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	mode := config.DetectMode()
+	result := cfg.ValidateWithMode(config.ValidationContextInit, mode)
+	if result.HasErrors() {
+		return fmt.Errorf("configuration validation failed:\n%s", result.Error())
+	}
+
 	// Connect to PostgreSQL
 	fmt.Printf("\n[0/3] Connecting to databases...\n")
 	stagingDB, err := database.NewStagingClient(
 		ctx,
-		config.GetString("POSTGRES_HOST", "localhost"),
-		config.GetInt("POSTGRES_PORT_EXTERNAL", 5433),
-		config.MustGetString("POSTGRES_DB"),
-		config.MustGetString("POSTGRES_USER"),
-		config.MustGetString("POSTGRES_PASSWORD"),
+		cfg.Storage.PostgresHost,
+		cfg.Storage.PostgresPort,
+		cfg.Storage.PostgresDB,
+		cfg.Storage.PostgresUser,
+		cfg.Storage.PostgresPassword,
 	)
 	if err != nil {
 		return fmt.Errorf("PostgreSQL connection failed: %w", err)
@@ -93,16 +105,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 	var graphBackend graph.Backend
 	switch backendType {
 	case "neo4j":
-		// Construct Neo4j URI from components
-		neo4jHost := config.GetString("NEO4J_HOST", "localhost")
-		neo4jPort := config.GetInt("NEO4J_BOLT_PORT", 7688)
-		neo4jURI := fmt.Sprintf("bolt://%s:%d", neo4jHost, neo4jPort)
-
 		graphBackend, err = graph.NewNeo4jBackend(
 			ctx,
-			neo4jURI,
-			config.MustGetString("NEO4J_USER"),
-			config.MustGetString("NEO4J_PASSWORD"),
+			cfg.Neo4j.URI,
+			cfg.Neo4j.User,
+			cfg.Neo4j.Password,
+			cfg.Neo4j.Database,
 		)
 		if err != nil {
 			return fmt.Errorf("Neo4j connection failed: %w", err)
@@ -112,7 +120,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	default:
 		return fmt.Errorf("unsupported backend: %s (use 'neo4j' or 'neptune')", backendType)
 	}
-	defer graphBackend.Close()
+	defer graphBackend.Close(ctx)
 
 	fmt.Printf("  ✓ Connected to PostgreSQL\n")
 	fmt.Printf("  ✓ Connected to %s\n", backendType)
@@ -217,6 +225,18 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  ✓ All layers validated successfully\n")
 
+	// Stage 3.5: Apply indexes for optimal query performance
+	fmt.Printf("\n[3.5/4] Creating database indexes...\n")
+	indexStart := time.Now()
+
+	if err := createIndexes(ctx, graphBackend); err != nil {
+		// Non-fatal: indexes improve performance but aren't required
+		fmt.Printf("  ⚠️  Index creation failed (non-fatal): %v\n", err)
+	} else {
+		indexDuration := time.Since(indexStart)
+		fmt.Printf("  ✓ Indexes created in %v\n", indexDuration)
+	}
+
 	// Summary
 	totalDuration := time.Since(startTime)
 	fmt.Printf("\n✅ CodeRisk initialized for %s/%s (All 3 Layers)\n", owner, repo)
@@ -231,12 +251,74 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n🚀 Next steps:\n")
 	fmt.Printf("   • Test: crisk check <file>\n")
 	fmt.Printf("   • Browse graph: http://localhost:7475 (Neo4j Browser)\n")
-	fmt.Printf("   • Credentials: neo4j / CHANGE_THIS_PASSWORD_IN_PRODUCTION_123\n")
+	fmt.Printf("   • Credentials: %s / <from .env file>\n", cfg.Neo4j.User)
 
 	return nil
 }
 
 // Helper functions
+
+// createIndexes applies all necessary indexes for optimal query performance
+// Reference: NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md Phase 1
+func createIndexes(ctx context.Context, backend graph.Backend) error {
+	indexes := []struct {
+		name  string
+		query string
+	}{
+		{
+			"file_path_unique",
+			"CREATE CONSTRAINT file_path_unique IF NOT EXISTS FOR (f:File) REQUIRE f.path IS UNIQUE",
+		},
+		{
+			"file_file_path_idx",
+			"CREATE INDEX file_file_path_idx IF NOT EXISTS FOR (f:File) ON (f.file_path)",
+		},
+		{
+			"function_unique_id_unique",
+			"CREATE CONSTRAINT function_unique_id_unique IF NOT EXISTS FOR (f:Function) REQUIRE f.unique_id IS UNIQUE",
+		},
+		{
+			"class_unique_id_unique",
+			"CREATE CONSTRAINT class_unique_id_unique IF NOT EXISTS FOR (c:Class) REQUIRE c.unique_id IS UNIQUE",
+		},
+		{
+			"commit_sha_unique",
+			"CREATE CONSTRAINT commit_sha_unique IF NOT EXISTS FOR (c:Commit) REQUIRE c.sha IS UNIQUE",
+		},
+		{
+			"developer_email_unique",
+			"CREATE CONSTRAINT developer_email_unique IF NOT EXISTS FOR (d:Developer) REQUIRE d.email IS UNIQUE",
+		},
+		{
+			"commit_date_idx",
+			"CREATE INDEX commit_date_idx IF NOT EXISTS FOR (c:Commit) ON (c.author_date)",
+		},
+		{
+			"pr_number_unique",
+			"CREATE CONSTRAINT pr_number_unique IF NOT EXISTS FOR (pr:PullRequest) REQUIRE pr.number IS UNIQUE",
+		},
+		{
+			"incident_id_unique",
+			"CREATE CONSTRAINT incident_id_unique IF NOT EXISTS FOR (i:Incident) REQUIRE i.id IS UNIQUE",
+		},
+		{
+			"issue_number_unique",
+			"CREATE CONSTRAINT issue_number_unique IF NOT EXISTS FOR (i:Issue) REQUIRE i.number IS UNIQUE",
+		},
+		{
+			"incident_severity_idx",
+			"CREATE INDEX incident_severity_idx IF NOT EXISTS FOR (i:Incident) ON (i.severity)",
+		},
+	}
+
+	for _, idx := range indexes {
+		if _, err := backend.Query(ctx, idx.query); err != nil {
+			return fmt.Errorf("failed to create index %s: %w", idx.name, err)
+		}
+	}
+
+	return nil
+}
 
 // parseRepoName splits "owner/repo" into components
 func parseRepoName(repoName string) (owner, repo string, err error) {
@@ -266,7 +348,7 @@ func validateGraph(ctx context.Context, backend graph.Backend, stats *graph.Buil
 	fmt.Printf("  Checking node types:\n")
 	for label, layer := range requiredLabels {
 		query := fmt.Sprintf("MATCH (n:%s) RETURN count(n) as count", label)
-		result, err := backend.Query(query)
+		result, err := backend.Query(ctx, query)
 		if err != nil {
 			return fmt.Errorf("failed to query %s nodes: %w", label, err)
 		}

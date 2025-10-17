@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/graph"
-	"github.com/coderisk/coderisk-go/internal/temporal"
-	"github.com/coderisk/coderisk-go/internal/treesitter"
+	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/temporal"
+	"github.com/rohankatakam/coderisk/internal/treesitter"
 )
 
 // ProcessorConfig holds configuration for repository processing
@@ -315,7 +315,7 @@ func (p *Processor) verifyCoChangedEdges(ctx context.Context) (int, error) {
 	// Query Neo4j directly to count CO_CHANGED edges
 	query := "MATCH ()-[r:CO_CHANGED]->() RETURN count(r) as count"
 
-	result, err := p.graphClient.Query(query)
+	result, err := p.graphClient.Query(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("verification query failed: %w", err)
 	}
@@ -427,7 +427,7 @@ func (p *Processor) buildGraph(ctx context.Context, entities []treesitter.CodeEn
 		// Create nodes
 		for _, entity := range batch {
 			node := entityToGraphNode(entity)
-			if _, err := p.graphClient.CreateNode(node); err != nil {
+			if _, err := p.graphClient.CreateNode(ctx, node); err != nil {
 				slog.Warn("failed to create node",
 					"entity", entity.Name,
 					"type", entity.Type,
@@ -502,7 +502,7 @@ func (p *Processor) createTestRelationships(ctx context.Context, entities []tree
 	// Batch create test edges
 	if len(testEdges) > 0 {
 		slog.Info("creating TESTS edges", "count", len(testEdges))
-		if err := p.graphClient.CreateEdges(testEdges); err != nil {
+		if err := p.graphClient.CreateEdges(ctx, testEdges); err != nil {
 			return fmt.Errorf("failed to create TESTS edges: %w", err)
 		}
 		slog.Info("TESTS relationships created successfully", "count", len(testEdges))
@@ -697,7 +697,7 @@ func (p *Processor) createEdges(ctx context.Context, entities []treesitter.CodeE
 	// Batch create edges
 	if len(edges) > 0 {
 		slog.Info("creating edges", "count", len(edges))
-		if err := p.graphClient.CreateEdges(edges); err != nil {
+		if err := p.graphClient.CreateEdges(ctx, edges); err != nil {
 			return fmt.Errorf("failed to create edges: %w", err)
 		}
 	}

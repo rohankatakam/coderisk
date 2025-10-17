@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/cache"
-	"github.com/coderisk/coderisk-go/internal/database"
-	"github.com/coderisk/coderisk-go/internal/graph"
-	"github.com/coderisk/coderisk-go/internal/metrics"
-	"github.com/coderisk/coderisk-go/internal/models"
-	"github.com/coderisk/coderisk-go/internal/output"
+	"github.com/rohankatakam/coderisk/internal/cache"
+	"github.com/rohankatakam/coderisk/internal/database"
+	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/metrics"
+	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/output"
 )
 
 // HighRiskFunction has high coupling, NO tests, complex logic

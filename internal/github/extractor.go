@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/models"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/coderisk/coderisk-go/internal/git"
+	"github.com/rohankatakam/coderisk/internal/git"
 	"github.com/spf13/cobra"
 )
 

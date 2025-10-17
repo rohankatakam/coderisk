@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/config"
-	"github.com/coderisk/coderisk-go/internal/graph"
-	"github.com/coderisk/coderisk-go/internal/ingestion"
+	"github.com/rohankatakam/coderisk/internal/config"
+	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/ingestion"
 	"github.com/spf13/cobra"
 )
 
@@ -76,7 +76,7 @@ func runParse(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to initialize Neo4j: %w", err)
 		}
-		defer neo4jClient.Close()
+		defer neo4jClient.Close(ctx)
 		graphClient = neo4jClient
 
 	case "neptune":
@@ -133,7 +133,7 @@ func runParse(cmd *cobra.Command, args []string) error {
 
 	// Print next steps
 	fmt.Printf("🎯 Next Steps:\n")
-	fmt.Printf("  1. Verify graph: cypher-shell -u neo4j -p coderisk123 \"MATCH (n) RETURN labels(n), count(n)\"\n")
+	fmt.Printf("  1. Verify graph: cypher-shell -u %s -p <password from .env> \"MATCH (n) RETURN labels(n), count(n)\"\n", cfg.Neo4j.User)
 	fmt.Printf("  2. Query functions: \"MATCH (f:Function) RETURN f.name LIMIT 10\"\n")
 	fmt.Printf("  3. Check imports: \"MATCH (f:File)-[:IMPORTS]->(i:Import) RETURN f.file_path, i.import_path LIMIT 10\"\n")
 	fmt.Printf("\n")
@@ -170,11 +170,20 @@ func normalizeRepoURL(input string) (string, error) {
 
 // initializeNeo4jBackend creates Neo4j graph backend
 func initializeNeo4jBackend(ctx context.Context) (*graph.Neo4jBackend, error) {
-	neo4jURI := config.GetString("NEO4J_URI", "bolt://localhost:7687")
-	neo4jUser := config.GetString("NEO4J_USER", "neo4j")
-	neo4jPassword := config.GetString("NEO4J_PASSWORD", "coderisk123")
+	// Load configuration
+	cfg, err := config.Load("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
 
-	neo4jClient, err := graph.NewNeo4jBackend(ctx, neo4jURI, neo4jUser, neo4jPassword)
+	// Validate configuration
+	mode := config.DetectMode()
+	result := cfg.ValidateWithMode(config.ValidationContextParse, mode)
+	if result.HasErrors() {
+		return nil, fmt.Errorf("configuration validation failed:\n%s", result.Error())
+	}
+
+	neo4jClient, err := graph.NewNeo4jBackend(ctx, cfg.Neo4j.URI, cfg.Neo4j.User, cfg.Neo4j.Password, cfg.Neo4j.Database)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Neo4j client: %w", err)
 	}

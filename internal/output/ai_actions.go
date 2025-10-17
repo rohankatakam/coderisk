@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/coderisk/coderisk-go/internal/metrics"
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/metrics"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // GenerateAIActions creates actionable prompts for AI coding assistants

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/coderisk/coderisk-go/internal/config"
+	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/spf13/cobra"
 )
 

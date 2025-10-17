@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/cache"
-	"github.com/coderisk/coderisk-go/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/cache"
+	"github.com/rohankatakam/coderisk/internal/graph"
 )
 
 // OwnershipChurnResult represents the ownership churn metric result (Tier 2)
@@ -111,7 +111,9 @@ func CalculateOwnershipChurn(ctx context.Context, neo4j *graph.Client, redis *ca
 }
 
 // queryModifiesEdges queries Neo4j for all developers who modified the file
-func queryModifiesEdges(ctx context.Context, neo4j *graph.Client, filePath string, windowDays int) ([]DeveloperCommitCount, error) {
+// Uses lazy loading to handle large result sets efficiently
+// Reference: NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md Phase 3
+func queryModifiesEdges(ctx context.Context, neo4jClient *graph.Client, filePath string, windowDays int) ([]DeveloperCommitCount, error) {
 	// Cypher query to get all MODIFIES edges for the file
 	query := `
 		MATCH (c:Commit)-[:MODIFIES]->(f:File {file_path: $file_path})
@@ -126,20 +128,43 @@ func queryModifiesEdges(ctx context.Context, neo4j *graph.Client, filePath strin
 		"window_days": windowDays,
 	}
 
-	records, err := neo4j.ExecuteQuery(ctx, query, params)
+	// Use lazy loading with medium fetch size (expect 10-100 developers)
+	fetchSize := graph.DefaultFetchSizeConfig().MediumQueryFetchSize
+	iter, err := graph.ExecuteQueryLazy(ctx, neo4jClient.Driver(), query, params, neo4jClient.Database(), fetchSize)
 	if err != nil {
 		return nil, fmt.Errorf("cypher query failed: %w", err)
 	}
+	defer iter.Close(ctx)
 
-	// Parse result
+	// Parse results lazily - only load records as needed
 	var developers []DeveloperCommitCount
-	for _, record := range records {
-		email, _ := record["email"].(string)
-		commitCount, _ := record["commit_count"].(int64)
+	for iter.Next() {
+		record := iter.Record()
+		recordMap := record.AsMap()
+
+		email, ok := recordMap["email"].(string)
+		if !ok {
+			continue // Skip invalid records
+		}
+
+		commitCount, ok := recordMap["commit_count"].(int64)
+		if !ok {
+			continue
+		}
+
 		developers = append(developers, DeveloperCommitCount{
 			Email:       email,
 			CommitCount: int(commitCount),
 		})
+
+		// Limit to top 100 developers to prevent unbounded growth
+		if len(developers) >= 100 {
+			break
+		}
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, fmt.Errorf("iteration error: %w", err)
 	}
 
 	return developers, nil

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/coderisk/coderisk-go/internal/config"
+	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )

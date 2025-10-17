@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/coderisk/coderisk-go/internal/analysis/config"
-	"github.com/coderisk/coderisk-go/internal/cache"
-	"github.com/coderisk/coderisk-go/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/analysis/config"
+	"github.com/rohankatakam/coderisk/internal/cache"
+	"github.com/rohankatakam/coderisk/internal/graph"
 )
 
 // AdaptivePhase1Result extends Phase1Result with adaptive configuration

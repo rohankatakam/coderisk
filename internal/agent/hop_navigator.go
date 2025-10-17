@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/agent/prompts"
+	"github.com/rohankatakam/coderisk/internal/agent/prompts"
 )
 
 // LLMClientInterface defines the interface for LLM clients

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // Common errors

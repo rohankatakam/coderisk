@@ -113,7 +113,7 @@ func TestPrintDomainExamples(t *testing.T) {
 			metadata: RepoMetadata{
 				PrimaryLanguage: "Go",
 				GoMod: []string{
-					"module github.com/coderisk/coderisk-go",
+					"module github.com/rohankatakam/coderisk",
 					"require github.com/spf13/cobra v1.7.0",
 					"require github.com/neo4j/neo4j-go-driver/v5 v5.13.0",
 				},

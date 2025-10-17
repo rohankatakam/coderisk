@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/config"
-	"github.com/coderisk/coderisk-go/internal/git"
-	"github.com/coderisk/coderisk-go/internal/graph"
-	"github.com/coderisk/coderisk-go/internal/ingestion"
+	"github.com/rohankatakam/coderisk/internal/config"
+	"github.com/rohankatakam/coderisk/internal/git"
+	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/ingestion"
 	"github.com/spf13/cobra"
 )
 
@@ -124,21 +124,30 @@ func runInitLocal(cmd *cobra.Command, args []string) error {
 		envLoader := config.NewEnvLoader()
 		envLoader.MustLoad()
 
-		neo4jHost := config.GetString("NEO4J_HOST", "localhost")
-		neo4jPort := config.GetInt("NEO4J_BOLT_PORT", 7688)
-		neo4jURI := fmt.Sprintf("bolt://%s:%d", neo4jHost, neo4jPort)
+		// Load and validate configuration
+		cfg, err := config.Load("")
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+
+		mode := config.DetectMode()
+		result := cfg.ValidateWithMode(config.ValidationContextInit, mode)
+		if result.HasErrors() {
+			return fmt.Errorf("configuration validation failed:\n%s", result.Error())
+		}
 
 		graphBackend, err = graph.NewNeo4jBackend(
 			ctx,
-			neo4jURI,
-			config.MustGetString("NEO4J_USER"),
-			config.MustGetString("NEO4J_PASSWORD"),
+			cfg.Neo4j.URI,
+			cfg.Neo4j.User,
+			cfg.Neo4j.Password,
+			cfg.Neo4j.Database,
 		)
 		if err != nil {
 			return fmt.Errorf("❌ Neo4j connection failed: %w\n"+
 				"   Hint: Start Neo4j with: docker-compose up -d", err)
 		}
-		defer graphBackend.Close()
+		defer graphBackend.Close(ctx)
 
 		reportProgress("Connected to Neo4j", "done")
 	}

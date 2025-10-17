@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 func TestQuietFormatter(t *testing.T) {

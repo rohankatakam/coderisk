@@ -1,7 +1,7 @@
 package ai
 
 import (
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // ConfidenceCalculator determines auto-fix confidence scores

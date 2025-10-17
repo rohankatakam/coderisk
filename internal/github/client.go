@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/models"
 	"github.com/google/go-github/v57/github"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"

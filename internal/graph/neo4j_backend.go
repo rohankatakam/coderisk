@@ -10,13 +10,20 @@ import (
 
 // Neo4jBackend implements Backend interface for Neo4j with Cypher queries
 // Reference: dev_docs/03-implementation/integration_guides/layers_2_3_graph_construction.md
+// 12-factor: Factor 12 - Stateless design (context passed per-request)
 type Neo4jBackend struct {
-	driver neo4j.DriverWithContext
-	ctx    context.Context
+	driver   neo4j.DriverWithContext
+	database string // Database name for all queries
+}
+
+// QueryWithParams represents a Cypher query with its parameters
+type QueryWithParams struct {
+	Query  string
+	Params map[string]any
 }
 
 // NewNeo4jBackend creates a Neo4j backend instance
-func NewNeo4jBackend(ctx context.Context, uri, username, password string) (*Neo4jBackend, error) {
+func NewNeo4jBackend(ctx context.Context, uri, username, password, database string) (*Neo4jBackend, error) {
 	driver, err := neo4j.NewDriverWithContext(uri, neo4j.BasicAuth(username, password, ""))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Neo4j driver: %w", err)
@@ -29,25 +36,39 @@ func NewNeo4jBackend(ctx context.Context, uri, username, password string) (*Neo4
 	}
 
 	return &Neo4jBackend{
-		driver: driver,
-		ctx:    ctx,
+		driver:   driver,
+		database: database,
 	}, nil
 }
 
 // CreateNode creates a single node using idempotent MERGE
-func (n *Neo4jBackend) CreateNode(node GraphNode) (string, error) {
-	cypher := generateCypherNode(node)
-	session := n.driver.NewSession(n.ctx, neo4j.SessionConfig{})
-	defer session.Close(n.ctx)
+// Security: Uses parameterized queries to prevent Cypher injection
+// Routing: Write operation - routes to cluster leader in cluster deployments
+// Reference: NEO4J_MODERNIZATION_GUIDE.md §Phase 3 & 4
+func (n *Neo4jBackend) CreateNode(ctx context.Context, node GraphNode) (string, error) {
+	// Build parameterized query using CypherBuilder
+	builder := NewCypherBuilder()
+	uniqueKey := getUniqueKey(node.Label)
+	uniqueValue := node.Properties[uniqueKey]
 
-	result, err := session.Run(n.ctx, cypher, nil)
+	cypher, err := builder.BuildMergeNode(node.Label, uniqueKey, uniqueValue, node.Properties)
+	if err != nil {
+		return "", fmt.Errorf("failed to build node query: %w", err)
+	}
+
+	// Use modern ExecuteQuery API (Neo4j v5.8+)
+	result, err := neo4j.ExecuteQuery(ctx, n.driver, cypher,
+		builder.Params(),
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(n.database))
+
 	if err != nil {
 		return "", fmt.Errorf("failed to create node: %w", err)
 	}
 
-	if result.Next(n.ctx) {
-		record := result.Record()
-		if id, ok := record.Get("id"); ok {
+	// Extract node ID from result
+	if len(result.Records) > 0 {
+		if id, ok := result.Records[0].Get("id"); ok {
 			return fmt.Sprintf("%v", id), nil
 		}
 	}
@@ -55,24 +76,75 @@ func (n *Neo4jBackend) CreateNode(node GraphNode) (string, error) {
 	return "", nil
 }
 
-// CreateNodes creates multiple nodes in batch
-func (n *Neo4jBackend) CreateNodes(nodes []GraphNode) ([]string, error) {
+// CreateNodes creates multiple nodes in batch using optimized UNWIND pattern
+// Security: Uses parameterized queries to prevent Cypher injection
+// Reference: NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md Phase 2
+func (n *Neo4jBackend) CreateNodes(ctx context.Context, nodes []GraphNode) ([]string, error) {
 	if len(nodes) == 0 {
 		return []string{}, nil
 	}
 
-	// Generate all Cypher commands
-	commands := make([]string, len(nodes))
-	for i, node := range nodes {
-		commands[i] = generateCypherNode(node)
+	// Use optimized batch creator with UNWIND pattern
+	batchCreator := NewBatchNodeCreator(n.driver, n.database, DefaultBatchConfig())
+
+	// Group nodes by label for efficient batch processing
+	nodesByLabel := make(map[string][]GraphNode)
+	for _, node := range nodes {
+		nodesByLabel[node.Label] = append(nodesByLabel[node.Label], node)
 	}
 
-	// Execute in single transaction
-	if err := n.ExecuteBatch(commands); err != nil {
-		return nil, err
+	// Process each node type with appropriate batch handler
+	for label, labelNodes := range nodesByLabel {
+		var err error
+		switch label {
+		case "File":
+			err = batchCreator.CreateFileNodes(ctx, labelNodes)
+		case "Function":
+			err = batchCreator.CreateFunctionNodes(ctx, labelNodes)
+		case "Class":
+			err = batchCreator.CreateClassNodes(ctx, labelNodes)
+		case "Commit":
+			err = batchCreator.CreateCommitNodes(ctx, labelNodes)
+		case "Developer":
+			err = batchCreator.CreateDeveloperNodes(ctx, labelNodes)
+		case "Issue":
+			err = batchCreator.CreateIssueNodes(ctx, labelNodes)
+		case "PullRequest":
+			// PullRequests use same pattern as Issues
+			err = batchCreator.CreateIssueNodes(ctx, labelNodes)
+		case "Incident":
+			// Incidents use same pattern as Issues
+			err = batchCreator.CreateIssueNodes(ctx, labelNodes)
+		default:
+			// Fallback to original implementation for unknown types
+			// Build parameterized queries for each node
+			queries := make([]QueryWithParams, len(labelNodes))
+			for i, node := range labelNodes {
+				builder := NewCypherBuilder()
+				uniqueKey := getUniqueKey(node.Label)
+				uniqueValue := node.Properties[uniqueKey]
+
+				cypher, buildErr := builder.BuildMergeNode(node.Label, uniqueKey, uniqueValue, node.Properties)
+				if buildErr != nil {
+					return nil, fmt.Errorf("failed to build node query for node %d: %w", i, buildErr)
+				}
+
+				queries[i] = QueryWithParams{
+					Query:  cypher,
+					Params: builder.Params(),
+				}
+			}
+
+			// Execute in single transaction
+			err = n.ExecuteBatchWithParams(ctx, queries)
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to create %s nodes: %w", label, err)
+		}
 	}
 
-	// Return dummy IDs (Neo4j doesn't return IDs in batch)
+	// Return dummy IDs (Neo4j doesn't return IDs in UNWIND batch operations)
 	ids := make([]string, len(nodes))
 	for i := range nodes {
 		ids[i] = fmt.Sprintf("%d", i)
@@ -82,24 +154,42 @@ func (n *Neo4jBackend) CreateNodes(nodes []GraphNode) ([]string, error) {
 }
 
 // CreateEdge creates a single edge using idempotent MERGE
-func (n *Neo4jBackend) CreateEdge(edge GraphEdge) error {
-	cypher := generateCypherEdge(edge)
-	session := n.driver.NewSession(n.ctx, neo4j.SessionConfig{})
-	defer session.Close(n.ctx)
+// Security: Uses parameterized queries to prevent Cypher injection
+// Routing: Write operation - routes to cluster leader in cluster deployments
+// Reference: NEO4J_MODERNIZATION_GUIDE.md §Phase 3 & 4
+func (n *Neo4jBackend) CreateEdge(ctx context.Context, edge GraphEdge) error {
+	// Parse node IDs
+	fromLabel, fromID := parseNodeID(edge.From)
+	toLabel, toID := parseNodeID(edge.To)
 
-	result, err := session.Run(n.ctx, cypher, nil)
+	// Build parameterized query
+	builder := NewCypherBuilder()
+	fromKey := getUniqueKey(fromLabel)
+	toKey := getUniqueKey(toLabel)
+
+	cypher, err := builder.BuildMergeEdge(
+		fromLabel, fromKey, fromID,
+		toLabel, toKey, toID,
+		edge.Label,
+		edge.Properties,
+	)
 	if err != nil {
-		// Enhanced error with diagnostic info
-		fromLabel, fromID := parseNodeID(edge.From)
-		toLabel, toID := parseNodeID(edge.To)
+		return fmt.Errorf("failed to build edge query: %w", err)
+	}
+
+	// Use modern ExecuteQuery API
+	result, err := neo4j.ExecuteQuery(ctx, n.driver, cypher,
+		builder.Params(),
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(n.database))
+
+	if err != nil {
 		return fmt.Errorf("failed to create edge %s: from=%s:%s to=%s:%s: %w",
 			edge.Label, fromLabel, fromID, toLabel, toID, err)
 	}
 
 	// Check if any records were returned (nodes found and edge created)
-	if !result.Next(n.ctx) {
-		fromLabel, fromID := parseNodeID(edge.From)
-		toLabel, toID := parseNodeID(edge.To)
+	if len(result.Records) == 0 {
 		return fmt.Errorf("edge creation returned no results (nodes may not exist): %s: from=%s:%s to=%s:%s",
 			edge.Label, fromLabel, fromID, toLabel, toID)
 	}
@@ -107,8 +197,10 @@ func (n *Neo4jBackend) CreateEdge(edge GraphEdge) error {
 	return nil
 }
 
-// CreateEdges creates multiple edges in batch
-func (n *Neo4jBackend) CreateEdges(edges []GraphEdge) error {
+// CreateEdges creates multiple edges in batch using optimized UNWIND pattern
+// Security: Uses parameterized queries to prevent Cypher injection
+// Reference: NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md Phase 2
+func (n *Neo4jBackend) CreateEdges(ctx context.Context, edges []GraphEdge) error {
 	if len(edges) == 0 {
 		return nil
 	}
@@ -117,34 +209,43 @@ func (n *Neo4jBackend) CreateEdges(edges []GraphEdge) error {
 	if len(edges) > 0 {
 		fromLabel, fromID := parseNodeID(edges[0].From)
 		toLabel, toID := parseNodeID(edges[0].To)
-		fmt.Printf("DEBUG: Creating %d edges. First edge: %s (%s:%s) -> %s (%s:%s)\n",
+		fmt.Printf("DEBUG: Creating %d edges using UNWIND batch pattern. First edge: %s (%s:%s) -> %s (%s:%s)\n",
 			len(edges), edges[0].Label, fromLabel, fromID, edges[0].Label, toLabel, toID)
 	}
 
-	// Generate all Cypher commands
-	commands := make([]string, len(edges))
-	for i, edge := range edges {
-		commands[i] = generateCypherEdge(edge)
-	}
+	// Use optimized batch creator with UNWIND pattern
+	batchCreator := NewBatchNodeCreator(n.driver, n.database, DefaultBatchConfig())
 
-	// Log first Cypher query for debugging
-	if len(commands) > 0 {
-		fmt.Printf("DEBUG: First Cypher query: %s\n", commands[0][:200])
-	}
-
-	// Execute in single transaction
-	return n.ExecuteBatch(commands)
+	// Create all edges in batches grouped by type
+	return batchCreator.CreateEdgesBatch(ctx, edges)
 }
 
-// ExecuteBatch executes multiple commands in a single transaction
-func (n *Neo4jBackend) ExecuteBatch(commands []string) error {
-	session := n.driver.NewSession(n.ctx, neo4j.SessionConfig{})
-	defer session.Close(n.ctx)
+// ExecuteBatch executes multiple commands in a single transaction (deprecated)
+// Use ExecuteBatchWithParams for parameterized queries
+func (n *Neo4jBackend) ExecuteBatch(ctx context.Context, commands []string) error {
+	// Convert to QueryWithParams format
+	queries := make([]QueryWithParams, len(commands))
+	for i, cmd := range commands {
+		queries[i] = QueryWithParams{
+			Query:  cmd,
+			Params: nil,
+		}
+	}
+	return n.ExecuteBatchWithParams(ctx, queries)
+}
 
-	_, err := session.ExecuteWrite(n.ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		for _, cmd := range commands {
-			if _, err := tx.Run(n.ctx, cmd, nil); err != nil {
-				return nil, fmt.Errorf("batch command failed: %w", err)
+// ExecuteBatchWithParams executes multiple parameterized queries in a single transaction
+// Security: Uses parameterized queries to prevent Cypher injection
+func (n *Neo4jBackend) ExecuteBatchWithParams(ctx context.Context, queries []QueryWithParams) error {
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{
+		DatabaseName: n.database,
+	})
+	defer session.Close(ctx)
+
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		for i, q := range queries {
+			if _, err := tx.Run(ctx, q.Query, q.Params); err != nil {
+				return nil, fmt.Errorf("batch command %d failed: %w", i, err)
 			}
 		}
 		return nil, nil
@@ -154,18 +255,21 @@ func (n *Neo4jBackend) ExecuteBatch(commands []string) error {
 }
 
 // Query executes a Cypher query and returns results
-func (n *Neo4jBackend) Query(query string) (interface{}, error) {
-	session := n.driver.NewSession(n.ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(n.ctx)
+// Uses modern ExecuteQuery API for better performance
+// Routing: Read operation - routes to read replicas in cluster deployments
+func (n *Neo4jBackend) Query(ctx context.Context, query string) (interface{}, error) {
+	result, err := neo4j.ExecuteQuery(ctx, n.driver, query,
+		nil, // No parameters for generic queries
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(n.database),
+		neo4j.ExecuteQueryWithReadersRouting()) // Read optimization
 
-	result, err := session.Run(n.ctx, query, nil)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
 
-	if result.Next(n.ctx) {
-		record := result.Record()
-		if count, ok := record.Get("count"); ok {
+	if len(result.Records) > 0 {
+		if count, ok := result.Records[0].Get("count"); ok {
 			return count, nil
 		}
 	}
@@ -174,90 +278,16 @@ func (n *Neo4jBackend) Query(query string) (interface{}, error) {
 }
 
 // Close closes the Neo4j driver connection
-func (n *Neo4jBackend) Close() error {
-	return n.driver.Close(n.ctx)
+func (n *Neo4jBackend) Close(ctx context.Context) error {
+	return n.driver.Close(ctx)
 }
 
 // ===================================
-// Cypher Query Generation
+// Helper Functions
 // ===================================
-
-// generateCypherNode creates Cypher MERGE query for idempotent node creation
-func generateCypherNode(node GraphNode) string {
-	uniqueKey := getUniqueKey(node.Label)
-	uniqueValue := node.Properties[uniqueKey]
-
-	// Build property SET clauses
-	propClauses := []string{}
-	for key, value := range node.Properties {
-		propClauses = append(propClauses, fmt.Sprintf("n.%s = %s", key, formatCypherValue(value)))
-	}
-
-	return fmt.Sprintf(
-		"MERGE (n:%s {%s: %s}) SET %s RETURN id(n) as id",
-		node.Label,
-		uniqueKey,
-		formatCypherValue(uniqueValue),
-		strings.Join(propClauses, ", "),
-	)
-}
-
-// generateCypherEdge creates Cypher MERGE query for idempotent edge creation
-// Returns both the query and a verification query to check if nodes exist
-func generateCypherEdge(edge GraphEdge) string {
-	fromLabel, fromID := parseNodeID(edge.From)
-	toLabel, toID := parseNodeID(edge.To)
-
-	fromKey := getUniqueKey(fromLabel)
-	toKey := getUniqueKey(toLabel)
-
-	// Build property SET clauses
-	propClauses := []string{}
-	for key, value := range edge.Properties {
-		propClauses = append(propClauses, fmt.Sprintf("r.%s = %s", key, formatCypherValue(value)))
-	}
-
-	propsStr := ""
-	if len(propClauses) > 0 {
-		propsStr = "SET " + strings.Join(propClauses, ", ")
-	}
-
-	// Use OPTIONAL MATCH to detect missing nodes and return diagnostics
-	// This helps debug silent edge creation failures
-	return fmt.Sprintf(
-		"MATCH (from:%s {%s: %s}) MATCH (to:%s {%s: %s}) MERGE (from)-[r:%s]->(to) %s RETURN from, to",
-		fromLabel, fromKey, formatCypherValue(fromID),
-		toLabel, toKey, formatCypherValue(toID),
-		edge.Label,
-		propsStr,
-	)
-}
-
-// formatCypherValue formats a value for Cypher query
-func formatCypherValue(value interface{}) string {
-	switch v := value.(type) {
-	case string:
-		// Escape quotes
-		escaped := strings.ReplaceAll(v, "'", "\\'")
-		escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
-		return fmt.Sprintf("'%s'", escaped)
-	case int, int64:
-		return fmt.Sprintf("%d", v)
-	case float64:
-		return fmt.Sprintf("%f", v)
-	case bool:
-		return fmt.Sprintf("%t", v)
-	case []string:
-		quoted := make([]string, len(v))
-		for i, s := range v {
-			escaped := strings.ReplaceAll(s, "'", "\\'")
-			quoted[i] = fmt.Sprintf("'%s'", escaped)
-		}
-		return "[" + strings.Join(quoted, ", ") + "]"
-	default:
-		return "''"
-	}
-}
+// Note: Old generateCypherNode, generateCypherEdge, and formatCypherValue functions
+// have been removed as they used vulnerable string concatenation.
+// All query generation now uses CypherBuilder with parameterized queries.
 
 // parseNodeID extracts label and ID from node reference (e.g., "commit:abc123" -> "Commit", "abc123")
 func parseNodeID(nodeID string) (label, id string) {

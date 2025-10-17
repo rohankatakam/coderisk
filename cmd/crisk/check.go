@@ -6,22 +6,22 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/agent"
-	"github.com/coderisk/coderisk-go/internal/ai"
-	"github.com/coderisk/coderisk-go/internal/analysis/config"
-	"github.com/coderisk/coderisk-go/internal/analysis/phase0"
-	"github.com/coderisk/coderisk-go/internal/cache"
-	"github.com/coderisk/coderisk-go/internal/database"
-	"github.com/coderisk/coderisk-go/internal/git"
-	"github.com/coderisk/coderisk-go/internal/graph"
-	"github.com/coderisk/coderisk-go/internal/incidents"
-	"github.com/coderisk/coderisk-go/internal/metrics"
-	"github.com/coderisk/coderisk-go/internal/models"
-	"github.com/coderisk/coderisk-go/internal/output"
+	"github.com/rohankatakam/coderisk/internal/agent"
+	"github.com/rohankatakam/coderisk/internal/ai"
+	"github.com/rohankatakam/coderisk/internal/analysis/config"
+	"github.com/rohankatakam/coderisk/internal/analysis/phase0"
+	"github.com/rohankatakam/coderisk/internal/cache"
+	appconfig "github.com/rohankatakam/coderisk/internal/config"
+	"github.com/rohankatakam/coderisk/internal/database"
+	"github.com/rohankatakam/coderisk/internal/git"
+	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/incidents"
+	"github.com/rohankatakam/coderisk/internal/metrics"
+	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/output"
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver for sqlx
 	"github.com/jmoiron/sqlx"
 	"github.com/spf13/cobra"
@@ -157,7 +157,14 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Assess each file
-	repoID := "local" // TODO: Get from git repo
+	repoID, err := git.GetRepoID()
+	if err != nil {
+		// Fallback to "local" if not in a git repo
+		repoID = "local"
+		if !quiet {
+			slog.Warn("could not detect repository ID, using 'local'", "error", err)
+		}
+	}
 	hasHighRisk := false
 
 	// Select adaptive configuration based on repository characteristics
@@ -359,58 +366,129 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// initNeo4j creates Neo4j client from environment
+// initNeo4j creates Neo4j client from config
 func initNeo4j(ctx context.Context) (*graph.Client, error) {
-	return graph.NewClient(
-		ctx,
-		getEnvOrDefault("NEO4J_URI", "bolt://localhost:7688"),
-		getEnvOrDefault("NEO4J_USER", "neo4j"),
-		getEnvOrDefault("NEO4J_PASSWORD", "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123"),
-	)
-}
+	slog.Debug("initializing Neo4j connection")
 
-// initRedis creates Redis client from environment
-func initRedis(ctx context.Context) (*cache.Client, error) {
-	port, _ := strconv.Atoi(getEnvOrDefault("REDIS_PORT_EXTERNAL", "6380"))
-	return cache.NewClient(
-		ctx,
-		getEnvOrDefault("REDIS_HOST", "localhost"),
-		port,
-		getEnvOrDefault("REDIS_PASSWORD", ""),
-	)
-}
-
-// initPostgres creates PostgreSQL client from environment
-func initPostgres(ctx context.Context) (*database.Client, error) {
-	port, _ := strconv.Atoi(getEnvOrDefault("POSTGRES_PORT_EXTERNAL", "5433"))
-	return database.NewClient(
-		ctx,
-		getEnvOrDefault("POSTGRES_HOST", "localhost"),
-		port,
-		getEnvOrDefault("POSTGRES_DB", "coderisk"),
-		getEnvOrDefault("POSTGRES_USER", "coderisk"),
-		getEnvOrDefault("POSTGRES_PASSWORD", "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123"),
-	)
-}
-
-// getEnvOrDefault retrieves environment variable with fallback
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+	cfg, err := appconfig.Load("")
+	if err != nil {
+		slog.Error("failed to load config for Neo4j", "error", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
-	return defaultValue
+
+	// Validate Neo4j configuration
+	mode := appconfig.DetectMode()
+	slog.Debug("detected deployment mode", "mode", mode)
+
+	result := cfg.ValidateWithMode(appconfig.ValidationContextCheck, mode)
+	if result.HasErrors() {
+		slog.Error("Neo4j configuration validation failed", "errors", result.Error())
+		return nil, fmt.Errorf("configuration validation failed:\n%s", result.Error())
+	}
+
+	slog.Info("connecting to Neo4j", "uri", cfg.Neo4j.URI, "database", cfg.Neo4j.Database)
+
+	client, err := graph.NewClient(
+		ctx,
+		cfg.Neo4j.URI,
+		cfg.Neo4j.User,
+		cfg.Neo4j.Password,
+	)
+	if err != nil {
+		slog.Error("failed to connect to Neo4j", "error", err, "uri", cfg.Neo4j.URI)
+		return nil, err
+	}
+
+	slog.Info("successfully connected to Neo4j")
+	return client, nil
+}
+
+// initRedis creates Redis client from config
+func initRedis(ctx context.Context) (*cache.Client, error) {
+	slog.Debug("initializing Redis connection")
+
+	cfg, err := appconfig.Load("")
+	if err != nil {
+		slog.Error("failed to load config for Redis", "error", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Validate Redis configuration
+	if cfg.Cache.RedisHost == "" {
+		slog.Error("Redis configuration missing", "field", "REDIS_HOST")
+		return nil, fmt.Errorf("REDIS_HOST is required in .env or environment variable")
+	}
+
+	if cfg.Cache.RedisPort == 0 {
+		slog.Error("Redis configuration missing", "field", "REDIS_PORT_EXTERNAL")
+		return nil, fmt.Errorf("REDIS_PORT_EXTERNAL is required in .env or environment variable")
+	}
+
+	slog.Info("connecting to Redis", "host", cfg.Cache.RedisHost, "port", cfg.Cache.RedisPort)
+
+	client, err := cache.NewClient(ctx, cfg.Cache.RedisHost, cfg.Cache.RedisPort, cfg.Cache.RedisPassword)
+	if err != nil {
+		slog.Error("failed to connect to Redis", "error", err, "host", cfg.Cache.RedisHost, "port", cfg.Cache.RedisPort)
+		return nil, err
+	}
+
+	slog.Info("successfully connected to Redis")
+	return client, nil
+}
+
+// initPostgres creates PostgreSQL client from config
+func initPostgres(ctx context.Context) (*database.Client, error) {
+	slog.Debug("initializing PostgreSQL connection")
+
+	cfg, err := appconfig.Load("")
+	if err != nil {
+		slog.Error("failed to load config for PostgreSQL", "error", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Validate PostgreSQL configuration
+	mode := appconfig.DetectMode()
+	slog.Debug("detected deployment mode", "mode", mode)
+
+	result := cfg.ValidateWithMode(appconfig.ValidationContextCheck, mode)
+	if result.HasErrors() {
+		slog.Error("PostgreSQL configuration validation failed", "errors", result.Error())
+		return nil, fmt.Errorf("configuration validation failed:\n%s", result.Error())
+	}
+
+	slog.Info("connecting to PostgreSQL", "host", cfg.Storage.PostgresHost, "port", cfg.Storage.PostgresPort, "database", cfg.Storage.PostgresDB)
+
+	// Use individual connection details from config
+	// Config loading handles defaults and environment variable overrides
+	client, err := database.NewClient(
+		ctx,
+		cfg.Storage.PostgresHost,
+		cfg.Storage.PostgresPort,
+		cfg.Storage.PostgresDB,
+		cfg.Storage.PostgresUser,
+		cfg.Storage.PostgresPassword,
+	)
+	if err != nil {
+		slog.Error("failed to connect to PostgreSQL", "error", err, "host", cfg.Storage.PostgresHost, "port", cfg.Storage.PostgresPort)
+		return nil, err
+	}
+
+	slog.Info("successfully connected to PostgreSQL")
+	return client, nil
 }
 
 // initPostgresSQLX creates a sqlx Postgres connection for incidents database
 func initPostgresSQLX() (*sqlx.DB, error) {
-	port, _ := strconv.Atoi(getEnvOrDefault("POSTGRES_PORT_EXTERNAL", "5433"))
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-		getEnvOrDefault("POSTGRES_USER", "coderisk"),
-		getEnvOrDefault("POSTGRES_PASSWORD", "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123"),
-		getEnvOrDefault("POSTGRES_HOST", "localhost"),
-		port,
-		getEnvOrDefault("POSTGRES_DB", "coderisk"),
-	)
+	cfg, err := appconfig.Load("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Use DSN from config
+	dsn := cfg.Storage.PostgresDSN
+	if dsn == "" {
+		return nil, fmt.Errorf("POSTGRES_DSN is required in .env or environment variable")
+	}
 
 	return sqlx.Connect("pgx", dsn)
 }

@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/coderisk/coderisk-go/internal/cache"
-	"github.com/coderisk/coderisk-go/internal/database"
-	"github.com/coderisk/coderisk-go/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/cache"
+	"github.com/rohankatakam/coderisk/internal/database"
+	"github.com/rohankatakam/coderisk/internal/graph"
 )
 
 // Registry orchestrates all metric calculations for Phase 1 baseline assessment

@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/coderisk/coderisk-go/internal/config"
+	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/sashabaranov/go-openai"
 )
 

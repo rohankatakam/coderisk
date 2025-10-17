@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/coderisk/coderisk-go/internal/models"
+	"github.com/rohankatakam/coderisk/internal/models"
 )
 
 // QuietFormatter outputs one-line summary (for pre-commit hooks)
