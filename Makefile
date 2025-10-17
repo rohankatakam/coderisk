@@ -19,8 +19,8 @@ help:
 	@echo ''
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/  /'
 
-## dev: Build + start services (full development setup)
-dev: clean build start
+## dev: Build + start services + install (full development setup)
+dev: clean build start install
 	@echo ""
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "✅ Development environment ready!"
@@ -30,10 +30,10 @@ dev: clean build start
 	@echo "   cd /tmp"
 	@echo "   git clone https://github.com/hashicorp/terraform-exec"
 	@echo "   cd terraform-exec"
-	@echo "   $(shell pwd)/bin/crisk init"
+	@echo "   crisk init"
 	@echo ""
-	@echo "💡 Or use directly:"
-	@echo "   ./bin/crisk --version"
+	@echo "💡 Check version:"
+	@echo "   crisk --version"
 	@echo ""
 
 ## build: Build CLI binary
@@ -51,9 +51,9 @@ install: build
 	@sudo chmod +x /usr/local/bin/$(BINARY_NAME)
 	@echo "✅ Installed - now run 'crisk' from anywhere"
 
-## rebuild: Quick rebuild (fast iteration)
-rebuild: build
-	@echo "✅ Rebuild complete - run ./bin/crisk"
+## rebuild: Quick rebuild + install (fast iteration)
+rebuild: build install
+	@echo "✅ Rebuild complete - crisk updated globally"
 
 ## start: Start Docker services
 start:
