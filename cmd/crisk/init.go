@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -30,9 +33,18 @@ This is the PRODUCTION command that enables full risk analysis:
   • Layer 2 (Temporal): GitHub commit history, co-changes, ownership
   • Layer 3 (Incidents): GitHub issues, PRs, incident tracking
 
+Usage:
+  # Inside a cloned repository (auto-detects git remote)
+  cd /path/to/my-repo
+  crisk init
+
+  # Or specify repository explicitly
+  crisk init owner/repo
+
 Examples:
-  crisk init omnara-ai/omnara
-  crisk init omnara-ai/omnara --backend neo4j
+  crisk init                        # Use current directory
+  crisk init omnara-ai/omnara       # Specify repository
+  crisk init --backend neo4j        # Use current dir with Neo4j backend
 
 Requirements:
   • OpenAI API key (for LLM-guided analysis)
@@ -41,15 +53,58 @@ Requirements:
 
 Configuration:
   Run 'crisk configure' to set up API keys with OS keychain.
-  Alternatively, use .env file (see .env.example).
-
-The repository must be specified as owner/repo format.`,
-	Args: cobra.ExactArgs(1),
+  Alternatively, use .env file (see .env.example).`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runInit,
 }
 
 func init() {
 	initCmd.Flags().StringVarP(&backendType, "backend", "b", "neo4j", "Graph backend: neo4j (local) or neptune (cloud)")
+}
+
+// detectCurrentRepo detects the git repository in the current directory
+func detectCurrentRepo() (owner, repo, repoPath string, err error) {
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Find git root directory
+	gitRoot := cwd
+	for {
+		if _, err := os.Stat(filepath.Join(gitRoot, ".git")); err == nil {
+			break
+		}
+		parent := filepath.Dir(gitRoot)
+		if parent == gitRoot {
+			return "", "", "", fmt.Errorf("not a git repository\n\nRun this command inside a cloned git repository, or specify:\n  crisk init owner/repo")
+		}
+		gitRoot = parent
+	}
+
+	// Get git remote URL
+	cmd := exec.Command("git", "-C", gitRoot, "remote", "get-url", "origin")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to get git remote: %w\n\nMake sure the repository has an 'origin' remote set.", err)
+	}
+
+	remoteURL := strings.TrimSpace(string(output))
+
+	// Parse owner/repo from remote URL
+	// Supports: https://github.com/owner/repo.git or git@github.com:owner/repo.git
+	re := regexp.MustCompile(`github\.com[:/]([^/]+)/(.+?)(?:\.git)?$`)
+	matches := re.FindStringSubmatch(remoteURL)
+	if matches == nil || len(matches) < 3 {
+		return "", "", "", fmt.Errorf("could not parse GitHub owner/repo from remote URL: %s\n\nRemote URL must be a GitHub repository.", remoteURL)
+	}
+
+	owner = matches[1]
+	repo = matches[2]
+	repoPath = gitRoot
+
+	return owner, repo, repoPath, nil
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -127,14 +182,31 @@ func runInit(cmd *cobra.Command, args []string) error {
 	os.Setenv("GITHUB_TOKEN", githubToken)
 	os.Setenv("OPENAI_API_KEY", openaiAPIKey)
 
-	// Parse repository name
-	repoName := args[0]
-	owner, repo, err := parseRepoName(repoName)
-	if err != nil {
-		return fmt.Errorf("invalid repository name: %w", err)
+	// Determine repository: from argument or detect current directory
+	var owner, repo, repoPath string
+	var err error
+
+	if len(args) == 0 {
+		// No argument provided - detect current repository
+		fmt.Println("📁 Detecting repository from current directory...")
+		owner, repo, repoPath, err = detectCurrentRepo()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("  ✓ Detected: %s/%s\n", owner, repo)
+		fmt.Printf("  ✓ Path: %s\n", repoPath)
+	} else {
+		// Argument provided - parse owner/repo format
+		repoName := args[0]
+		owner, repo, err = parseRepoName(repoName)
+		if err != nil {
+			return fmt.Errorf("invalid repository name: %w", err)
+		}
+		// Will clone this repository later
+		repoPath = ""
 	}
 
-	fmt.Printf("🚀 Initializing CodeRisk for %s/%s...\n", owner, repo)
+	fmt.Printf("\n🚀 Initializing CodeRisk for %s/%s...\n", owner, repo)
 	fmt.Printf("   Backend: %s\n", backendType)
 	fmt.Printf("   Mode: %s\n", mode.Description())
 
@@ -188,17 +260,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Connected to PostgreSQL\n")
 	fmt.Printf("  ✓ Connected to %s\n", backendType)
 
-	// Stage 0: Clone repository with FULL history (needed for Layer 2 temporal analysis)
-	fmt.Printf("\n[0/4] Cloning repository with full git history...\n")
+	// Stage 0: Clone repository or use existing directory
 	cloneStart := time.Now()
-
-	repoURL := fmt.Sprintf("https://github.com/%s/%s", owner, repo)
-	repoPath, err := ingestion.CloneRepositoryFull(ctx, repoURL)
-	if err != nil {
-		return fmt.Errorf("clone failed: %w", err)
+	if repoPath == "" {
+		// Need to clone the repository
+		fmt.Printf("\n[0/4] Cloning repository with full git history...\n")
+		repoURL := fmt.Sprintf("https://github.com/%s/%s", owner, repo)
+		repoPath, err = ingestion.CloneRepositoryFull(ctx, repoURL)
+		if err != nil {
+			return fmt.Errorf("clone failed: %w", err)
+		}
+		cloneDuration := time.Since(cloneStart)
+		fmt.Printf("  ✓ Repository cloned to %s (took %v)\n", repoPath, cloneDuration)
+	} else {
+		// Using existing cloned repository
+		fmt.Printf("\n[0/4] Using existing repository...\n")
+		fmt.Printf("  ✓ Using repository at %s (skipped cloning)\n", repoPath)
 	}
-	cloneDuration := time.Since(cloneStart)
-	fmt.Printf("  ✓ Repository cloned to %s (took %v)\n", repoPath, cloneDuration)
 
 	// Parse with tree-sitter (Layer 1: Structure)
 	fmt.Printf("\n[0.5/4] Parsing code structure (Layer 1)...\n")

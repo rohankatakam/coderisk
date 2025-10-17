@@ -58,15 +58,21 @@ make test
 ### Testing Graph Construction
 
 ```bash
-# crisk init takes owner/repo and clones it for you
-cd /Users/rohankatakam/Documents/brain/coderisk
-./bin/crisk init hashicorp/terraform-exec
+# Clone a test repository
+cd /tmp
+git clone https://github.com/hashicorp/terraform-exec
+cd terraform-exec
 
-# Repository cloned to: ~/.coderisk/repos/<hash>/
-# Graph built in: Neo4j (localhost:7475)
+# Run crisk init (auto-detects git remote)
+/Users/rohankatakam/Documents/brain/coderisk/bin/crisk init
 
-# Verify in Neo4j browser
+# Graph built in Neo4j
 open http://localhost:7475
+```
+
+**Alternative:** Specify repository explicitly (clones it for you):
+```bash
+./bin/crisk init hashicorp/terraform-exec
 ```
 
 ### Available Commands
