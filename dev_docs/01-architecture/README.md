@@ -1,6 +1,6 @@
 # System Architecture Documentation
 
-**Purpose:** Core system design, technical architecture, design decisions
+**Purpose:** Core system design, technical architecture, design decisions for CodeRisk MVP
 
 > **📘 For AI agents:** Before creating/updating architecture docs, read [DOCUMENTATION_WORKFLOW.md](../DOCUMENTATION_WORKFLOW.md) to determine if this is the right location and which document to update.
 
@@ -9,68 +9,92 @@
 ## What Goes Here
 
 **System Design:**
-- High-level architecture diagrams
-- Component interactions
-- Data flows
+- High-level architecture overview
+- Component interactions and data flows
 - Technology stack choices
+- Local-first deployment strategy
 
 **Technical Specifications:**
-- Graph database schema and ontology
-- Agent investigation algorithms
-- API contracts
+- Graph database schema (Neo4j)
+- LLM-guided investigation algorithms
+- Metric calculation and validation
 - Integration patterns
-
-**Infrastructure:**
-- Cloud deployment architecture
-- Scalability strategies
-- Security design
-- Monitoring and observability
 
 **Design Decisions:**
 - Architecture Decision Records (ADRs)
 - Trade-off analyses
 - Technology evaluations
+- MVP scope decisions
 
 ---
 
-## Current Documents
+## Current Documents (MVP Focus)
 
 ### Core Architecture
-- **[system_overview_layman.md](system_overview_layman.md)** - Accessible explanation of CodeRisk architecture and agentic search for non-technical stakeholders
-- **[cloud_deployment.md](cloud_deployment.md)** - Cloud infrastructure, BYOK model, pricing, multi-tenancy
-- **[graph_ontology.md](graph_ontology.md)** - Five-layer graph structure, relationships, inference rules
-- **[agentic_design.md](agentic_design.md)** - Agent investigation strategy with Phase 0 pre-analysis, confidence-driven investigation, adaptive thresholds
-- **[arc_intelligence_architecture.md](arc_intelligence_architecture.md)** - ARC database integration, hybrid GraphRAG, pattern recombination strategy
-- **[incident_knowledge_graph.md](incident_knowledge_graph.md)** - Incident attribution pipeline, pattern signature hashing, causal chains
-- **[risk_assessment_methodology.md](risk_assessment_methodology.md)** - Risk calculation formulas, thresholds, metric validation
-- **[prompt_engineering_design.md](prompt_engineering_design.md)** - LLM prompt architecture, context management, token budgets
+
+**Start Here:**
+- **[mvp_architecture_overview.md](mvp_architecture_overview.md)** - **READ THIS FIRST** - High-level overview of MVP architecture, deployment, and design principles
+
+**Detailed Specifications:**
+- **[agentic_design.md](agentic_design.md)** - Two-phase investigation flow (fast baseline + LLM investigation), working memory, evidence chain
+- **[graph_ontology.md](graph_ontology.md)** - Three-layer graph structure (Structure, Temporal, Incidents), Neo4j schema, branch-aware properties
+- **[risk_assessment_methodology.md](risk_assessment_methodology.md)** - Five simple metrics, threshold logic, false positive tracking, validation framework
 
 ### Architecture Decisions
-- **[decisions/001-neptune-over-neo4j.md](decisions/001-neptune-over-neo4j.md)** - Why Neptune Serverless (70% cost savings) - See ADR-004 for phased approach
-- **[decisions/002-branch-aware-incremental-ingestion.md](decisions/002-branch-aware-incremental-ingestion.md)** - Branch-aware ingestion with language detection (92% storage reduction)
-- **[decisions/003-postgresql-fulltext-search.md](decisions/003-postgresql-fulltext-search.md)** - PostgreSQL full-text search for incident similarity (eliminates LanceDB dependency)
-- **[decisions/004-neo4j-aura-to-neptune-migration.md](decisions/004-neo4j-aura-to-neptune-migration.md)** - Phased cloud database strategy: Neo4j Aura (MVP) → Neptune (Scale)
-- **[decisions/005-confidence-driven-investigation.md](decisions/005-confidence-driven-investigation.md)** - Phase 0 pre-analysis, adaptive thresholds, confidence-based stopping (70-80% FP reduction)
+
+**Relevant to MVP:**
+- **[decisions/002-branch-aware-incremental-ingestion.md](decisions/002-branch-aware-incremental-ingestion.md)** - Branch-aware ingestion with language detection
+- **[decisions/005-confidence-driven-investigation.md](decisions/005-confidence-driven-investigation.md)** - Confidence-based stopping and adaptive investigation
+
+**Cloud-Related (Deferred to Post-MVP):**
+- **[decisions/001-neptune-over-neo4j.md](decisions/001-neptune-over-neo4j.md)** - Cloud database strategy (future)
+- **[decisions/003-postgresql-fulltext-search.md](decisions/003-postgresql-fulltext-search.md)** - Full-text search strategy (using Neo4j FTS for MVP)
+- **[decisions/004-neo4j-aura-to-neptune-migration.md](decisions/004-neo4j-aura-to-neptune-migration.md)** - Cloud migration path (future)
+
+**Note:** MVP uses local Neo4j in Docker, not cloud databases. Cloud ADRs are preserved for future reference.
+
+---
+
+## Archived Documents (Future Vision)
+
+Documents that discuss cloud infrastructure, enterprise features, or complex optimizations beyond MVP scope have been moved to:
+
+**[../99-archive/01-architecture-future-vision/](../99-archive/01-architecture-future-vision/)**
+
+Archived documents include:
+- cloud_deployment.md - AWS Neptune, EKS, Lambda deployment
+- arc_intelligence_architecture.md - GitHub mining and ARC database
+- scalability_analysis.md - Enterprise-scale validation
+- data_volumes.md - Cloud storage calculations
+- trust_infrastructure.md - AI code provenance (Q2-Q3 2026)
+- incident_knowledge_graph.md - Federated learning (Q1-Q2 2026)
+- system_overview_layman.md - References cloud features
+- prompt_engineering_design.md - Detailed prompt optimization
+- agentic_design_v4.0.md - Complex three-phase version
+
+**Why archived:** These documents describe features outside the 4-6 week MVP timeline. They remain preserved for post-MVP phases.
 
 ---
 
 ## Document Guidelines
 
 ### When to Add Here
-- System design proposals
+- System design proposals for MVP
 - Architecture decision records (ADRs)
-- Technical deep-dives
+- Technical deep-dives on core features
 - Component specifications
 
 ### When NOT to Add Here
 - Implementation guides (goes to 03-implementation/)
 - Operational procedures (goes to 02-operations/)
 - Business requirements (goes to 00-product/)
+- Future/cloud features (goes to 99-archive/)
 
 ### Format
 - **High-level** - Concepts and decisions, not code
 - **Decision-focused** - What we chose and why
-- **Timeless** - Avoid implementation details that change frequently
+- **MVP-scoped** - Focus on 4-6 week deliverable
+- **No code** - Explain concepts without implementation details
 
 ---
 
@@ -89,32 +113,160 @@ ADRs are stored in the `decisions/` subdirectory and numbered sequentially.
 - Number sequentially starting from 001
 - Use lowercase with hyphens
 
+**ADR Status:**
+- Some ADRs discuss cloud features (Neptune, PostgreSQL) not in MVP
+- These remain valid for future phases
+- MVP uses simplified local alternatives (Neo4j, SQLite)
+
 **See:** [decisions/README.md](decisions/README.md) for ADR template
 
 ---
 
 ## Key Concepts
 
-### Cloud-First Architecture
-- BYOK (Bring Your Own API Key) model
-- Amazon Neptune Serverless for graphs
-- Kubernetes for compute orchestration
-- PostgreSQL for metadata
-- Redis for caching
+### Local-First Architecture (MVP)
 
-### Graph Ontology
-- Five layers: Syntactic, Semantic, Behavioral, Risk, Causal
-- Dense graphs (50-200 relationships per entity)
-- Temporal coupling from git history
-- Incident correlation
+**Deployment:**
+- Docker Compose stack (Neo4j + CodeRisk CLI)
+- Local Neo4j graph database (not cloud)
+- SQLite for validation data (not PostgreSQL)
+- Filesystem cache (not Redis)
+- Zero cloud infrastructure
 
-### Agentic Investigation
-- **Three-phase architecture:** Phase 0 pre-analysis → Phase 1 baseline → Phase 2 confidence-driven investigation
-- **Adaptive thresholds:** Domain-aware configs (Python web vs Go backend)
-- **Confidence-based stopping:** Dynamic hop count (1-5) based on evidence quality
-- **Hybrid ARC patterns:** Combine complementary patterns for 3-5x better insights
-- **Metric validation:** Auto-exclude metrics with >3% FP rate
-- **Evidence-based reasoning:** LLM synthesizes from multiple low-FP signals
+**Philosophy:**
+- Free BYOK model (~$1-2/month in LLM costs)
+- No network latency (all local)
+- Full data control (no vendor lock-in)
+- Sufficient for solo/small teams (<10K files)
+
+### Three-Layer Graph Ontology
+
+**Layer 1: Structure (Code & Dependencies)**
+- Entities: File, Function, Class, Module
+- Relationships: CALLS, IMPORTS, CONTAINS
+- Purpose: "What code depends on what?" (~1% FP rate)
+
+**Layer 2: Temporal (Git History & Ownership)**
+- Entities: Commit, Developer, PullRequest
+- Relationships: AUTHORED, MODIFIES, CO_CHANGED
+- Purpose: "How does code evolve?" (~3-5% FP rate)
+
+**Layer 3: Incidents (Failure History)**
+- Entities: Incident, Issue
+- Relationships: CAUSED_BY, AFFECTS, FIXED_BY
+- Purpose: "What has broken before?" (~5% FP rate with manual linking)
+
+**Why three layers:** Structure and temporal are factual, incidents are manually curated. Semantic and risk layers are computed on-demand, not stored.
+
+### Two-Phase Investigation
+
+**Phase 1: Fast Baseline (80% of checks, <200ms)**
+- Calculate Tier 1 metrics in parallel (coupling, co-change, test coverage)
+- Apply simple heuristic (OR logic)
+- If ANY metric HIGH → escalate to Phase 2
+- Else return LOW risk immediately (no LLM needed)
+
+**Phase 2: LLM-Guided Investigation (20% of checks, 3-5s)**
+- Load 1-hop neighbors into working memory
+- LLM reviews evidence, decides next action:
+  - Calculate Tier 2 metric (ownership churn, incident similarity)
+  - Expand to 2-hop neighbors (rare)
+  - Finalize assessment (has enough evidence)
+- Max 3 investigation rounds (prevents runaway costs)
+- LLM synthesizes final risk level, confidence, evidence, recommendations
+
+**Why two-phase:** 10x cost savings ($0.60/day vs $6/day), 5x latency improvement (800ms avg vs 4s avg)
+
+### Five Simple Metrics (Not 9+ Complex Ones)
+
+**Tier 1 (always calculated, factual):**
+1. Structural coupling - 1-2% FP rate
+2. Temporal co-change - 3-5% FP rate
+3. Test coverage ratio - 5-8% FP rate
+
+**Tier 2 (LLM-requested, context-dependent):**
+4. Ownership churn - 5-7% FP rate
+5. Incident similarity - 8-12% FP rate
+
+**Explicitly avoided (high FP, expensive):**
+- ΔDBR (Diffusion Blast Radius) - 15-20% FP rate
+- HDCC (Hawkes Decay Co-Change) - 12-18% FP rate
+- G² Surprise - 20-25% FP rate
+- Vector embeddings - Marginal improvement at 10x cost
+
+**Why simple:** Factual metrics are explainable, cheap, and accurate. Complex statistical models add marginal value at high cost.
+
+### Self-Validating Metrics
+
+**Feedback Loop:**
+- User provides feedback: `crisk feedback --false-positive --reason "..."`
+- System tracks FP rate per metric in SQLite
+- Auto-disable if fp_rate > 3% (with >20 samples)
+- Admin reviews and adjusts thresholds
+
+**Why this matters:** Builds trust through self-correction, learns from user's domain knowledge, prevents metric degradation.
+
+---
+
+## MVP Scope Summary
+
+### ✅ In MVP (4-6 weeks)
+- Two-phase risk assessment (baseline + LLM)
+- Three-layer graph ontology (Neo4j local)
+- Five simple metrics (no complex models)
+- Docker Compose deployment
+- CLI: `crisk init`, `crisk check`, `crisk incident`
+- Pre-commit hook integration
+- False positive tracking
+- Supported languages: Python, JavaScript, TypeScript, Go
+
+### ❌ Out of MVP (Post-MVP)
+- Cloud deployment (Neptune, K8s, Lambda)
+- Enterprise features (RBAC, SSO, audit logs)
+- Complex statistical models (ΔDBR, HDCC, G²)
+- Vector embeddings for semantic search
+- Web portal for settings/dashboards
+- ARC database (industry risk patterns)
+- Multi-file PR risk assessment
+- Adaptive thresholds (learning from feedback)
+
+---
+
+## How to Navigate This Documentation
+
+**1. Start with the overview:**
+   - Read [mvp_architecture_overview.md](mvp_architecture_overview.md) for high-level understanding
+
+**2. Dive into specific areas:**
+   - Investigation flow → [agentic_design.md](agentic_design.md)
+   - Graph schema → [graph_ontology.md](graph_ontology.md)
+   - Metrics and validation → [risk_assessment_methodology.md](risk_assessment_methodology.md)
+
+**3. Understand decisions:**
+   - Review relevant ADRs in [decisions/](decisions/)
+   - Note which ADRs are MVP vs future
+
+**4. See the big picture:**
+   - Connect to product vision in [../00-product/mvp_vision.md](../00-product/mvp_vision.md)
+   - Understand user workflow in [../00-product/developer_experience.md](../00-product/developer_experience.md)
+
+**5. Future reference:**
+   - Explore archived docs in [../99-archive/01-architecture-future-vision/](../99-archive/01-architecture-future-vision/) for post-MVP ideas
+
+---
+
+## Related Documentation
+
+**Product Documentation:**
+- [../00-product/mvp_vision.md](../00-product/mvp_vision.md) - MVP scope and goals
+- [../00-product/developer_experience.md](../00-product/developer_experience.md) - CLI workflow and UX
+- [../00-product/simplified_pricing.md](../00-product/simplified_pricing.md) - BYOK pricing model
+
+**Implementation (Future):**
+- [../03-implementation/](../03-implementation/) - Code structure and implementation guides (TBD)
+
+**Operations (Future):**
+- [../02-operations/](../02-operations/) - Deployment and operational procedures (TBD)
 
 ---
 

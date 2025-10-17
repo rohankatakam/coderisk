@@ -19,10 +19,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	backendType string
-)
-
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize CodeRisk analysis for current repository",
@@ -42,24 +38,19 @@ Usage:
 
 Examples:
   cd ~/projects/my-repo
-  crisk init                # Detects GitHub remote automatically
-  crisk init --backend neo4j  # Specify backend (default: neo4j)
+  crisk init
 
 Requirements:
   • Must be run inside a cloned GitHub repository
   • GitHub Personal Access Token (for fetching issues, commits)
   • OpenAI API key (optional, for Phase 2 LLM analysis)
-  • Docker (Neo4j, PostgreSQL, Redis)
+  • Docker with Neo4j, PostgreSQL, Redis running
 
 Configuration:
   Development: Use .env file (copy from .env.example)
   Production: Run 'crisk login' for cloud authentication`,
 	Args: cobra.NoArgs,
 	RunE: runInit,
-}
-
-func init() {
-	initCmd.Flags().StringVarP(&backendType, "backend", "b", "neo4j", "Graph backend: neo4j (local) or neptune (cloud)")
 }
 
 // detectCurrentRepo detects the git repository in the current directory
@@ -192,7 +183,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Path: %s\n", repoPath)
 
 	fmt.Printf("\n🚀 Initializing CodeRisk for %s/%s...\n", owner, repo)
-	fmt.Printf("   Backend: %s\n", backendType)
+	fmt.Printf("   Backend: Neo4j (local)\n")
 	fmt.Printf("   Mode: %s\n", mode.Description())
 
 	// Load and validate configuration
@@ -221,29 +212,21 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	defer stagingDB.Close()
 
-	// Connect to graph backend
-	var graphBackend graph.Backend
-	switch backendType {
-	case "neo4j":
-		graphBackend, err = graph.NewNeo4jBackend(
-			ctx,
-			cfg.Neo4j.URI,
-			cfg.Neo4j.User,
-			cfg.Neo4j.Password,
-			cfg.Neo4j.Database,
-		)
-		if err != nil {
-			return fmt.Errorf("Neo4j connection failed: %w", err)
-		}
-	case "neptune":
-		return fmt.Errorf("Neptune backend not yet implemented")
-	default:
-		return fmt.Errorf("unsupported backend: %s (use 'neo4j' or 'neptune')", backendType)
+	// Connect to Neo4j (only supported backend for MVP)
+	graphBackend, err := graph.NewNeo4jBackend(
+		ctx,
+		cfg.Neo4j.URI,
+		cfg.Neo4j.User,
+		cfg.Neo4j.Password,
+		cfg.Neo4j.Database,
+	)
+	if err != nil {
+		return fmt.Errorf("Neo4j connection failed: %w", err)
 	}
 	defer graphBackend.Close(ctx)
 
 	fmt.Printf("  ✓ Connected to PostgreSQL\n")
-	fmt.Printf("  ✓ Connected to %s\n", backendType)
+	fmt.Printf("  ✓ Connected to Neo4j\n")
 
 	// Use the already-cloned repository
 	fmt.Printf("\n[0/4] Using repository at %s...\n", repoPath)

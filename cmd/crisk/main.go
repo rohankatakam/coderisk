@@ -63,11 +63,8 @@ Build time: ` + BuildTime + `
 Git commit: ` + GitCommit + `
 `)
 
-	// Add subcommands
-	rootCmd.AddCommand(initCmd)
-	rootCmd.AddCommand(checkCmd)
-	rootCmd.AddCommand(statusCmd)
-	rootCmd.AddCommand(configCmd)
-	rootCmd.AddCommand(incidentCmd)
-	// Note: login, logout, whoami are added via their own init() functions
+	// Add essential commands only
+	rootCmd.AddCommand(initCmd)   // Initialize repo with graph construction
+	rootCmd.AddCommand(checkCmd)  // Check files for risk
+	// Note: login, logout, whoami are cloud auth commands (added via init())
 }
