@@ -1,129 +1,63 @@
-# ========================================
-# CodeRisk Local Deployment Stack
-# Reference: spec.md §5.6 - Deployment models
-# ========================================
+# CodeRisk Development Stack
+# For local development only
 
 services:
-  # ========================================
-  # Neo4j Graph Database
-  # Reference: graph_ontology.md - Three-layer ontology
-  # ========================================
   neo4j:
     image: neo4j:5.15-community
     container_name: coderisk-neo4j
     ports:
-      - "${NEO4J_HTTP_PORT}:7474"  # HTTP (browser UI)
-      - "${NEO4J_BOLT_PORT}:7687"  # Bolt (Cypher queries)
+      - "${NEO4J_HTTP_PORT:-7475}:7474"
+      - "${NEO4J_BOLT_PORT:-7688}:7687"
     volumes:
-      - ./volumes/neo4j_data:/data
-      - ./volumes/neo4j_logs:/logs
+      - neo4j_data:/data
+      - neo4j_logs:/logs
     environment:
-      - NEO4J_AUTH=${NEO4J_AUTH}
-      - NEO4J_server_memory_heap_max__size=${NEO4J_MAX_HEAP}
-      - NEO4J_server_memory_pagecache_size=${NEO4J_PAGECACHE}
+      - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/CHANGE_THIS_PASSWORD_IN_PRODUCTION_123}
+      - NEO4J_server_memory_heap_max__size=${NEO4J_MAX_HEAP:-2G}
+      - NEO4J_server_memory_pagecache_size=${NEO4J_PAGECACHE:-1G}
     healthcheck:
       test: ["CMD-SHELL", "wget --spider http://localhost:7474 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
-  # ========================================
-  # PostgreSQL Metadata Database
-  # Reference: risk_assessment_methodology.md §5.2 - Validation schema
-  # ========================================
   postgres:
     image: postgres:16-alpine
     container_name: coderisk-postgres
     ports:
-      - "${POSTGRES_PORT_EXTERNAL}:5432"
+      - "${POSTGRES_PORT_EXTERNAL:-5433}:5432"
     volumes:
-      - ./volumes/postgres_data:/var/lib/postgresql/data
-      # Initialize schema on first run
-      - ./scripts/init_postgres.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - postgres_data:/var/lib/postgresql/data
     environment:
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-coderisk}
+      - POSTGRES_USER=${POSTGRES_USER:-coderisk}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD_IN_PRODUCTION_123}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-coderisk}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
-  # ========================================
-  # Redis Cache (Ephemeral State)
-  # Reference: agentic_design.md §4.1 - Caching strategy
-  # ========================================
   redis:
     image: redis:7-alpine
     container_name: coderisk-redis
     ports:
-      - "${REDIS_PORT_EXTERNAL}:6379"
+      - "${REDIS_PORT_EXTERNAL:-6380}:6379"
     volumes:
-      - ./volumes/redis_data:/data
+      - redis_data:/data
     command: >
       redis-server
-      --maxmemory ${REDIS_MAXMEMORY}
-      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY}
+      --maxmemory ${REDIS_MAXMEMORY:-2gb}
+      --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
       --appendonly yes
-      --save 900 1
-      --save 300 10
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
-  # ========================================
-  # API Service (Go Application)
-  # Reference: agentic_design.md §2 - Two-phase investigation
-  # ========================================
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: coderisk-api
-    ports:
-      - "${API_PORT}:8080"
-    environment:
-      # Database connections
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=${NEO4J_USER}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
-      - NEO4J_DATABASE=${NEO4J_DATABASE}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      # LLM configuration (BYOK)
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - PHASE2_ENABLED=${PHASE2_ENABLED}
-      # Performance tuning
-      - MAX_HOPS=${MAX_HOPS}
-      - FP_THRESHOLD=${FP_THRESHOLD}
-      - INVESTIGATION_TIMEOUT=${INVESTIGATION_TIMEOUT_SECONDS}
-      - LOG_LEVEL=${LOG_LEVEL}
-    depends_on:
-      neo4j:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-networks:
-  default:
-    name: coderisk-network
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  postgres_data:
+  redis_data:

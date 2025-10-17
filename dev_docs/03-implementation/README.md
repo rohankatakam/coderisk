@@ -36,13 +36,17 @@
 
 ## Current Documents
 
+**🎯 Development & Deployment:**
+- **[DEVELOPMENT_AND_DEPLOYMENT.md](DEVELOPMENT_AND_DEPLOYMENT.md)** - ⭐ High-level development workflow and deployment strategy
+- **[DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md)** - Detailed release process, CI/CD, and branching strategy
+
 **🎯 Current Status:**
-- **[CURRENT_STATUS_AND_CLOUD_READINESS.md](CURRENT_STATUS_AND_CLOUD_READINESS.md)** - ⭐ **NEW** - What's working locally vs. what's needed for cloud multi-tenant deployment
+- **[CURRENT_STATUS_AND_CLOUD_READINESS.md](CURRENT_STATUS_AND_CLOUD_READINESS.md)** - What's working locally vs. what's needed for cloud multi-tenant deployment
 - **[status.md](status.md)** - Implementation status, MVP blockers, phase roadmap
 - **[NEXT_STEPS.md](NEXT_STEPS.md)** - Immediate next actions (Week 1-8 roadmap)
-- **[PHASE_0_PARALLEL_IMPLEMENTATION_PLAN.md](PHASE_0_PARALLEL_IMPLEMENTATION_PLAN.md)** - 🚀 **READY TO EXECUTE** - Phase 0 + Adaptive System (4 parallel agents, 2-3 weeks)
+- **[PHASE_0_PARALLEL_IMPLEMENTATION_PLAN.md](PHASE_0_PARALLEL_IMPLEMENTATION_PLAN.md)** - Phase 0 + Adaptive System (4 parallel agents, 2-3 weeks)
 - **[IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md)** - Historical implementation log with decisions
-- **[DX_FOUNDATION_COMPLETE.md](DX_FOUNDATION_COMPLETE.md)** - ✅ DX Foundation phase summary
+- **[DX_FOUNDATION_COMPLETE.md](DX_FOUNDATION_COMPLETE.md)** - DX Foundation phase summary
 
 **Coordination Documents (Parallel Sessions):**
 
