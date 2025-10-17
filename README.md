@@ -28,25 +28,25 @@ cd coderisk
 cp .env.example .env
 # Edit .env and set GITHUB_TOKEN
 
-# Build + start services + install (requires sudo password)
+# Build + start services
 make dev
 
-# Verify installation
-crisk-dev --version
+# Verify build
+./bin/crisk --version
 ```
 
-**Note:** Development uses `crisk-dev` command to avoid conflicts with production `crisk` from Homebrew.
+**Note:** Development uses `./bin/crisk` (local binary). Production uses global `crisk` (from Homebrew).
 
 ### Daily Development
 
 ```bash
 # Make code changes...
 
-# Quick rebuild (requires sudo password)
+# Quick rebuild (no sudo needed)
 make rebuild
 
 # Test
-crisk-dev --version
+./bin/crisk --version
 make test
 ```
 
@@ -58,8 +58,8 @@ cd /tmp
 git clone https://github.com/hashicorp/terraform-exec
 cd terraform-exec
 
-# Run crisk-dev init (auto-detects from git remote)
-crisk-dev init
+# Run crisk init (auto-detects from git remote)
+/Users/rohankatakam/Documents/brain/coderisk/bin/crisk init
 
 # Verify in Neo4j browser
 open http://localhost:7475
@@ -69,26 +69,28 @@ open http://localhost:7475
 
 ```bash
 make help       # Show all commands
-make dev        # Full development setup
-make rebuild    # Fast rebuild + install
+make dev        # Full development setup (build + start services)
+make rebuild    # Fast rebuild (no sudo needed)
 make build      # Build binary only
 make test-cli   # Test built binary
 make start      # Start Docker services
 make stop       # Stop services
 make test       # Run unit tests
 make lint       # Run linters
-make uninstall  # Remove crisk-dev
+make install    # Install globally (optional, overwrites Homebrew version)
+make uninstall  # Remove any global installations
 make clean-db   # Reset databases
 ```
 
 ### Dev vs Production Separation
 
-| Command | Binary | Use Case |
-|---------|--------|----------|
-| `crisk-dev` | Development | From `make dev` or `make rebuild` |
-| `crisk` | Production | From `brew install rohankatakam/coderisk/crisk` |
+| Usage | Binary | Use Case |
+|-------|--------|----------|
+| `./bin/crisk` | Development | Local binary from `make dev` or `make rebuild` |
+| `crisk` | Production | Global binary from `brew install rohankatakam/coderisk/crisk` |
 
-**No conflicts:** You can have both installed simultaneously!
+**Development workflow:** Always use `./bin/crisk` (no sudo needed for rebuilds!)
+**Production workflow:** Use global `crisk` command after Homebrew install
 
 ### Environment Setup
 

@@ -1,8 +1,7 @@
 # CodeRisk Development Makefile
 
 # Build configuration
-BINARY_NAME=crisk-dev
-PROD_BINARY_NAME=crisk
+BINARY_NAME=crisk
 BUILD_DIR=./bin
 CMD_DIR=./cmd
 
@@ -20,8 +19,8 @@ help:
 	@echo ''
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/  /'
 
-## dev: Build + start services + install (full development setup)
-dev: clean build start install
+## dev: Build + start services (full development setup)
+dev: clean build start
 	@echo ""
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "✅ Development environment ready!"
@@ -31,13 +30,13 @@ dev: clean build start install
 	@echo "   cd /tmp"
 	@echo "   git clone https://github.com/hashicorp/terraform-exec"
 	@echo "   cd terraform-exec"
-	@echo "   crisk-dev init"
+	@echo "   $(shell pwd)/bin/crisk init"
 	@echo ""
 	@echo "💡 Check version:"
-	@echo "   crisk-dev --version"
+	@echo "   $(shell pwd)/bin/crisk --version"
 	@echo ""
-	@echo "📌 Note: Development uses 'crisk-dev' command"
-	@echo "   Production (brew): 'crisk' command"
+	@echo "📌 Development: Use ./bin/crisk (local binary)"
+	@echo "   Production:  Use crisk (global from Homebrew)"
 	@echo ""
 
 ## build: Build CLI binary
@@ -47,21 +46,20 @@ build:
 	@CGO_ENABLED=1 go build -v -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
 	@echo "✅ Binary: $(BUILD_DIR)/$(BINARY_NAME)"
 
-## install: Install dev binary globally (requires sudo)
+## install: Install binary globally (optional, for testing prod experience)
 install: build
-	@echo "📦 Installing dev binary to /usr/local/bin..."
+	@echo "📦 Installing to /usr/local/bin..."
 	@echo "⚠️  This requires sudo password"
+	@echo "⚠️  WARNING: This will overwrite any Homebrew-installed crisk"
+	@echo ""
+	@read -p "Continue? (y/N) " confirm && [ "$$confirm" = "y" ] || exit 1
 	@sudo cp $(BUILD_DIR)/$(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
 	@sudo chmod +x /usr/local/bin/$(BINARY_NAME)
-	@echo "✅ Installed - now run '$(BINARY_NAME)' from anywhere"
-	@echo ""
-	@echo "📌 Separation:"
-	@echo "   Development: $(BINARY_NAME)"
-	@echo "   Production:  $(PROD_BINARY_NAME) (from Homebrew)"
+	@echo "✅ Installed globally"
 
-## rebuild: Quick rebuild + install (fast iteration)
-rebuild: build install
-	@echo "✅ Rebuild complete - $(BINARY_NAME) updated globally"
+## rebuild: Quick rebuild (fast iteration, no install needed)
+rebuild: build
+	@echo "✅ Rebuild complete - use ./bin/crisk"
 
 ## start: Start Docker services
 start:
@@ -133,14 +131,14 @@ lint:
 	@go vet ./...
 	@if command -v golangci-lint &> /dev/null; then golangci-lint run; fi
 
-## uninstall: Remove installed dev binary
+## uninstall: Remove any globally installed crisk (including old dev versions)
 uninstall:
-	@echo "🗑️  Uninstalling $(BINARY_NAME)..."
-	@sudo rm -f /usr/local/bin/$(BINARY_NAME)
-	@rm -f ~/.local/bin/crisk ~/.local/bin/$(BINARY_NAME) 2>/dev/null || true
-	@echo "✅ Uninstalled"
+	@echo "🗑️  Removing globally installed crisk..."
+	@sudo rm -f /usr/local/bin/crisk /usr/local/bin/crisk-dev
+	@rm -f ~/.local/bin/crisk ~/.local/bin/crisk-dev 2>/dev/null || true
+	@echo "✅ Removed all global installations"
 	@echo ""
-	@echo "Note: Production 'crisk' from Homebrew is untouched"
+	@echo "Note: Use 'make dev' to build local binary at ./bin/crisk"
 
 ## clean: Clean build artifacts
 clean:
