@@ -13,6 +13,7 @@ import (
 	"github.com/rohankatakam/coderisk/internal/ai"
 	"github.com/rohankatakam/coderisk/internal/analysis/config"
 	"github.com/rohankatakam/coderisk/internal/analysis/phase0"
+	"github.com/rohankatakam/coderisk/internal/auth"
 	"github.com/rohankatakam/coderisk/internal/cache"
 	appconfig "github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/database"
@@ -56,12 +57,34 @@ func init() {
 func runCheck(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
+	// Try to fetch credentials from cloud (if authenticated)
+	// Otherwise fall back to environment variables
+	var openaiAPIKey string
+	var authManager *auth.Manager
+	var err error
+
+	authManager, err = auth.NewManager()
+	if err == nil {
+		// Try to load session
+		if err := authManager.LoadSession(); err == nil {
+			// Authenticated - fetch credentials from Supabase
+			creds, err := authManager.GetCredentials()
+			if err == nil && creds.OpenAIAPIKey != "" {
+				openaiAPIKey = creds.OpenAIAPIKey
+			}
+		}
+	}
+
+	// If cloud credentials weren't available, use environment variable
+	if openaiAPIKey == "" {
+		openaiAPIKey = os.Getenv("OPENAI_API_KEY")
+	}
+
 	// Get pre-commit flag
 	preCommit, _ := cmd.Flags().GetBool("pre-commit")
 
 	// Get files to check (from args, staged files, or git status)
 	var files []string
-	var err error
 
 	if preCommit {
 		// Pre-commit mode: check staged files
@@ -262,16 +285,15 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		if adaptiveResult.ShouldEscalate {
 			hasHighRisk = true
 
-			// Get OpenAI API key from environment
+			// Use OpenAI API key from cloud or environment
 			// 12-factor: Factor 3 - Configuration from environment
-			apiKey := os.Getenv("OPENAI_API_KEY")
-
-			if apiKey == "" {
+			if openaiAPIKey == "" {
 				// No API key - show message and continue
 				if !preCommit {
 					fmt.Println("\n⚠️  HIGH RISK detected")
-					fmt.Println("    Set OPENAI_API_KEY to enable Phase 2 LLM investigation")
-					fmt.Println("    Example: export OPENAI_API_KEY=sk-...")
+					fmt.Println("    Enable Phase 2 LLM investigation by either:")
+					fmt.Println("      1. Running 'crisk login' to use cloud credentials")
+					fmt.Println("      2. Setting OPENAI_API_KEY environment variable")
 				}
 				continue
 			}
@@ -299,7 +321,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			}
 
 			// Create LLM client
-			llmClient, err := agent.NewLLMClient(apiKey)
+			llmClient, err := agent.NewLLMClient(openaiAPIKey)
 			if err != nil {
 				fmt.Printf("❌ LLM client error: %v\n", err)
 				continue
@@ -354,6 +376,26 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				// Standard Mode: Show summary with recommendations
 				output.DisplayPhase2Summary(assessment)
 			}
+		}
+	}
+
+	// Post usage telemetry if authenticated
+	if authManager != nil {
+		// TODO: Track actual OpenAI tokens used during Phase 2
+		// For now, we'll estimate based on whether Phase 2 was triggered
+		totalFiles := len(files)
+		estimatedTokens := 0
+		estimatedCost := 0.0
+
+		if hasHighRisk && openaiAPIKey != "" {
+			// Rough estimate: 1000 tokens per high-risk file with Phase 2
+			estimatedTokens = 1000 * totalFiles
+			// Estimate cost: $0.01 per 1000 tokens (rough GPT-4 pricing)
+			estimatedCost = float64(estimatedTokens) * 0.00001
+		}
+
+		if err := authManager.PostUsage("check", totalFiles, 0, estimatedTokens, estimatedCost); err != nil {
+			// Silently fail - telemetry shouldn't block the command
 		}
 	}
 

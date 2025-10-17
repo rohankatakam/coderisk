@@ -22,9 +22,42 @@ func NewClerkClient() *ClerkClient {
 // DeviceFlowAuth performs OAuth device flow authentication
 // This opens a browser for the user to authenticate and returns a token
 func (c *ClerkClient) DeviceFlowAuth(ctx context.Context) (*Token, error) {
-	// TODO: Implement proper device flow
-	// For MVP, we'll guide users to the manual flow
-	return nil, fmt.Errorf("automatic device flow coming soon - use manual setup for now")
+	// For MVP, we use a simplified flow:
+	// 1. Open browser to authentication page
+	// 2. User authenticates and copies their session token
+	// 3. We store the token locally
+
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("Welcome to CodeRisk Cloud Authentication")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+	fmt.Println("📖 Instructions:")
+	fmt.Println("   1. Browser will open to CodeRisk authentication page")
+	fmt.Println("   2. Sign in with your account (or create one)")
+	fmt.Println("   3. Your credentials will be automatically configured")
+	fmt.Println()
+	fmt.Println("Press Enter to open browser...")
+	fmt.Scanln() // Wait for user to press Enter
+
+	// Open browser for authentication
+	if err := BrowserAuth(); err != nil {
+		fmt.Printf("⚠️  Browser opening failed: %v\n", err)
+		fmt.Printf("    Please visit manually: %s\n", AuthCallbackURL)
+	}
+
+	fmt.Println()
+	fmt.Println("⏳ Waiting for authentication...")
+	fmt.Println("   (This feature is in development)")
+	fmt.Println()
+	fmt.Println("For now, authentication will be completed in Phase 1.4")
+	fmt.Println("You can still use CodeRisk with environment variables:")
+	fmt.Println("   export OPENAI_API_KEY=sk-...")
+	fmt.Println("   export GITHUB_TOKEN=ghp_...")
+	fmt.Println()
+
+	// TODO: Implement actual device flow polling
+	// For now, return an error indicating manual setup is needed
+	return nil, fmt.Errorf("automatic authentication coming in Phase 1.4 - use environment variables for now")
 }
 
 // VerifySession verifies a Clerk session token

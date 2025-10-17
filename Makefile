@@ -41,7 +41,7 @@ build: build-cli
 	@echo ""
 	@echo "🚀 Next steps:"
 	@echo "   1. Start services:  make start"
-	@echo "   2. Run crisk:       $(BUILD_DIR)/$(BINARY_NAME) init-local"
+	@echo "   2. Run crisk:       $(BUILD_DIR)/$(BINARY_NAME) init owner/repo"
 	@echo ""
 	@echo "📋 Useful commands:"
 	@echo "   make start    - Start Docker services (required)"
@@ -150,7 +150,7 @@ clean-fresh: clean-all
 	@echo "📋 Next steps:"
 	@echo "   1. Verify .env has your API keys"
 	@echo "   2. Run 'make dev' to build and start services"
-	@echo "   3. Run 'bin/crisk init <repo-url>' to initialize a repository"
+	@echo "   3. Run 'bin/crisk init owner/repo' to initialize a repository"
 
 ## test: Run tests
 test:
@@ -322,7 +322,7 @@ start:
 	@echo "   API Server:    http://localhost:8080/health"
 	@echo ""
 	@echo "🚀 Ready to use crisk:"
-	@echo "   $(BUILD_DIR)/$(BINARY_NAME) init <repo-url>"
+	@echo "   $(BUILD_DIR)/$(BINARY_NAME) init owner/repo"
 	@echo ""
 
 ## stop: Stop Docker services
@@ -420,7 +420,7 @@ dev: clean build start install-global
 	@echo ""
 	@echo "🚀 Quick start:"
 	@echo "   crisk --version           # Verify installation"
-	@echo "   crisk init <repo-url>     # Initialize a repository"
+	@echo "   crisk init owner/repo     # Initialize a repository"
 	@echo "   crisk check <file>        # Check a file for risks"
 	@echo ""
 	@echo "📋 Useful commands:"

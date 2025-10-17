@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/rohankatakam/coderisk/internal/auth"
 	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/database"
 	"github.com/rohankatakam/coderisk/internal/github"
@@ -54,9 +56,57 @@ func runInit(cmd *cobra.Command, args []string) error {
 	startTime := time.Now()
 	ctx := context.Background()
 
-	// Load environment variables from .env file
+	// Try to fetch credentials from cloud (if authenticated)
+	// Otherwise fall back to environment variables
+	var githubToken, openaiAPIKey string
+	authManager, err := auth.NewManager()
+	if err == nil {
+		// Try to load session
+		if err := authManager.LoadSession(); err == nil {
+			// Authenticated - fetch credentials from Supabase
+			fmt.Println("🔐 Fetching credentials from CodeRisk Cloud...")
+			creds, err := authManager.GetCredentials()
+			if err != nil {
+				fmt.Printf("⚠️  Failed to fetch cloud credentials: %v\n", err)
+				fmt.Println("   Falling back to environment variables")
+			} else {
+				// Use cloud credentials
+				if creds.GitHubToken != "" {
+					githubToken = creds.GitHubToken
+					fmt.Println("  ✓ Using GitHub token from cloud")
+				}
+				if creds.OpenAIAPIKey != "" {
+					openaiAPIKey = creds.OpenAIAPIKey
+					fmt.Println("  ✓ Using OpenAI API key from cloud")
+				}
+			}
+		}
+	}
+
+	// Load environment variables from .env file (as fallback or primary source)
 	envLoader := config.NewEnvLoader()
 	envLoader.MustLoad()
+
+	// If cloud credentials weren't available, use environment variables
+	if githubToken == "" {
+		githubToken = os.Getenv("GITHUB_TOKEN")
+		if githubToken == "" {
+			return fmt.Errorf("GitHub token not found. Either:\n  1. Run 'crisk login' to use cloud credentials\n  2. Set GITHUB_TOKEN in .env or environment")
+		}
+		fmt.Println("  ✓ Using GitHub token from environment")
+	}
+
+	if openaiAPIKey == "" {
+		openaiAPIKey = os.Getenv("OPENAI_API_KEY")
+		if openaiAPIKey == "" {
+			return fmt.Errorf("OpenAI API key not found. Either:\n  1. Run 'crisk login' to use cloud credentials\n  2. Set OPENAI_API_KEY in .env or environment")
+		}
+		fmt.Println("  ✓ Using OpenAI API key from environment")
+	}
+
+	// Set environment variables for downstream code that expects them
+	os.Setenv("GITHUB_TOKEN", githubToken)
+	os.Setenv("OPENAI_API_KEY", openaiAPIKey)
 
 	// Validate required variables including GitHub token
 	if err := envLoader.ValidateWithGitHub(); err != nil {
@@ -252,6 +302,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   • Test: crisk check <file>\n")
 	fmt.Printf("   • Browse graph: http://localhost:7475 (Neo4j Browser)\n")
 	fmt.Printf("   • Credentials: %s / <from .env file>\n", cfg.Neo4j.User)
+
+	// Post usage telemetry if authenticated
+	if authManager != nil {
+		// Estimate cost: rough estimate based on parsing complexity
+		// Actual OpenAI costs would need to be tracked during LLM usage
+		estimatedCost := 0.0 // No LLM usage in init
+		totalNodes := buildStats.Nodes
+
+		if err := authManager.PostUsage("init", parseResult.FilesParsed, totalNodes, 0, estimatedCost); err != nil {
+			// Silently fail - telemetry shouldn't block the command
+			fmt.Printf("   (telemetry skipped: %v)\n", err)
+		}
+	}
 
 	return nil
 }

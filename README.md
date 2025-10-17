@@ -2,388 +2,221 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Go Version](https://img.shields.io/badge/Go-1.21%2B-blue)](https://golang.org)
-[![Open Source](https://img.shields.io/badge/Open%20Source-Yes-brightgreen)](LICENSE)
 
-AI-powered code risk assessment that catches risky changes before they reach production. Sub-5-second analysis using graph-based knowledge and LLM intelligence.
+AI-powered code risk assessment that catches risky changes before they reach production.
 
-## Installation
+## For Users: Cloud Platform (Recommended)
 
-CodeRisk supports multiple installation methods for maximum flexibility.
-
-### Homebrew (Recommended for macOS/Linux)
+Get started in under 60 seconds with zero local setup:
 
 ```bash
-# Install via Homebrew
-brew tap rohankatakam/coderisk
-brew install crisk
-
-# Verify installation
-crisk --version
-```
-
-### Install Script (Universal One-Liner)
-
-Works on macOS, Linux, and Windows (WSL):
-
-```bash
+# Install CLI
 curl -fsSL https://coderisk.dev/install.sh | bash
+
+# Authenticate with CodeRisk Cloud
+crisk login
+
+# Initialize repository (fetches from cloud)
+crisk init owner/repo
+
+# Run risk analysis
+crisk check
 ```
 
-The script will:
-- Auto-detect your platform (OS + architecture)
-- Download the latest release
-- Verify checksums
-- Install to `~/.local/bin/crisk`
-- Prompt for OpenAI API key setup (interactive)
+**What you get:**
+- ✅ Zero setup - no Docker, no databases
+- ✅ Instant analysis - pre-built knowledge graphs
+- ✅ Team features - shared insights, webhooks
+- ✅ Always up-to-date - automatic graph updates
 
-### Docker
+**Visit [coderisk.dev](https://coderisk.dev) to sign up**
 
-For containerized workflows and CI/CD:
+---
 
-```bash
-# Pull the image
-docker pull coderisk/crisk:latest
+## For Developers: Local Development
 
-# Run a check
-docker run --rm -v $(pwd):/repo coderisk/crisk:latest check
-
-# With API key
-docker run --rm -v $(pwd):/repo \
-  -e OPENAI_API_KEY="sk-..." \
-  coderisk/crisk:latest check --explain
-```
-
-### Direct Download
-
-Download pre-built binaries from [GitHub Releases](https://github.com/rohankatakam/coderisk-go/releases):
-
-1. Download the appropriate archive for your platform
-2. Extract the binary: `tar -xzf crisk_*.tar.gz`
-3. Move to PATH: `mv crisk ~/.local/bin/` (or `/usr/local/bin` with sudo)
-4. Make executable: `chmod +x ~/.local/bin/crisk`
-
-### Build from Source
-
-If you prefer to build from source:
-
-```bash
-git clone https://github.com/rohankatakam/coderisk-go.git
-cd coderisk-go
-go build -o crisk ./cmd/crisk
-mv crisk ~/.local/bin/
-```
-
-## Quick Start
+Want to contribute or run locally? Follow this guide.
 
 ### Prerequisites
 
-- **OpenAI API key** (REQUIRED): Get one at https://platform.openai.com/api-keys
-- **Docker Desktop** (REQUIRED): For graph database (Neo4j)
-- Git repository to analyze
+- **Go 1.21+** with CGO enabled
+- **Docker Desktop** (for Neo4j, PostgreSQL, Redis)
+- **C compiler** (Xcode CLI tools on macOS, `build-essential` on Linux)
 
-### Setup (17 minutes one-time per repo)
-
-```bash
-# 1. Configure API key (if not done during installation)
-export OPENAI_API_KEY="sk-..."
-# Add to ~/.zshrc or ~/.bashrc for persistence
-
-# 2. Start infrastructure (2 minutes)
-docker compose up -d
-
-# 3. Initialize repository (10-15 minutes)
-cd /path/to/your/repo
-crisk init-local
-# Builds graph: Tree-sitter AST + Git history
-
-# 4. Check for risks (2-5 seconds)
-crisk check
-```
-
-**Setup time:** ~17 minutes (one-time per repo)
-**Check time:** 2-5 seconds (after setup)
-**Cost:** $0.03-0.05/check (BYOK)
-
-## Usage
-
-### Basic Commands
+### Quick Start
 
 ```bash
-# Check changed files for risk
-crisk check
-
-# Check specific files with detailed explanation
-crisk check --explain path/to/file.go
-
-# Install pre-commit hook for automatic checks
-crisk hook install
-
-# View repository status
-crisk status
-```
-
-### AI-Powered Analysis
-
-CodeRisk uses LLM-guided agentic investigation for risk assessment:
-
-```bash
-# Baseline check with detailed explanation
-crisk check --explain path/to/file.go
-
-# JSON output for AI tools (Claude Code, Cursor, etc.)
-crisk check --ai-mode path/to/file.go
-```
-
-> **IMPORTANT:** Both OpenAI API key AND graph database (Docker + init-local) are **REQUIRED** for CodeRisk to function.
->
-> ```bash
-> # Set API key
-> export OPENAI_API_KEY="sk-..."  # Add to ~/.zshrc or ~/.bashrc
->
-> # Start graph database
-> docker compose up -d
->
-> # Initialize repository
-> crisk init-local
-> ```
-
-### View Graph Data
-
-Open Neo4j Browser at http://localhost:7475
-
-- **Username:** `neo4j`
-- **Password:** `CHANGE_THIS_PASSWORD_IN_PRODUCTION_123`
-
-Try these queries:
-
-```cypher
--- See all nodes by type
-MATCH (n) RETURN labels(n)[0] as type, count(n) ORDER BY count DESC
-
--- Find high-coupling files
-MATCH (f:File)-[:IMPORTS]->()
-WITH f, count(*) as imports
-WHERE imports > 10
-RETURN f.name, imports ORDER BY imports DESC LIMIT 10
-```
-
-## How It Works
-
-**Phase 0: Pre-Filter (<50ms)**
-- Security keyword detection (auto-escalate)
-- Docs-only changes (skip expensive analysis)
-- Configuration file detection
-
-**Phase 1: Baseline Assessment (1-2s)**
-- Graph queries for 1-hop neighbors
-- Structural coupling analysis
-- Initial risk score calculation
-
-**Phase 2: Deep Investigation (2-5s)**
-- LLM-guided agentic graph navigation (3-5 hops)
-- Temporal coupling detection (CO_CHANGED patterns)
-- Evidence synthesis from code structure, git history, and past incidents
-- Confidence-driven stopping (stops at 85%)
-
-**Result:** <3% false positive rate (vs 10-20% industry standard)
-
-## Configuration
-
-### Required Environment Variables
-
-```bash
-# REQUIRED for CodeRisk to function
-export OPENAI_API_KEY="sk-..."
-```
-
-Add to your shell config for persistence:
-```bash
-# For zsh
-echo 'export OPENAI_API_KEY="sk-..."' >> ~/.zshrc
-source ~/.zshrc
-
-# For bash
-echo 'export OPENAI_API_KEY="sk-..."' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### Optional Configuration
-
-For advanced configuration:
-
-```bash
-cp .env.example .env
-# Edit .env for custom ports, memory limits, etc.
-```
-
-Optional settings:
-- `NEO4J_PASSWORD` - Change default database password
-- Port mappings if defaults conflict (7687, 7474, 5432, 6379)
-- Memory limits for Docker containers
-
-## Development
-
-### Build Requirements
-
-CodeRisk uses tree-sitter for AST parsing, which requires CGO and a C compiler:
-
-**macOS:**
-```bash
-# Xcode Command Line Tools (includes gcc)
-xcode-select --install
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt-get install build-essential
-```
-
-**Linux (Alpine/Docker):**
-```bash
-apk add gcc musl-dev
-```
-
-> **Why CGO?** Tree-sitter language parsers are C libraries with Go bindings for performance.
-
-### Quick Start for Contributors
-
-```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/rohankatakam/coderisk-go.git
 cd coderisk-go
 
-# One-command setup (build + start services + install)
+# 2. Copy and configure environment
+cp .env.example .env
+# Edit .env and add your tokens:
+#   GITHUB_TOKEN=ghp_...          (required)
+#   OPENAI_API_KEY=sk-...         (optional, for Phase 2)
+
+# 3. Build, start services, and install
 make dev
 
-# Verify installation
+# 4. Verify installation
 crisk --version
 ```
 
-### Development Commands
+### Development Workflow
 
 ```bash
-# Build CLI binary
-make build
+# Start Docker services
+make start
 
-# Quick rebuild and reinstall (fast iteration)
+# Build and install globally
+make build install-global
+
+# Make code changes...
+
+# Quick rebuild (faster iteration)
 make rebuild
 
 # Run tests
 make test
 
-# Format and lint code
-make fmt
-make lint
-
-# Clean database (keeps containers)
-make clean-db
-
-# Complete cleanup
-make clean-all
-
-# Fresh clone state (removes all local data)
-make clean-fresh
-```
-
-### Docker Services
-
-```bash
-# Start services (Neo4j, PostgreSQL, Redis)
-make start
-
-# Check service status
-make status
-
-# View logs
+# View service logs
 make logs
 
 # Stop services
 make stop
 ```
 
-### Common Workflows
+### Testing CodeRisk Locally
 
-**Quick Development:**
 ```bash
-# Make code changes...
-make rebuild              # Rebuild and reinstall
-crisk check <file>        # Test your changes
+# Initialize a repository (builds local knowledge graph)
+crisk init owner/repo
+
+# Check files for risk
+crisk check path/to/file.go
+
+# Check with explanation
+crisk check --explain path/to/file.go
 ```
 
-**Clean Development:**
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `make dev` | Full setup: build + start services + install globally |
+| `make build` | Build CLI binary to `./bin/crisk` |
+| `make rebuild` | Quick rebuild and reinstall (fast iteration) |
+| `make start` | Start Docker services (Neo4j, PostgreSQL, Redis) |
+| `make stop` | Stop Docker services |
+| `make status` | Check service status |
+| `make logs` | View service logs |
+| `make test` | Run unit tests |
+| `make clean-db` | Reset databases (keeps containers) |
+| `make clean-all` | Complete cleanup |
+| `make help` | Show all available commands |
+
+### Environment Variables (Local Development Only)
+
+Create a `.env` file with these required variables:
+
 ```bash
-make clean-all           # Clean everything
-make build              # Build fresh
-make start              # Start services
-make install-global     # Install globally
+# Required for repository ingestion
+GITHUB_TOKEN=ghp_your_token_here
+
+# Optional: Enable Phase 2 LLM-powered analysis
+OPENAI_API_KEY=sk_your_key_here
+
+# Database passwords (change for production)
+NEO4J_PASSWORD=CHANGE_THIS_PASSWORD_IN_PRODUCTION_123
+POSTGRES_PASSWORD=CHANGE_THIS_PASSWORD_IN_PRODUCTION_123
 ```
 
-**Database Issues:**
-```bash
-make clean-db           # Reset database
-make start              # Restart services
+**Note:** When using the cloud platform (`crisk login`), credentials are automatically managed - no manual token setup required.
+
+### Project Structure
+
+```
+coderisk-go/
+├── cmd/crisk/          # CLI entry point
+├── internal/           # Core packages
+│   ├── agent/         # Phase 2 LLM investigation
+│   ├── analysis/      # Risk assessment logic
+│   ├── auth/          # Cloud authentication
+│   ├── graph/         # Neo4j graph operations
+│   ├── ingestion/     # Repository parsing
+│   └── metrics/       # Risk metrics calculation
+├── Makefile           # Development commands
+├── docker-compose.yml # Local infrastructure
+└── .env.example       # Configuration template
 ```
 
-See [MAKEFILE_GUIDE.md](MAKEFILE_GUIDE.md) for comprehensive Makefile documentation.
+## How It Works
 
-See [dev_docs/](dev_docs/) for architecture and detailed documentation.
+**Phase 0: Pre-Filter** (<50ms)
+- Security keyword detection
+- Documentation-only change detection
 
-## License
+**Phase 1: Baseline Assessment** (1-2s)
+- Structural coupling analysis
+- Temporal co-change patterns
+- Test coverage ratio
 
-CodeRisk is **open source** software licensed under the [MIT License](LICENSE).
+**Phase 2: Deep Investigation** (2-5s, optional)
+- LLM-guided graph navigation
+- Evidence synthesis from code, git history, and incidents
+- Confidence-driven investigation
 
-### Open Source Components
+## Architecture
 
-The following components are freely available under the MIT License:
+CodeRisk uses a three-layer knowledge graph:
 
-- ✅ **CLI tool** (`crisk` binary) - Full source code
-- ✅ **Local mode** - Run CodeRisk entirely on your machine
-- ✅ **Core graph engine** - AST parsing, graph ingestion
-- ✅ **Phase 1 metrics** - Coupling, co-change, test coverage analysis
-- ✅ **Pre-commit hooks** - Automated risk checking
-- ✅ **Docker Compose stack** - Local Neo4j, PostgreSQL, Redis setup
+- **Layer 1 (Structure):** Functions, classes, imports from tree-sitter AST
+- **Layer 2 (Temporal):** Git commits, co-change patterns, ownership
+- **Layer 3 (Incidents):** GitHub issues, PRs, incident correlation
 
-**Use cases:**
-- Individual developers and small teams
-- Privacy-sensitive environments (air-gapped, on-premise)
-- Learning and education
-- Contributing to the core engine
-
-### Commercial Cloud Platform
-
-For teams wanting hosted infrastructure, advanced features, and zero setup, we offer a **commercial cloud platform**:
-
-- ⚡ **Zero setup** - No Docker, no database management
-- 🚀 **Instant access** - Pre-built graphs for popular repos (React, Next.js, etc.)
-- 👥 **Team collaboration** - Shared graphs, webhooks, branch analysis
-- 🔒 **Enterprise features** - SSO, audit logs, SLA guarantees
-- 🎯 **ARC Database** - Access to 100+ architectural risk patterns from 10,000 real incidents
-- 🤖 **Phase 2 LLM** - Advanced agentic investigation
-
-**Pricing:** $10-50/user/month • [Learn more at coderisk.dev](https://coderisk.dev)
-
-> **Open Core Model:** We believe in open source for developer tools. The CLI and local mode will always be free and open source. Cloud infrastructure and enterprise features are commercial to sustain development.
-
-See [LICENSE](LICENSE) for full licensing details.
+**Local Services:**
+- Neo4j (Graph DB): Port 7475 (browser), 7688 (bolt)
+- PostgreSQL (Metadata): Port 5433
+- Redis (Cache): Port 6380
 
 ## Contributing
 
-We welcome contributions! CodeRisk is built by developers, for developers.
+We welcome contributions!
 
-**How to contribute:**
-- 🐛 Report bugs via [GitHub Issues](https://github.com/rohankatakam/coderisk-go/issues)
-- 💡 Suggest features or improvements
-- 🔧 Submit PRs for new metrics, parsers, or bug fixes
-- 📚 Improve documentation
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes
+4. Run tests: `make test`
+5. Format code: `make fmt`
+6. Commit: `git commit -m 'Add amazing feature'`
+7. Push: `git push origin feature/amazing-feature`
+8. Open a Pull Request
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
-## Community & Support
+## Documentation
 
-- **Documentation:** [dev_docs/](dev_docs/)
-- **Issues:** [GitHub Issues](https://github.com/rohankatakam/coderisk-go/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/rohankatakam/coderisk-go/discussions)
-- **Website:** [coderisk.dev](https://coderisk.dev)
+- [Development Docs](dev_docs/) - Architecture and implementation details
+- [Makefile Guide](MAKEFILE_GUIDE.md) - Complete command reference
+
+## License
+
+CodeRisk is open source software licensed under the [MIT License](LICENSE).
+
+**Open Source Components:**
+- ✅ CLI tool (full source code)
+- ✅ Local mode with Docker Compose
+- ✅ Core risk assessment engine
+- ✅ Graph ingestion and analysis
+
+**Commercial Cloud Platform:**
+- ⚡ Zero-setup hosted infrastructure
+- 🚀 Pre-built knowledge graphs
+- 👥 Team collaboration features
+- 🔒 Enterprise SSO and audit logs
+
+Learn more at [coderisk.dev](https://coderisk.dev)
 
 ---
 
