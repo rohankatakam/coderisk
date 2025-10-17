@@ -1,7 +1,8 @@
 # CodeRisk Development Makefile
 
 # Build configuration
-BINARY_NAME=crisk
+BINARY_NAME=crisk-dev
+PROD_BINARY_NAME=crisk
 BUILD_DIR=./bin
 CMD_DIR=./cmd
 
@@ -30,10 +31,13 @@ dev: clean build start install
 	@echo "   cd /tmp"
 	@echo "   git clone https://github.com/hashicorp/terraform-exec"
 	@echo "   cd terraform-exec"
-	@echo "   crisk init"
+	@echo "   crisk-dev init"
 	@echo ""
 	@echo "💡 Check version:"
-	@echo "   crisk --version"
+	@echo "   crisk-dev --version"
+	@echo ""
+	@echo "📌 Note: Development uses 'crisk-dev' command"
+	@echo "   Production (brew): 'crisk' command"
 	@echo ""
 
 ## build: Build CLI binary
@@ -43,17 +47,21 @@ build:
 	@CGO_ENABLED=1 go build -v -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
 	@echo "✅ Binary: $(BUILD_DIR)/$(BINARY_NAME)"
 
-## install: Install binary globally (requires sudo, optional for dev)
+## install: Install dev binary globally (requires sudo)
 install: build
-	@echo "📦 Installing globally to /usr/local/bin..."
+	@echo "📦 Installing dev binary to /usr/local/bin..."
 	@echo "⚠️  This requires sudo password"
 	@sudo cp $(BUILD_DIR)/$(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
 	@sudo chmod +x /usr/local/bin/$(BINARY_NAME)
-	@echo "✅ Installed - now run 'crisk' from anywhere"
+	@echo "✅ Installed - now run '$(BINARY_NAME)' from anywhere"
+	@echo ""
+	@echo "📌 Separation:"
+	@echo "   Development: $(BINARY_NAME)"
+	@echo "   Production:  $(PROD_BINARY_NAME) (from Homebrew)"
 
 ## rebuild: Quick rebuild + install (fast iteration)
 rebuild: build install
-	@echo "✅ Rebuild complete - crisk updated globally"
+	@echo "✅ Rebuild complete - $(BINARY_NAME) updated globally"
 
 ## start: Start Docker services
 start:
@@ -100,15 +108,15 @@ test:
 test-cli: build
 	@echo "🧪 Testing CLI binary..."
 	@echo ""
-	@./bin/crisk --version
+	@./bin/$(BINARY_NAME) --version
 	@echo ""
-	@./bin/crisk init --help | head -15
+	@./bin/$(BINARY_NAME) init --help | head -15
 	@echo ""
 	@echo "✅ CLI binary works!"
 	@echo ""
 	@echo "💡 Test graph construction:"
 	@echo "   cd /tmp && git clone https://github.com/hashicorp/terraform-exec"
-	@echo "   cd /tmp/terraform-exec && $(shell pwd)/bin/crisk init"
+	@echo "   cd /tmp/terraform-exec && $(BINARY_NAME) init"
 	@echo ""
 
 ## coverage: Generate test coverage
@@ -124,6 +132,15 @@ lint:
 	@go fmt ./...
 	@go vet ./...
 	@if command -v golangci-lint &> /dev/null; then golangci-lint run; fi
+
+## uninstall: Remove installed dev binary
+uninstall:
+	@echo "🗑️  Uninstalling $(BINARY_NAME)..."
+	@sudo rm -f /usr/local/bin/$(BINARY_NAME)
+	@rm -f ~/.local/bin/crisk ~/.local/bin/$(BINARY_NAME) 2>/dev/null || true
+	@echo "✅ Uninstalled"
+	@echo ""
+	@echo "Note: Production 'crisk' from Homebrew is untouched"
 
 ## clean: Clean build artifacts
 clean:

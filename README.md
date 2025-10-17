@@ -28,30 +28,25 @@ cd coderisk
 cp .env.example .env
 # Edit .env and set GITHUB_TOKEN
 
-# Build + start services + install
+# Build + start services + install (requires sudo password)
 make dev
 
 # Verify installation
-crisk --version
+crisk-dev --version
 ```
+
+**Note:** Development uses `crisk-dev` command to avoid conflicts with production `crisk` from Homebrew.
 
 ### Daily Development
 
 ```bash
-# Start services
-make start
-
-# Build and test CLI
-make build
-./bin/crisk --version
-
 # Make code changes...
 
-# Quick rebuild
+# Quick rebuild (requires sudo password)
 make rebuild
-./bin/crisk --version
 
-# Run tests
+# Test
+crisk-dev --version
 make test
 ```
 
@@ -63,8 +58,8 @@ cd /tmp
 git clone https://github.com/hashicorp/terraform-exec
 cd terraform-exec
 
-# Run crisk init (auto-detects from git remote)
-/Users/rohankatakam/Documents/brain/coderisk/bin/crisk init
+# Run crisk-dev init (auto-detects from git remote)
+crisk-dev init
 
 # Verify in Neo4j browser
 open http://localhost:7475
@@ -73,19 +68,27 @@ open http://localhost:7475
 ### Available Commands
 
 ```bash
-make help      # Show all commands
-make dev       # Full development setup
-make build     # Build CLI binary
-make rebuild   # Fast rebuild
-make test-cli  # Test built binary
-make start     # Start Docker services
-make stop      # Stop services
-make test      # Run unit tests
-make lint      # Run linters
-make clean-db  # Reset databases
+make help       # Show all commands
+make dev        # Full development setup
+make rebuild    # Fast rebuild + install
+make build      # Build binary only
+make test-cli   # Test built binary
+make start      # Start Docker services
+make stop       # Stop services
+make test       # Run unit tests
+make lint       # Run linters
+make uninstall  # Remove crisk-dev
+make clean-db   # Reset databases
 ```
 
-**Note:** `make install` is available but requires sudo - not needed for development.
+### Dev vs Production Separation
+
+| Command | Binary | Use Case |
+|---------|--------|----------|
+| `crisk-dev` | Development | From `make dev` or `make rebuild` |
+| `crisk` | Production | From `brew install rohankatakam/coderisk/crisk` |
+
+**No conflicts:** You can have both installed simultaneously!
 
 ### Environment Setup
 

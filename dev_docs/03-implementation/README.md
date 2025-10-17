@@ -1,264 +1,270 @@
-# Implementation Documentation
+# Implementation Documentation (MVP Focus)
 
-**Purpose:** Implementation status, roadmaps, integration guides, how-to tutorials
+**Last Updated:** October 17, 2025
+**Purpose:** Implementation guides, status tracking, and development resources for MVP
 
-> **📘 For AI agents:** Before creating/updating implementation docs, read [DOCUMENTATION_WORKFLOW.md](../DOCUMENTATION_WORKFLOW.md) to determine if this is the right location and which document to update.
+> **📘 Strategic Shift:** Focused on local-first MVP implementation. Cloud features, completed sessions, and obsolete planning docs moved to [../99-archive/03-implementation-obsolete](../99-archive/03-implementation-obsolete/).
 
 ---
 
 ## What Goes Here
 
-**Status Tracking:**
-- Current implementation progress
-- MVP blockers and dependencies
-- Technology stack status
-- Component completion tracking
-
-**Phase Roadmaps:**
-- Detailed phase plans (MVP, Multi-branch, Public cache)
-- Timeline estimates
-- Success criteria
-- Deliverables
-
-**Integration Guides:**
+**Implementation Guides:**
 - Step-by-step integration instructions
 - Configuration examples
-- Troubleshooting guides
-- Best practices
+- Component setup procedures
+- Testing strategies
 
-**How-To Tutorials:**
-- Setting up development environment
-- Running tests
-- Deploying components
-- Debugging common issues
+**Status Tracking:**
+- Current implementation progress
+- MVP blockers and next steps
+- Component completion status
 
----
-
-## Current Documents
-
-**🎯 Development & Deployment:**
-- **[DEVELOPMENT_AND_DEPLOYMENT.md](DEVELOPMENT_AND_DEPLOYMENT.md)** - ⭐ High-level development workflow and deployment strategy
-- **[DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md)** - Detailed release process, CI/CD, and branching strategy
-
-**🎯 Current Status:**
-- **[CURRENT_STATUS_AND_CLOUD_READINESS.md](CURRENT_STATUS_AND_CLOUD_READINESS.md)** - What's working locally vs. what's needed for cloud multi-tenant deployment
-- **[status.md](status.md)** - Implementation status, MVP blockers, phase roadmap
-- **[NEXT_STEPS.md](NEXT_STEPS.md)** - Immediate next actions (Week 1-8 roadmap)
-- **[PHASE_0_PARALLEL_IMPLEMENTATION_PLAN.md](PHASE_0_PARALLEL_IMPLEMENTATION_PLAN.md)** - Phase 0 + Adaptive System (4 parallel agents, 2-3 weeks)
-- **[IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md)** - Historical implementation log with decisions
-- **[DX_FOUNDATION_COMPLETE.md](DX_FOUNDATION_COMPLETE.md)** - DX Foundation phase summary
-
-**Coordination Documents (Parallel Sessions):**
-
-**DX Foundation (Complete ✅):**
-- **[PARALLEL_SESSION_PLAN.md](PARALLEL_SESSION_PLAN.md)** - File ownership map and checkpoints
-- **[THREE_SESSIONS_SUMMARY.md](THREE_SESSIONS_SUMMARY.md)** - Quick reference for managing sessions
-- **[SESSION_1_PROMPT.md](SESSION_1_PROMPT.md)** - Session 1: Pre-commit hook (complete)
-- **[SESSION_2_PROMPT.md](SESSION_2_PROMPT.md)** - Session 2: Adaptive verbosity (complete)
-- **[SESSION_3_PROMPT.md](SESSION_3_PROMPT.md)** - Session 3: AI Mode (complete)
-
-**Week 1 Core Functionality (Ready to Execute):**
-- **[../../WEEK1_QUICK_START.md](../../WEEK1_QUICK_START.md)** - 🚀 **START HERE** - Quick start guide for Week 1 parallel sessions
-- **[PARALLEL_SESSION_PLAN_WEEK1.md](PARALLEL_SESSION_PLAN_WEEK1.md)** - File ownership map and coordination protocol
-- **[SESSION_4_PROMPT.md](SESSION_4_PROMPT.md)** - Session 4: Git Integration Functions
-- **[SESSION_5_PROMPT.md](SESSION_5_PROMPT.md)** - Session 5: Init Flow Orchestration
-- **[SESSION_6_PROMPT.md](SESSION_6_PROMPT.md)** - Session 6: Risk Calculation & Validation
+**Development Resources:**
+- Development workflows
+- Deployment procedures
+- Performance optimization guides
+- Distribution strategies
 
 ---
 
-## Subdirectories
+## Current Documents (MVP Focus)
 
-### `phases/`
-Detailed roadmaps for each development phase:
-- **[phase_dx_foundation.md](phases/phase_dx_foundation.md)** - ✅ Developer Experience foundation (pre-commit hook, verbosity, AI mode) **COMPLETE**
-- **[phase_cornered_resource_q1_2026.md](phases/phase_cornered_resource_q1_2026.md)** - Q1 2026: Cornered resource strategy
-- **[phase_trust_layer_q2_q3_2026.md](phases/phase_trust_layer_q2_q3_2026.md)** - Q2-Q3 2026: Trust and collaboration
+### 🚀 Quick Start
 
-**Next Phase:** Complete core functionality (git integration, crisk init) - See [NEXT_STEPS.md](NEXT_STEPS.md)
+**New to CodeRisk development? Start here:**
+1. [DEVELOPMENT_AND_DEPLOYMENT.md](DEVELOPMENT_AND_DEPLOYMENT.md) - Development workflow, local setup, testing
+2. [integration_guides/local_deployment.md](integration_guides/local_deployment.md) - Docker Compose setup
+3. [status.md](status.md) - Current implementation status
 
-**Template:**
-- Scope and goals
-- Deliverables and success criteria
-- Timeline and milestones
-- Dependencies and blockers
-- Testing strategy
+---
 
-### `integration_guides/`
-Step-by-step guides for integrating components:
+### 📋 Status & Roadmap
 
-**Graph Construction:**
-- **[local_deployment.md](integration_guides/local_deployment.md)** - Docker Compose setup with Neo4j, Redis, Postgres
-- **[graph_construction.md](integration_guides/graph_construction.md)** - 3-layer graph construction overview (Tree-sitter, Git, GitHub API)
-- **[layer_1_treesitter.md](integration_guides/layer_1_treesitter.md)** - Layer 1 (Code Structure) with tree-sitter AST parsing
-- **[layers_2_3_github_fetching.md](integration_guides/layers_2_3_github_fetching.md)** - Priority 6A: GitHub API → PostgreSQL (Stage 1)
-- **[layers_2_3_graph_construction.md](integration_guides/layers_2_3_graph_construction.md)** - Priority 6B: PostgreSQL → Neo4j/Neptune (Stage 2)
-- **[cli_integration.md](integration_guides/cli_integration.md)** - Priority 6C: End-to-end `crisk init` orchestration
+**Track progress:**
+- **[status.md](status.md)** - ⭐ Implementation status, MVP completion tracking, blockers
+- **[NEXT_STEPS.md](NEXT_STEPS.md)** - Immediate next actions and priorities
+- **[PRODUCTION_READINESS.md](PRODUCTION_READINESS.md)** - Production readiness checklist
 
-**Developer Experience (UX):**
-- **[ux_adaptive_verbosity.md](integration_guides/ux_adaptive_verbosity.md)** - 4-level verbosity system (quiet, standard, explain, AI mode)
-- **[ux_pre_commit_hook.md](integration_guides/ux_pre_commit_hook.md)** - Pre-commit hook integration (`crisk hook install`)
-- **[ux_ai_mode_output.md](integration_guides/ux_ai_mode_output.md)** - AI Mode JSON schema for Claude Code/Cursor integration
+---
 
-**Testing & Validation:**
-- **[END_TO_END_TESTING_RESULTS.md](END_TO_END_TESTING_RESULTS.md)** - ✅ Complete E2E testing results, critical bugs found/fixed
-- **[testing_edge_fixes.md](integration_guides/testing_edge_fixes.md)** - Complete testing instructions for CO_CHANGED/CAUSED_BY edge fixes
-- **[quick_test_commands.md](integration_guides/quick_test_commands.md)** - Quick reference commands and expected results
+### 🛠 Development & Deployment
 
-**Testing Strategy Documentation:** (in `testing/`)
-- **[TESTING_EXPANSION_SUMMARY.md](testing/TESTING_EXPANSION_SUMMARY.md)** - ✨ **NEW** - Executive summary: 8 new test scenarios and Phase 0 recommendation
-- **[MODIFICATION_TYPES_AND_TESTING.md](testing/MODIFICATION_TYPES_AND_TESTING.md)** - ✨ **NEW** - Full taxonomy: 10 modification types, impact framework, detailed test scenarios
-- **[INTEGRATION_TEST_STRATEGY.md](testing/INTEGRATION_TEST_STRATEGY.md)** - High-level testing strategy for Claude Code + CodeRisk validation
-- **[E2E_TEST_SUMMARY.md](testing/E2E_TEST_SUMMARY.md)** - Final E2E test execution results (all tests passing)
-- **[DATA_VERIFICATION_QUERIES.md](testing/DATA_VERIFICATION_QUERIES.md)** - Neo4j/PostgreSQL queries for verifying graph construction
+**Development workflow:**
+- **[DEVELOPMENT_AND_DEPLOYMENT.md](DEVELOPMENT_AND_DEPLOYMENT.md)** - ⭐ Local development setup, testing, contribution guide
+- **[DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md)** - Git workflow, releases, CI/CD pipeline, Homebrew distribution
 
-**Distribution & Launch (Pre-Launch Phase):**
-- **[packaging_and_distribution.md](packaging_and_distribution.md)** - ✨ **NEW** - GoReleaser, Homebrew, install script, Docker distribution strategy
-- **[website_messaging.md](website_messaging.md)** - ✨ **NEW** - Website content, messaging framework, open source positioning
-- **[configuration_management.md](configuration_management.md)** - ✨ **NEW** - API key setup, config file, tiered user experience (Phase 0/1/2)
+**Distribution:**
+- **[packaging_and_distribution.md](packaging_and_distribution.md)** - GoReleaser, Homebrew, install script, Docker Hub
+- **[website_messaging.md](website_messaging.md)** - Website content, messaging framework, open source positioning
+- **[configuration_management.md](configuration_management.md)** - API key setup, config files, user experience tiers
 
-**Claude Code Prompts (Ready to Execute):**
-- **[BACKEND_PACKAGING_PROMPT.md](BACKEND_PACKAGING_PROMPT.md)** - 🚀 **Session 1** - GoReleaser, Homebrew, GitHub Actions setup
-- **[FRONTEND_WEBSITE_PROMPT.md](FRONTEND_WEBSITE_PROMPT.md)** - 🚀 **Session 2** - Website updates for open source messaging
-- **[CONFIG_MANAGEMENT_PROMPT.md](CONFIG_MANAGEMENT_PROMPT.md)** - 🚀 **Session 3** - `crisk configure`, tiered UX, config file support
+**Release management:**
+- **[CHANGELOG.md](CHANGELOG.md)** - Version history and release notes
 
-**Future Guides (Planned):**
-- Neptune integration (openCypher queries, connection pooling)
-- GitHub OAuth (authentication flow, token management)
-- Settings portal (API key config, team management)
-- Redis caching (investigation cache, spatial context)
-- Webhook handlers (graph updates, branch lifecycle)
+---
 
-**Template:**
-- Prerequisites
-- Installation and setup
-- Configuration
-- Usage examples
-- Troubleshooting
-- Testing
+### 📚 Integration Guides
+
+**Graph construction:**
+- **[integration_guides/graph_construction.md](integration_guides/graph_construction.md)** - ⭐ 3-layer graph overview
+- **[integration_guides/layer_1_treesitter.md](integration_guides/layer_1_treesitter.md)** - Layer 1 (Code Structure) with tree-sitter AST parsing
+- **[integration_guides/layers_2_3_github_fetching.md](integration_guides/layers_2_3_github_fetching.md)** - Layers 2-3 GitHub API data fetching
+- **[integration_guides/layers_2_3_graph_construction.md](integration_guides/layers_2_3_graph_construction.md)** - Layers 2-3 graph construction (Temporal + Incidents)
+- **[integration_guides/cli_integration.md](integration_guides/cli_integration.md)** - End-to-end `crisk init` orchestration
+
+**Local deployment:**
+- **[integration_guides/local_deployment.md](integration_guides/local_deployment.md)** - ⭐ Docker Compose setup with Neo4j
+- **[NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md](NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md)** - Neo4j performance tuning
+- **[NEO4J_MODERNIZATION_GUIDE.md](NEO4J_MODERNIZATION_GUIDE.md)** - Neo4j best practices and modernization
+
+**Developer experience:**
+- **[integration_guides/ux_adaptive_verbosity.md](integration_guides/ux_adaptive_verbosity.md)** - 4-level verbosity system (quiet, standard, explain, AI mode)
+- **[integration_guides/ux_pre_commit_hook.md](integration_guides/ux_pre_commit_hook.md)** - Pre-commit hook integration
+- **[integration_guides/ux_ai_mode_output.md](integration_guides/ux_ai_mode_output.md)** - AI Mode JSON schema for IDE integration
+
+**Platform integrations:**
+- **[KEYCHAIN_INTEGRATION_GUIDE.md](KEYCHAIN_INTEGRATION_GUIDE.md)** - macOS Keychain for secure API key storage
+- **[GRAPH_SEARCH_INTEGRATION_GUIDE.md](GRAPH_SEARCH_INTEGRATION_GUIDE.md)** - Graph search strategies and query optimization
+
+**Testing helpers:**
+- **[integration_guides/quick_test_commands.md](integration_guides/quick_test_commands.md)** - Quick reference for testing
+- **[integration_guides/testing_edge_fixes.md](integration_guides/testing_edge_fixes.md)** - Testing CO_CHANGED/CAUSED_BY edge creation
+
+---
+
+### 🧪 Testing Strategy
+
+**Strategy documents:**
+- **[testing/INTEGRATION_TEST_STRATEGY.md](testing/INTEGRATION_TEST_STRATEGY.md)** - ⭐ High-level testing approach
+- **[testing/MODIFICATION_TYPES_AND_TESTING.md](testing/MODIFICATION_TYPES_AND_TESTING.md)** - Modification taxonomy and test scenarios
+- **[testing/TESTING_EXPANSION_SUMMARY.md](testing/TESTING_EXPANSION_SUMMARY.md)** - Testing expansion plan
+- **[testing/E2E_TEST_SUMMARY.md](testing/E2E_TEST_SUMMARY.md)** - E2E test execution summary
+
+**Data verification:**
+- **[testing/DATA_VERIFICATION_QUERIES.md](testing/DATA_VERIFICATION_QUERIES.md)** - Neo4j/PostgreSQL verification queries
+
+---
+
+### 📖 Phase Documentation
+
+**Completed phases:**
+- **[phases/phase_dx_foundation.md](phases/phase_dx_foundation.md)** - ✅ Developer Experience foundation (pre-commit hook, verbosity, AI mode) - **COMPLETE**
+
+**Note:** Future phase plans (Q1 2026, Q2-Q3 2026) archived to [../99-archive/03-implementation-obsolete/](../99-archive/03-implementation-obsolete/) as they're beyond MVP scope.
 
 ---
 
 ## Document Guidelines
 
 ### When to Add Here
-- Implementation status updates
+- Implementation step-by-step guides
+- Testing strategies and procedures
+- Development workflow improvements
+- Status updates and roadmaps
 - Integration tutorials
-- Troubleshooting guides
-- Development workflows
-- Testing strategies
 
 ### When NOT to Add Here
 - Architecture decisions (goes to 01-architecture/)
+- Operational patterns (goes to 02-operations/)
 - Product requirements (goes to 00-product/)
+- One-time session prompts (complete work, don't document)
 - Research experiments (goes to 04-research/)
 
 ### Format
-- **Actionable** - Clear steps, examples, commands
+- **Actionable** - Clear steps, commands, examples
 - **Current** - Keep status docs updated weekly
-- **Practical** - Focus on "how to" not "what is"
+- **Concise** - High-level guidance, not code dumps
+- **No code** - Minimal examples OK, link to codebase for details
 
 ---
 
-## Status Tracking
+## MVP Implementation Status
 
-### What to Track
-- ✅ Completed components
-- ⚠️ Partial implementations (what's missing)
-- ❌ Not started components
-- 🚧 Blockers and dependencies
+### ✅ Completed (Ready for MVP)
 
-### Update Frequency
-- **status.md** - Weekly updates
-- **Phase docs** - At phase boundaries
-- **Integration guides** - As components evolve
+**Core functionality:**
+- Pre-commit hook integration
+- Adaptive verbosity (quiet, standard, explain, AI)
+- 3-layer graph ingestion (structure, temporal, incidents)
+- Tree-sitter AST parsing (Python, JS, TS, Go)
+- Git history analysis
+- Docker Compose deployment
+- Authentication (login/logout/whoami)
+- Incident tracking (create, link, search)
 
----
+**Development infrastructure:**
+- GoReleaser configuration
+- GitHub Actions CI/CD
+- Homebrew distribution
+- Installation script
+- Docker Hub publishing
 
-## Phase Documentation Template
+### 🚧 In Progress (Current Sprint)
 
-```markdown
-# Phase N: [Phase Name]
+- Risk assessment engine (Phase 1 baseline + Phase 2 LLM)
+- Neo4j query optimization
+- False positive tracking
+- Configuration management improvements
 
-**Timeline:** [Start] - [End]
-**Status:** [Proposed | In Progress | Completed]
+### 📅 Planned (Next 2-4 Weeks)
 
----
+- Complete risk assessment integration
+- Performance optimization (<200ms Phase 1, <5s Phase 2)
+- Production hardening
+- Beta user onboarding
+- Documentation polish
 
-## Goals
-
-[High-level objectives for this phase]
-
----
-
-## Scope
-
-**In Scope:**
-- [ ] Feature 1
-- [ ] Feature 2
-
-**Out of Scope:**
-- [Deferred to next phase]
+**See [NEXT_STEPS.md](NEXT_STEPS.md) and [status.md](status.md) for detailed roadmap**
 
 ---
 
-## Deliverables
+## Archived Documents (Obsolete)
 
-| Deliverable | Owner | Status | Notes |
-|-------------|-------|--------|-------|
-| Component A | [Name] | Done | |
-| Component B | [Name] | In Progress | |
+Documents that are completed, obsolete, or out of MVP scope have been moved to:
 
----
+**[../99-archive/03-implementation-obsolete/](../99-archive/03-implementation-obsolete/)**
 
-## Success Criteria
+**Archived categories:**
+- Session prompts (SESSION_*.md) - Completed work
+- Coordination docs (PARALLEL_SESSION_PLAN*.md) - Sessions complete
+- Completion reports (DX_FOUNDATION_COMPLETE.md, etc.) - Historical milestones
+- Cloud research (CLOUD_GRAPH_DATABASE_COMPARISON.md) - Deferred to post-MVP
+- Future phase plans (Q1 2026, Q2-Q3 2026) - Beyond MVP scope
+- Test results (TEST_RESULTS_OCT_2025.md) - One-time reports
 
-- [ ] Criterion 1
-- [ ] Criterion 2
+**Why archived:** These docs were useful for specific work sessions or represent future vision outside 4-6 week MVP timeline.
 
----
-
-## Dependencies
-
-- [External dependency]
-- [Blocker from previous phase]
+**See:** [../99-archive/03-implementation-obsolete/README.md](../99-archive/03-implementation-obsolete/README.md) for full archive index
 
 ---
 
-## Testing Strategy
+## How to Navigate This Documentation
 
-[How this phase will be tested]
+**1. New contributors - Start here:**
+   - Read [DEVELOPMENT_AND_DEPLOYMENT.md](DEVELOPMENT_AND_DEPLOYMENT.md) for setup
+   - Check [status.md](status.md) to understand current progress
+   - Review [NEXT_STEPS.md](NEXT_STEPS.md) for priorities
+
+**2. Implementing features:**
+   - Find relevant integration guide in [integration_guides/](integration_guides/)
+   - Check [testing/](testing/) for testing strategy
+   - Update [status.md](status.md) when complete
+
+**3. Deploying/releasing:**
+   - Follow [DEPLOYMENT_STRATEGY.md](DEPLOYMENT_STRATEGY.md) for releases
+   - Check [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) before launch
+   - Update [CHANGELOG.md](CHANGELOG.md) with changes
+
+**4. Optimizing:**
+   - Review [NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md](NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md) for graph performance
+   - Check [integration_guides/graph_construction.md](integration_guides/graph_construction.md) for optimization strategies
+
+**5. Future reference:**
+   - Explore archived docs in [../99-archive/03-implementation-obsolete/](../99-archive/03-implementation-obsolete/) for historical context
+   - Check [../99-archive/01-architecture-future-vision/](../99-archive/01-architecture-future-vision/) for cloud features
 
 ---
 
-## Risks
+## Related Documentation
 
-| Risk | Probability | Impact | Mitigation |
-|------|------------|--------|------------|
-| Risk 1 | High | Medium | Strategy |
+**Product Vision:**
+- [../00-product/mvp_vision.md](../00-product/mvp_vision.md) - MVP scope and goals
+- [../00-product/developer_experience.md](../00-product/developer_experience.md) - UX design principles
 
----
+**Architecture:**
+- [../01-architecture/mvp_architecture_overview.md](../01-architecture/mvp_architecture_overview.md) - System architecture
+- [../01-architecture/agentic_design.md](../01-architecture/agentic_design.md) - Investigation flow
+- [../01-architecture/graph_ontology.md](../01-architecture/graph_ontology.md) - Graph schema
 
-## Timeline
-
-Week 1-2: [Milestone]
-Week 3-4: [Milestone]
-```
+**Operations:**
+- [../02-operations/local_deployment_operations.md](../02-operations/local_deployment_operations.md) - Operational patterns
+- [../02-operations/development_best_practices.md](../02-operations/development_best_practices.md) - Best practices
 
 ---
 
 ## Integration Guide Template
+
+When adding new integration guides, use this structure:
 
 ```markdown
 # [Component] Integration Guide
 
 **Purpose:** [What this component does]
 **Prerequisites:** [What you need before starting]
+**Last Updated:** YYYY-MM-DD
+
+---
+
+## Overview
+
+[High-level description]
 
 ---
 
 ## Installation
 
-[Step-by-step installation instructions]
+[Step-by-step installation]
 
 ---
 
@@ -270,7 +276,7 @@ Week 3-4: [Milestone]
 
 ## Usage
 
-[Code examples, common patterns]
+[Common patterns, examples]
 
 ---
 
@@ -289,12 +295,27 @@ Week 3-4: [Milestone]
 
 ---
 
-## References
+## Related Documentation
 
-- [Link to architecture doc]
-- [Link to external docs]
+- [Architecture doc](../01-architecture/...)
+- [Operations doc](../02-operations/...)
 ```
 
 ---
 
+## Status Update Frequency
+
+**Keep these docs current:**
+- **status.md** - Update weekly (or after major milestones)
+- **NEXT_STEPS.md** - Update when priorities change
+- **PRODUCTION_READINESS.md** - Update before release
+- **CHANGELOG.md** - Update with every release
+
+---
+
 **Back to:** [dev_docs/README.md](../README.md)
+
+---
+
+**Last Updated:** October 17, 2025
+**Next Review:** After MVP beta launch (Week 7-8)
