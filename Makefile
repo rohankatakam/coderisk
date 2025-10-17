@@ -11,7 +11,7 @@ GIT_TAG=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0-dev")
 BUILD_DATE=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 VERSION_FLAGS=-X main.GitCommit=$(GIT_COMMIT) -X main.Version=$(GIT_TAG) -X main.BuildTime=$(BUILD_DATE)
 
-.PHONY: help build clean test dev start stop logs status install
+.PHONY: help build clean test dev start stop logs status rebuild test-cli coverage lint clean-db clean-all restart
 
 ## help: Show available commands
 help:
@@ -109,7 +109,7 @@ test-cli: build
 	@echo ""
 	@echo "💡 Test graph construction:"
 	@echo "   cd /tmp && git clone https://github.com/hashicorp/terraform-exec"
-	@echo "   cd /tmp/terraform-exec && $(BINARY_NAME) init"
+	@echo "   cd /tmp/terraform-exec && $(shell pwd)/bin/$(BINARY_NAME) init"
 	@echo ""
 
 ## coverage: Generate test coverage
