@@ -37,11 +37,11 @@ dev: clean build start
 	@echo "   cd terraform-exec"
 	@echo "   $(shell pwd)/bin/crisk init"
 	@echo ""
-	@echo "💡 Check version:"
-	@echo "   $(shell pwd)/bin/crisk --version"
+	@echo "💡 Quick checks:"
+	@echo "   ./bin/crisk --version          # Check version"
+	@echo "   ./bin/crisk help               # See all commands"
 	@echo ""
-	@echo "📌 Development: Use ./bin/crisk (local binary)"
-	@echo "   Production:  Use crisk (global from Homebrew)"
+	@echo "📌 Binary location: ./bin/crisk (local build)"
 	@echo ""
 
 ## build: Build CLI binary
