@@ -78,10 +78,10 @@ cmd/test-env/
 test_sandbox/  # Integration testing workspace (cloned repos)
 
 # Private development documentation (personal IP)
-dev_docs/
 test_data/
 private/
 internal_docs/
+dev_docs/
 DEV_REFERENCE.md
 
 # Logs and debug files
