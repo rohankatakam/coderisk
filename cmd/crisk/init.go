@@ -56,62 +56,76 @@ func runInit(cmd *cobra.Command, args []string) error {
 	startTime := time.Now()
 	ctx := context.Background()
 
-	// Try to fetch credentials from cloud (if authenticated)
-	// Otherwise fall back to environment variables
+	// Detect deployment mode
+	mode := config.DetectMode()
+
 	var githubToken, openaiAPIKey string
-	authManager, err := auth.NewManager()
-	if err == nil {
-		// Try to load session
-		if err := authManager.LoadSession(); err == nil {
-			// Authenticated - fetch credentials from Supabase
-			fmt.Println("🔐 Fetching credentials from CodeRisk Cloud...")
-			creds, err := authManager.GetCredentials()
-			if err != nil {
-				fmt.Printf("⚠️  Failed to fetch cloud credentials: %v\n", err)
-				fmt.Println("   Falling back to environment variables")
-			} else {
-				// Use cloud credentials
-				if creds.GitHubToken != "" {
-					githubToken = creds.GitHubToken
-					fmt.Println("  ✓ Using GitHub token from cloud")
-				}
-				if creds.OpenAIAPIKey != "" {
-					openaiAPIKey = creds.OpenAIAPIKey
-					fmt.Println("  ✓ Using OpenAI API key from cloud")
-				}
-			}
+	var authManager *auth.Manager
+
+	// Production mode: REQUIRE cloud authentication
+	if !mode.AllowsDevelopmentDefaults() {
+		// Running from packaged binary (brew install, etc.)
+		// MUST authenticate with cloud
+		authManager, err := auth.NewManager()
+		if err != nil {
+			return fmt.Errorf("failed to initialize authentication: %w", err)
 		}
-	}
 
-	// Load environment variables from .env file (as fallback or primary source)
-	envLoader := config.NewEnvLoader()
-	envLoader.MustLoad()
+		if err := authManager.LoadSession(); err != nil {
+			return fmt.Errorf("❌ Not authenticated.\n\n" +
+				"To use CodeRisk, you must authenticate:\n" +
+				"  → Run: crisk login\n\n" +
+				"Visit https://coderisk.dev to create an account.\n")
+		}
 
-	// If cloud credentials weren't available, use environment variables
-	if githubToken == "" {
+		// Fetch credentials from cloud
+		fmt.Println("🔐 Fetching credentials from CodeRisk Cloud...")
+		creds, err := authManager.GetCredentials()
+		if err != nil {
+			return fmt.Errorf("failed to fetch cloud credentials: %w\n\nTry running 'crisk logout' then 'crisk login' again.", err)
+		}
+
+		if creds.GitHubToken == "" || creds.OpenAIAPIKey == "" {
+			return fmt.Errorf("❌ Missing credentials.\n\n" +
+				"Please configure your API keys at:\n" +
+				"  → https://coderisk.dev/dashboard/settings\n")
+		}
+
+		githubToken = creds.GitHubToken
+		openaiAPIKey = creds.OpenAIAPIKey
+		fmt.Println("  ✓ Using credentials from cloud")
+
+	} else {
+		// Development mode: Allow .env file
+		fmt.Printf("🔧 Development mode detected (%s)\n", mode.Description())
+
+		// Load environment variables from .env file
+		envLoader := config.NewEnvLoader()
+		if err := envLoader.Load(); err != nil {
+			return fmt.Errorf("failed to load .env file: %w\n\nCopy .env.example to .env and configure your credentials.", err)
+		}
+
 		githubToken = os.Getenv("GITHUB_TOKEN")
-		if githubToken == "" {
-			return fmt.Errorf("GitHub token not found. Either:\n  1. Run 'crisk login' to use cloud credentials\n  2. Set GITHUB_TOKEN in .env or environment")
-		}
-		fmt.Println("  ✓ Using GitHub token from environment")
-	}
-
-	if openaiAPIKey == "" {
 		openaiAPIKey = os.Getenv("OPENAI_API_KEY")
-		if openaiAPIKey == "" {
-			return fmt.Errorf("OpenAI API key not found. Either:\n  1. Run 'crisk login' to use cloud credentials\n  2. Set OPENAI_API_KEY in .env or environment")
+
+		if githubToken == "" {
+			return fmt.Errorf("GITHUB_TOKEN not set in .env file")
 		}
-		fmt.Println("  ✓ Using OpenAI API key from environment")
+		if openaiAPIKey == "" {
+			return fmt.Errorf("OPENAI_API_KEY not set in .env file")
+		}
+
+		fmt.Println("  ✓ Using credentials from .env file")
+
+		// Validate required variables
+		if err := envLoader.ValidateWithGitHub(); err != nil {
+			return err
+		}
 	}
 
 	// Set environment variables for downstream code that expects them
 	os.Setenv("GITHUB_TOKEN", githubToken)
 	os.Setenv("OPENAI_API_KEY", openaiAPIKey)
-
-	// Validate required variables including GitHub token
-	if err := envLoader.ValidateWithGitHub(); err != nil {
-		return err
-	}
 
 	// Parse repository name
 	repoName := args[0]
@@ -122,7 +136,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("🚀 Initializing CodeRisk for %s/%s...\n", owner, repo)
 	fmt.Printf("   Backend: %s\n", backendType)
-	fmt.Printf("   Config: %s\n", envLoader.GetPath())
+	fmt.Printf("   Mode: %s\n", mode.Description())
 
 	// Load and validate configuration
 	cfg, err := config.Load("")
@@ -130,7 +144,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	mode := config.DetectMode()
 	result := cfg.ValidateWithMode(config.ValidationContextInit, mode)
 	if result.HasErrors() {
 		return fmt.Errorf("configuration validation failed:\n%s", result.Error())

@@ -65,13 +65,9 @@ Git commit: ` + GitCommit + `
 
 	// Add subcommands
 	rootCmd.AddCommand(initCmd)
-	rootCmd.AddCommand(initLocalCmd)
 	rootCmd.AddCommand(checkCmd)
-	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(statusCmd)
-	rootCmd.AddCommand(configureCmd)
 	rootCmd.AddCommand(configCmd)
-	rootCmd.AddCommand(migrateToKeychainCmd)
-	rootCmd.AddCommand(parseCmd)
 	rootCmd.AddCommand(incidentCmd)
+	// Note: login, logout, whoami are added via their own init() functions
 }

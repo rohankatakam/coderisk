@@ -57,27 +57,46 @@ func init() {
 func runCheck(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Try to fetch credentials from cloud (if authenticated)
-	// Otherwise fall back to environment variables
+	// Detect deployment mode
+	mode := appconfig.DetectMode()
+
 	var openaiAPIKey string
 	var authManager *auth.Manager
 	var err error
 
-	authManager, err = auth.NewManager()
-	if err == nil {
-		// Try to load session
-		if err := authManager.LoadSession(); err == nil {
-			// Authenticated - fetch credentials from Supabase
-			creds, err := authManager.GetCredentials()
-			if err == nil && creds.OpenAIAPIKey != "" {
-				openaiAPIKey = creds.OpenAIAPIKey
-			}
+	// Production mode: REQUIRE cloud authentication
+	if !mode.AllowsDevelopmentDefaults() {
+		// Running from packaged binary - must use cloud auth
+		authManager, err = auth.NewManager()
+		if err != nil {
+			return fmt.Errorf("failed to initialize authentication: %w", err)
 		}
-	}
 
-	// If cloud credentials weren't available, use environment variable
-	if openaiAPIKey == "" {
+		if err := authManager.LoadSession(); err != nil {
+			return fmt.Errorf("❌ Not authenticated.\n\nRun: crisk login\n")
+		}
+
+		// Fetch credentials from cloud
+		creds, err := authManager.GetCredentials()
+		if err != nil {
+			return fmt.Errorf("failed to fetch credentials: %w", err)
+		}
+
+		if creds.OpenAIAPIKey == "" {
+			return fmt.Errorf("OpenAI API key not configured.\nVisit: https://coderisk.dev/dashboard/settings")
+		}
+
+		openaiAPIKey = creds.OpenAIAPIKey
+
+	} else {
+		// Development mode: Allow .env file
 		openaiAPIKey = os.Getenv("OPENAI_API_KEY")
+
+		// Try to load auth manager for telemetry (optional in dev mode)
+		authManager, _ = auth.NewManager()
+		if authManager != nil {
+			authManager.LoadSession() // Ignore errors in dev mode
+		}
 	}
 
 	// Get pre-commit flag
