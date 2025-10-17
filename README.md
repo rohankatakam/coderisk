@@ -63,16 +63,11 @@ cd /tmp
 git clone https://github.com/hashicorp/terraform-exec
 cd terraform-exec
 
-# Run crisk init (auto-detects git remote)
+# Run crisk init (auto-detects from git remote)
 /Users/rohankatakam/Documents/brain/coderisk/bin/crisk init
 
-# Graph built in Neo4j
+# Verify in Neo4j browser
 open http://localhost:7475
-```
-
-**Alternative:** Specify repository explicitly (clones it for you):
-```bash
-./bin/crisk init hashicorp/terraform-exec
 ```
 
 ### Available Commands

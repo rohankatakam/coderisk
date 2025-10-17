@@ -24,37 +24,37 @@ var (
 )
 
 var initCmd = &cobra.Command{
-	Use:   "init [repository]",
-	Short: "Initialize CodeRisk with full 3-layer analysis (Production)",
+	Use:   "init",
+	Short: "Initialize CodeRisk analysis for current repository",
 	Long: `Initialize CodeRisk by building the complete 3-layer knowledge graph.
 
-This is the PRODUCTION command that enables full risk analysis:
+This command must be run inside a cloned GitHub repository.
+
+What it does:
   • Layer 1 (Structure): Tree-sitter parsing of code structure
   • Layer 2 (Temporal): GitHub commit history, co-changes, ownership
   • Layer 3 (Incidents): GitHub issues, PRs, incident tracking
 
 Usage:
-  # Inside a cloned repository (auto-detects git remote)
-  cd /path/to/my-repo
+  git clone https://github.com/owner/repo
+  cd repo
   crisk init
 
-  # Or specify repository explicitly
-  crisk init owner/repo
-
 Examples:
-  crisk init                        # Use current directory
-  crisk init omnara-ai/omnara       # Specify repository
-  crisk init --backend neo4j        # Use current dir with Neo4j backend
+  cd ~/projects/my-repo
+  crisk init                # Detects GitHub remote automatically
+  crisk init --backend neo4j  # Specify backend (default: neo4j)
 
 Requirements:
-  • OpenAI API key (for LLM-guided analysis)
-  • GitHub Personal Access Token (for temporal data)
+  • Must be run inside a cloned GitHub repository
+  • GitHub Personal Access Token (for fetching issues, commits)
+  • OpenAI API key (optional, for Phase 2 LLM analysis)
   • Docker (Neo4j, PostgreSQL, Redis)
 
 Configuration:
-  Run 'crisk configure' to set up API keys with OS keychain.
-  Alternatively, use .env file (see .env.example).`,
-	Args: cobra.MaximumNArgs(1),
+  Development: Use .env file (copy from .env.example)
+  Production: Run 'crisk login' for cloud authentication`,
+	Args: cobra.NoArgs,
 	RunE: runInit,
 }
 
@@ -182,29 +182,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 	os.Setenv("GITHUB_TOKEN", githubToken)
 	os.Setenv("OPENAI_API_KEY", openaiAPIKey)
 
-	// Determine repository: from argument or detect current directory
-	var owner, repo, repoPath string
-	var err error
-
-	if len(args) == 0 {
-		// No argument provided - detect current repository
-		fmt.Println("📁 Detecting repository from current directory...")
-		owner, repo, repoPath, err = detectCurrentRepo()
-		if err != nil {
-			return err
-		}
-		fmt.Printf("  ✓ Detected: %s/%s\n", owner, repo)
-		fmt.Printf("  ✓ Path: %s\n", repoPath)
-	} else {
-		// Argument provided - parse owner/repo format
-		repoName := args[0]
-		owner, repo, err = parseRepoName(repoName)
-		if err != nil {
-			return fmt.Errorf("invalid repository name: %w", err)
-		}
-		// Will clone this repository later
-		repoPath = ""
+	// Detect current repository
+	fmt.Println("📁 Detecting repository from current directory...")
+	owner, repo, repoPath, err := detectCurrentRepo()
+	if err != nil {
+		return err
 	}
+	fmt.Printf("  ✓ Detected: %s/%s\n", owner, repo)
+	fmt.Printf("  ✓ Path: %s\n", repoPath)
 
 	fmt.Printf("\n🚀 Initializing CodeRisk for %s/%s...\n", owner, repo)
 	fmt.Printf("   Backend: %s\n", backendType)
@@ -260,23 +245,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Connected to PostgreSQL\n")
 	fmt.Printf("  ✓ Connected to %s\n", backendType)
 
-	// Stage 0: Clone repository or use existing directory
-	cloneStart := time.Now()
-	if repoPath == "" {
-		// Need to clone the repository
-		fmt.Printf("\n[0/4] Cloning repository with full git history...\n")
-		repoURL := fmt.Sprintf("https://github.com/%s/%s", owner, repo)
-		repoPath, err = ingestion.CloneRepositoryFull(ctx, repoURL)
-		if err != nil {
-			return fmt.Errorf("clone failed: %w", err)
-		}
-		cloneDuration := time.Since(cloneStart)
-		fmt.Printf("  ✓ Repository cloned to %s (took %v)\n", repoPath, cloneDuration)
-	} else {
-		// Using existing cloned repository
-		fmt.Printf("\n[0/4] Using existing repository...\n")
-		fmt.Printf("  ✓ Using repository at %s (skipped cloning)\n", repoPath)
-	}
+	// Use the already-cloned repository
+	fmt.Printf("\n[0/4] Using repository at %s...\n", repoPath)
+	fmt.Printf("  ✓ Skipping clone (using existing repository)\n")
 
 	// Parse with tree-sitter (Layer 1: Structure)
 	fmt.Printf("\n[0.5/4] Parsing code structure (Layer 1)...\n")
