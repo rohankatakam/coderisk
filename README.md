@@ -77,8 +77,6 @@ make start      # Start Docker services
 make stop       # Stop services
 make test       # Run unit tests
 make lint       # Run linters
-make install    # Install globally (optional, overwrites Homebrew version)
-make uninstall  # Remove any global installations
 make clean-db   # Reset databases
 ```
 

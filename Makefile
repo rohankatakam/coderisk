@@ -26,6 +26,11 @@ dev: clean build start
 	@echo "✅ Development environment ready!"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo ""
+	@if command -v crisk &> /dev/null; then \
+		echo "⚠️  WARNING: Found global 'crisk' at: $$(which crisk)"; \
+		echo "   To avoid conflicts, always use the full path: ./bin/crisk"; \
+		echo ""; \
+	fi
 	@echo "🚀 Test the workflow:"
 	@echo "   cd /tmp"
 	@echo "   git clone https://github.com/hashicorp/terraform-exec"
@@ -45,21 +50,11 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	@CGO_ENABLED=1 go build -v -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
 	@echo "✅ Binary: $(BUILD_DIR)/$(BINARY_NAME)"
+	@echo "📌 Use: $(shell pwd)/bin/crisk"
 
-## install: Install binary globally (optional, for testing prod experience)
-install: build
-	@echo "📦 Installing to /usr/local/bin..."
-	@echo "⚠️  This requires sudo password"
-	@echo "⚠️  WARNING: This will overwrite any Homebrew-installed crisk"
-	@echo ""
-	@read -p "Continue? (y/N) " confirm && [ "$$confirm" = "y" ] || exit 1
-	@sudo cp $(BUILD_DIR)/$(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
-	@sudo chmod +x /usr/local/bin/$(BINARY_NAME)
-	@echo "✅ Installed globally"
-
-## rebuild: Quick rebuild (fast iteration, no install needed)
+## rebuild: Quick rebuild (fast iteration)
 rebuild: build
-	@echo "✅ Rebuild complete - use ./bin/crisk"
+	@echo "✅ Rebuild complete"
 
 ## start: Start Docker services
 start:
@@ -131,14 +126,6 @@ lint:
 	@go vet ./...
 	@if command -v golangci-lint &> /dev/null; then golangci-lint run; fi
 
-## uninstall: Remove any globally installed crisk (including old dev versions)
-uninstall:
-	@echo "🗑️  Removing globally installed crisk..."
-	@sudo rm -f /usr/local/bin/crisk /usr/local/bin/crisk-dev
-	@rm -f ~/.local/bin/crisk ~/.local/bin/crisk-dev 2>/dev/null || true
-	@echo "✅ Removed all global installations"
-	@echo ""
-	@echo "Note: Use 'make dev' to build local binary at ./bin/crisk"
 
 ## clean: Clean build artifacts
 clean:
