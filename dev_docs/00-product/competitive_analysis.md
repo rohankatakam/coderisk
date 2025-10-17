@@ -1,157 +1,220 @@
-# Competitive Analysis
+# Competitive Analysis (MVP Focus)
 
-**Last Updated:** October 4, 2025
-**Owner:** Product Team
-**Status:** Active - Counter-Positioning Strategy Deployed
+**Last Updated:** October 17, 2025
+**Status:** Active - Local-First Positioning
+**Target Market:** Solo developers + small teams using AI coding assistants
 
-> **📘 Cross-reference:** See [spec.md](../spec.md) Section 1.4 for technical comparison details
-> **📘 Strategic Context:** See [strategic_moats.md](strategic_moats.md) for 7 Powers counter-positioning
-
----
-
-## Executive Summary (Updated October 2025)
-
-**Strategic Repositioning:** CodeRisk has evolved from "Pre-Flight Check tool" to **"Trust Infrastructure for AI-Generated Code"** —a fundamentally different market position that competitors cannot adopt without destroying their existing business models.
-
-**Previous Positioning (Vulnerable):**
-- Category: Pre-flight check tool (new workflow moment)
-- Differentiation: Timing (pre-commit) + intelligence (agentic)
-- **Problem:** Competitors could add pre-commit mode easily
-
-**New Positioning (Defensible):**
-- Category: **The ARC Database** (CVE for Architecture) + Trust infrastructure
-- Business Model: Platform + insurance + certification (not just analysis)
-- **Moat:** Competitors cannot copy without cannibalizing existing revenue
-- **Bootstrap:** GitHub mining strategy provides 100 ARC entries in 8 weeks (10x faster than organic)
-
-**Key Competitive Advantages (Updated):**
-1. **Cornered Resource**: The ARC Database - 100 patterns from 10,000 GitHub incidents (8-week bootstrap)
-2. **Counter-Positioning**: Trust infrastructure business model they can't adopt
-3. **Network Effects**: Cross-org learning bootstrapped by GitHub mining (perceived Day 1 value)
-4. **Brand**: "First ARC Database" category creation (first-mover advantage)
-5. **Economics**: BYOK model + insurance revenue (70-85% cost advantage)
-
-> **📊 Strategic Update:** GitHub mining analysis complete - see [github_mining_7_powers_alignment.md](../04-research/active/github_mining_7_powers_alignment.md) for 85% alignment score with 7 Powers framework
+> **📘 Strategic Simplification:** Updated to focus on local-first MVP positioning. Complex trust infrastructure and ARC database positioning archived to [99-archive/00-product-future-vision](../99-archive/00-product-future-vision/) for v2-v4.
 
 ---
 
-## Competitive Landscape
+## Executive Summary
 
-### Market Segmentation
+**CodeRisk MVP Positioning:**
+> **"Local-first pre-commit risk scanner for AI-generated code"**
+
+**Category:** Pre-commit architectural safety check (NEW workflow moment)
+
+**Key Differentiators:**
+1. **Timing:** Pre-commit (before code becomes public) vs post-commit (PR review, CI/CD)
+2. **Architecture:** Local-first (Docker + local Neo4j) vs cloud-based
+3. **Economics:** BYOK model (~$1-2/month) vs all-inclusive pricing ($30-150/month)
+4. **Focus:** Architectural risks for AI-generated code vs general code quality
+
+**Primary Competitors:**
+- **Greptile** - Cloud PR review tool (later timing, higher cost)
+- **SonarQube** - Rule-based static analysis (high false positives)
+- **Codescene** - Health dashboard for managers (batch, not real-time)
+
+**Competitive Advantages:**
+- ✅ **Earliest intervention** - Pre-commit, not PR review
+- ✅ **Local-first** - Fast, private, no cloud costs
+- ✅ **Low cost** - Free BYOK (~$1-2/month LLM costs)
+- ✅ **AI-focused** - Designed for AI coding assistant users
+- ✅ **Low false positives** - <5% target vs 10-20% industry
+
+---
+
+## Market Positioning Map
+
+### Timing in Developer Workflow
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Timing in Workflow                    │
 ├──────────────┬──────────────┬──────────────┬────────────┤
 │  Pre-Commit  │   Pre-PR     │  PR Review   │ Post-Merge │
+│  (PRIVATE)   │   (PRIVATE)  │  (PUBLIC)    │ (DEPLOYED) │
 ├──────────────┼──────────────┼──────────────┼────────────┤
-│  CodeRisk    │  CodeRisk    │  Greptile    │  Codescene │
-│  (2-5s)      │  (2-5s)      │  (30s-2min)  │  (hours)   │
-│              │              │  SonarQube   │  Datadog   │
+│  CodeRisk    │              │  Greptile    │  Codescene │
+│  (2-5s)      │              │  (30s-2min)  │  (hours)   │
+│  LOCAL       │              │  SonarQube   │  Datadog   │
 │              │              │  (minutes)   │  (passive) │
 └──────────────┴──────────────┴──────────────┴────────────┘
+
+              ↑ CodeRisk owns this moment
+              └─ BEFORE developer commits publicly
 ```
 
 **CodeRisk's Unique Position:**
-- **Earliest intervention point** (before developer commits publicly)
-- **Private feedback loop** (no embarrassment, no sunk cost fallacy)
-- **Rapid iteration** (fix locally, recheck in 5 seconds)
+- **Earliest intervention point** - Before code becomes public
+- **Private feedback** - No embarrassment, no sunk cost fallacy
+- **Local execution** - Fast, private, no network latency
+- **Rapid iteration** - Fix locally, recheck in 5 seconds
 
 ---
 
-## Direct Competitors
+## Primary Competitors
 
-### 1. Greptile (Conversational PR Co-pilot)
+### 1. Greptile (Cloud PR Co-pilot)
 
 **Company Profile:**
 - **Founded:** 2023
 - **Funding:** Seed stage (~$2M)
-- **Focus:** AI-powered PR review assistant
-- **Customer Base:** 100+ teams (estimate)
+- **Focus:** Conversational AI-powered PR review
+- **Architecture:** Cloud-based, vector search + RAG
+- **Pricing:** $30-100/user/month (estimated)
 
 **Product Positioning:**
 > "Chat with your codebase during PR review"
 
 **Feature Comparison:**
 
-| Feature | CodeRisk | Greptile |
-|---------|----------|----------|
-| **Timing** | Pre-commit | PR review |
-| **Format** | Decisive check (binary) | Conversational (open-ended) |
+| Feature | CodeRisk (MVP) | Greptile |
+|---------|----------------|----------|
+| **Timing** | Pre-commit (private) | PR review (public) |
+| **Architecture** | Local (Docker + Neo4j) | Cloud (vector DB) |
 | **Latency** | 2-5 seconds | 30 seconds - 2 minutes |
-| **Use Case** | "Is this safe?" | "How does X work?" |
-| **Data Model** | Hybrid graph (AST + temporal) | Code embeddings + RAG |
-| **Investigation** | Agentic graph search | Vector similarity search |
-| **Setup** | 0-1 min (OAuth) | 2-5 min (repo indexing) |
-| **Pricing** | $10-50/user/month | $30-100/user/month (estimate) |
-| **LLM Cost** | User BYOK (transparent) | Included (markup) |
+| **Use Case** | "Is this AI code safe?" | "How does X work?" |
+| **Workflow** | Binary check (pass/fail) | Conversational exploration |
+| **Setup** | `brew install` → Done | OAuth + repo indexing (5 min) |
+| **Privacy** | 100% local (except LLM call) | Code sent to cloud |
+| **Pricing** | Free + BYOK ($1-2/mo LLM) | $30-100/user/month (all-in) |
+| **LLM Costs** | User pays directly (transparent) | Included (marked up 2-3x) |
+| **Infrastructure** | User's machine (Docker) | Greptile's cloud |
 
 **Strengths:**
-- ✅ Strong conversational UX (feels like ChatGPT for code)
+- ✅ Strong conversational UX (ChatGPT for code)
 - ✅ Good for exploratory questions during PR review
 - ✅ Integrates with GitHub PR interface
-- ✅ Handles "How does X work?" questions well
+- ✅ Mature cloud infrastructure
 
 **Weaknesses:**
-- ❌ Too late in workflow (developer already committed, sunk cost)
-- ❌ Not optimized for rapid yes/no decisions
-- ❌ Expensive (includes LLM costs with markup)
-- ❌ Requires back-and-forth conversation (not instant)
+- ❌ Too late in workflow (developer already committed)
+- ❌ Cloud-based (privacy concerns, network latency)
+- ❌ Expensive (includes LLM with markup)
+- ❌ Requires conversation (not instant feedback)
 
 **When Greptile Wins:**
-- PR reviewer needs to understand complex code flow
-- Team wants conversational debugging experience
-- Budget allows for higher per-user costs
+- PR reviewer needs deep code exploration
+- Team comfortable with cloud-based tools
+- Budget allows $30-100/user/month
 
 **When CodeRisk Wins:**
-- Developer needs instant pre-commit risk check
-- Team values early feedback (before PR)
-- Budget-conscious teams (BYOK model)
+- Developer needs instant pre-commit check
+- Privacy-conscious teams (local-first)
+- Budget-conscious ($1-2/month vs $30-100/month)
+- Using AI coding assistants (Claude Code, Cursor)
 
-**Differentiation Strategy:**
-- **Timing**: "Use CodeRisk *before* you commit, use Greptile *during* PR review"
-- **Workflow**: CodeRisk is reflexive (like `git status`), Greptile is investigative
-- **Integration**: Not competitive—teams can use both
+**Positioning:**
+> **"Use CodeRisk *before* you commit (private), use Greptile *during* PR review (public)"**
+>
+> Not competitive—teams can use both. CodeRisk for pre-commit safety, Greptile for PR exploration.
 
 ---
 
-### 2. Codescene (Health Monitor & Technical Debt Dashboard)
+### 2. SonarQube (Static Analysis)
+
+**Company Profile:**
+- **Founded:** 2008
+- **Market Leader:** 7M+ developers, 400K+ organizations
+- **Focus:** Code quality and security scanning
+- **Architecture:** Rule-based static analysis
+- **Pricing:** Free (Community) → $10-150/user/month (Enterprise)
+
+**Product Positioning:**
+> "Clean Code for developers, Safe Code for organizations"
+
+**Feature Comparison:**
+
+| Feature | CodeRisk (MVP) | SonarQube |
+|---------|----------------|-----------|
+| **Intelligence** | LLM-guided + graph analysis | Rule-based patterns |
+| **False Positive Rate** | <5% (target) | 10-20% (industry standard) |
+| **Focus** | Architectural risks, coupling | Security, bugs, code smells |
+| **Context** | Temporal coupling + git history | Syntax + known vulnerabilities |
+| **Evolution** | Learns from codebase | Fixed rulesets (manual updates) |
+| **Timing** | Pre-commit (local) | CI/CD (cloud) |
+| **Setup** | `brew install` (1 min) | CI/CD integration (hours) |
+| **Privacy** | 100% local | Code sent to SonarCloud OR self-hosted |
+
+**Strengths:**
+- ✅ Industry standard (7M+ users)
+- ✅ Comprehensive security rules (OWASP, CWE)
+- ✅ Free tier (Community Edition)
+- ✅ Mature product (16+ years)
+
+**Weaknesses:**
+- ❌ High false positive rate (10-20%)
+- ❌ Rule-based (misses architectural coupling)
+- ❌ Alert fatigue (developers ignore warnings)
+- ❌ No temporal coupling analysis
+- ❌ Not optimized for AI-generated code
+
+**When SonarQube Wins:**
+- Team needs security vulnerability scanning
+- Compliance requires OWASP coverage
+- Already invested in SonarQube infrastructure
+
+**When CodeRisk Wins:**
+- Team frustrated with SonarQube's false positives
+- Need architectural risk analysis (not just security)
+- Want local-first tool (privacy, speed)
+- Using AI coding assistants
+
+**Positioning:**
+> **"SonarQube finds *security bugs*, CodeRisk finds *architectural risks* in AI code"**
+>
+> Complementary—run both. SonarQube for security, CodeRisk for architecture.
+
+---
+
+### 3. Codescene (Health Dashboard)
 
 **Company Profile:**
 - **Founded:** 2015
-- **Funding:** Bootstrapped → Acquired (2023)
-- **Focus:** Long-term codebase health monitoring
-- **Customer Base:** 500+ enterprise teams
+- **Market Position:** 500+ enterprise teams
+- **Focus:** Codebase health monitoring for managers
+- **Architecture:** Cloud dashboard, batch analysis
+- **Pricing:** $50-150/user/month
 
 **Product Positioning:**
 > "X-ray for your codebase: Find hotspots and technical debt"
 
 **Feature Comparison:**
 
-| Feature | CodeRisk | Codescene |
-|---------|----------|-----------|
-| **Timing** | Pre-commit (real-time) | Post-merge (batch) |
+| Feature | CodeRisk (MVP) | Codescene |
+|---------|----------------|-----------|
+| **Timing** | Pre-commit (real-time) | Post-merge (batch, daily) |
+| **Target User** | Individual developer | Tech lead / manager |
+| **Workflow** | Developer inner loop (CLI) | Management dashboard (web) |
+| **Latency** | 2-5 seconds | Hours (daily batch analysis) |
 | **Scope** | Specific change impact | Codebase-wide trends |
-| **Latency** | 2-5 seconds | Hours (daily batch) |
-| **User** | Individual developer | Tech lead / manager |
-| **Workflow** | Inner loop (local) | Management dashboard |
-| **Intelligence** | LLM-guided investigation | Statistical analysis |
-| **Data Model** | Graph (3 hops) | Time-series metrics |
+| **Intelligence** | LLM + graph analysis | Statistical models |
 | **Actionability** | "Fix before commit" | "Prioritize refactoring" |
-| **Pricing** | $10-50/user/month | $50-150/user/month |
+| **Setup** | `brew install` (1 min) | Historical data ingestion (days) |
 
 **Strengths:**
-- ✅ Mature product (9+ years in market)
+- ✅ Mature product (9+ years)
 - ✅ Strong visualization (hotspot maps)
 - ✅ Good for technical debt prioritization
-- ✅ Enterprise-ready (compliance, security)
-- ✅ Predictive analytics (which code will cause issues)
+- ✅ Predictive analytics
 
 **Weaknesses:**
-- ❌ Not real-time (batch processing, not inner loop)
+- ❌ Not real-time (batch processing)
 - ❌ Optimized for managers, not developers
-- ❌ Expensive setup (requires historical data ingestion)
 - ❌ Dashboard-centric (not CLI-friendly)
+- ❌ Expensive ($50-150/user/month)
 
 **When Codescene Wins:**
 - Management needs codebase health dashboard
@@ -161,75 +224,23 @@
 **When CodeRisk Wins:**
 - Developer needs instant feedback before committing
 - Team wants developer-first tool (not manager dashboard)
-- Startup/mid-size company prioritizing speed
+- Small team or solo developer
+- Using AI coding assistants
 
-**Differentiation Strategy:**
-- **User**: "Codescene is for your *manager*, CodeRisk is for *you*"
-- **Timing**: "Codescene tells you where debt is, CodeRisk prevents new debt"
-- **Integration**: Complementary—CodeRisk prevents issues Codescene would later flag
-
----
-
-### 3. SonarQube (Static Analysis & Code Quality)
-
-**Company Profile:**
-- **Founded:** 2008
-- **Funding:** Private equity backed
-- **Focus:** Code quality and security scanning
-- **Customer Base:** 7M+ developers, 400K+ organizations
-
-**Product Positioning:**
-> "Clean Code for developers, Safe Code for organizations"
-
-**Feature Comparison:**
-
-| Feature | CodeRisk | SonarQube |
-|---------|----------|-----------|
-| **Intelligence** | Agentic graph search | Rule-based patterns |
-| **False Positive Rate** | <3% (LLM-validated) | 10-20% (industry standard) |
-| **Context** | Temporal coupling + graph | Syntax + known vulnerabilities |
-| **Evolution** | Self-improving (metric validation) | Fixed rulesets (manual updates) |
-| **Risk Types** | Architectural, coupling, incidents | Security, bugs, code smells |
-| **Integration** | CLI + CI/CD | CI/CD + IDE plugins |
-| **Pricing** | $10-50/user/month | Free (Community) → $150+/user/month (Enterprise) |
-
-**Strengths:**
-- ✅ Industry standard (7M+ users)
-- ✅ Comprehensive rules (1000+ patterns)
-- ✅ Security focus (OWASP, CWE coverage)
-- ✅ IDE integration (real-time linting)
-- ✅ Free tier (Community Edition)
-
-**Weaknesses:**
-- ❌ High false positive rate (10-20%)
-- ❌ Rule-based (misses architectural issues)
-- ❌ No temporal coupling analysis
-- ❌ Alert fatigue (developers ignore warnings)
-
-**When SonarQube Wins:**
-- Team needs security vulnerability scanning
-- Compliance requires OWASP coverage
-- Budget allows for free tier (small teams)
-
-**When CodeRisk Wins:**
-- Team frustrated with SonarQube's false positives
-- Need architectural risk analysis (not just code quality)
-- Want intelligent investigation (not rigid rules)
-
-**Differentiation Strategy:**
-- **Focus**: "SonarQube finds *bugs*, CodeRisk finds *architectural risks*"
-- **Accuracy**: "SonarQube has 10-20% FP, CodeRisk has <3% FP"
-- **Integration**: Complementary—run both (SonarQube for security, CodeRisk for architecture)
+**Positioning:**
+> **"Codescene is for your *manager*, CodeRisk is for *you*"**
+>
+> Codescene tells you where debt is (dashboard). CodeRisk prevents new debt (pre-commit).
 
 ---
 
 ## Indirect Competitors
 
-### 4. GitHub Advanced Security (GHAS)
+### GitHub Advanced Security (GHAS)
 
-**Positioning:** Native GitHub security scanning
-**Overlap:** Code scanning, dependency alerts
-**Differentiation:** CodeRisk focuses on architectural risk, not security vulnerabilities
+**Focus:** Security scanning (not architectural analysis)
+**Overlap:** CI/CD code scanning
+**Differentiation:** CodeRisk focuses on architectural coupling, not security vulnerabilities
 
 **When GHAS Wins:**
 - Already using GitHub Enterprise
@@ -237,106 +248,26 @@
 
 **When CodeRisk Wins:**
 - Need architectural coupling analysis
-- Want pre-commit feedback (GHAS is CI/CD)
+- Want pre-commit feedback (GHAS is CI/CD only)
+- Solo developer (GHAS requires Enterprise)
 
 ---
 
-### 5. vFunction (Application Modernization & Architectural Intelligence)
+## Competitive Advantages Matrix
 
-**Company Profile:**
-- **Founded:** 2017
-- **Funding:** $60M+ (Series B)
-- **Focus:** Monolith-to-microservices transformation
-- **Customer Base:** Enterprise (Fortune 500 focus)
-
-**Product Positioning:**
-> "Architectural intelligence for legacy application modernization"
-
-**Feature Comparison:**
-
-| Feature | CodeRisk | vFunction |
-|---------|----------|-----------|
-| **Timing** | Pre-commit (developer) | Post-deployment (architect) |
-| **Target User** | Individual developer | Architect / CTO |
-| **Use Case** | "Is this change safe?" | "How do we modernize this monolith?" |
-| **Scope** | Single file/change | Entire application |
-| **Intelligence** | Pre-commit risk assessment | Architecture refactoring recommendations |
-| **Integration** | CLI + pre-commit hook | Platform + GenAI assistant integration |
-| **Latency** | 2-5 seconds | Hours-days (full analysis) |
-| **Pricing** | $10-50/user/month | Enterprise (6-7 figures/year estimate) |
-| **AI Integration** | BYOK (user's LLM) | Platform-provided (architectural context) |
-
-**Strengths:**
-- ✅ Deep architectural analysis (static + dynamic code analysis)
-- ✅ Automated service extraction (monolith → microservices)
-- ✅ Enterprise-proven (15x faster modernization claim)
-- ✅ Framework upgrade capabilities (Java, .NET)
-- ✅ Architectural observability (drift detection)
-
-**Weaknesses:**
-- ❌ Not real-time (batch processing, hours-days)
-- ❌ Enterprise-only (not accessible to individual developers)
-- ❌ Platform-dependent (not CLI-first)
-- ❌ Expensive (6-7 figure annual contracts)
-- ❌ Modernization-focused (not day-to-day development)
-
-**When vFunction Wins:**
-- Large enterprise modernizing legacy monoliths
-- Multi-year cloud migration projects
-- Need architectural refactoring roadmap
-- Budget for 6-7 figure platform
-
-**When CodeRisk Wins:**
-- Daily development workflow (not one-time modernization)
-- Individual developers need instant feedback
-- Startup/mid-size company budget
-- Pre-commit safety checks (not architectural transformation)
-
-**Differentiation Strategy:**
-- **Workflow Stage**: "vFunction is for *planning* modernization (months), CodeRisk is for *daily* development (seconds)"
-- **User**: "vFunction is for your *architect*, CodeRisk is for your *developer*"
-- **Scope**: "vFunction analyzes entire applications, CodeRisk analyzes individual changes"
-- **Integration**: Not competitive—vFunction modernization + CodeRisk daily checks complement each other
-
-**Key Insight:**
-vFunction and CodeRisk target different workflow moments and users. vFunction helps enterprises plan multi-year modernization projects (top-down, architect-driven). CodeRisk helps developers make safe changes daily (bottom-up, developer-driven). A company could use vFunction to plan microservices extraction, then use CodeRisk to ensure developers don't introduce new coupling during the transition.
-
----
-
-### 6. Datadog / New Relic (Observability Dashboards)
-
-**Positioning:** Post-production monitoring and alerting
-**Overlap:** Incident detection (reactive, not proactive)
-**Differentiation:** CodeRisk prevents incidents *before* they happen
-
-**When Observability Tools Win:**
-- Need runtime metrics, APM, log aggregation
-- Team already invested in observability stack
-
-**When CodeRisk Wins:**
-- Want to prevent incidents (not just detect them)
-- Shift-left strategy (catch issues pre-commit)
-
----
-
-## Competitive Matrix
-
-| Capability | CodeRisk | Greptile | Codescene | SonarQube | vFunction |
-|------------|----------|----------|-----------|-----------|-----------|
-| **Pre-Commit Timing** | ✅ Core | ❌ No | ❌ No | ⚠️ IDE plugin only | ❌ No |
-| **Agentic Investigation** | ✅ Core | ⚠️ RAG only | ❌ No | ❌ No | ⚠️ Architectural only |
-| **Temporal Coupling** | ✅ Core | ❌ No | ✅ Yes | ❌ No | ⚠️ Via analysis |
-| **Incident Prediction** | ✅ Core | ❌ No | ⚠️ Hotspots only | ❌ No | ❌ No |
-| **Low FP Rate (<3%)** | ✅ Target | ⚠️ Varies | ⚠️ ~5-10% | ❌ ~10-20% | ⚠️ Unknown |
-| **Shared Public Cache** | ✅ Core | ❌ No | ❌ No | ❌ No | ❌ No |
-| **BYOK Model** | ✅ Core | ❌ No | ❌ No | N/A | ❌ No |
-| **CLI-First** | ✅ Core | ⚠️ Web-first | ❌ Dashboard | ⚠️ CI/CD | ❌ Platform |
-| **Graph Database** | ✅ Neptune | ⚠️ Vector DB | ❌ SQL | ❌ Files | ✅ Yes |
-| **LLM Integration** | ✅ Phase 2 | ✅ Core | ❌ No | ❌ No | ✅ GenAI |
-| **Real-Time (<5s)** | ✅ Core | ⚠️ 30s-2min | ❌ Batch | ⚠️ Varies | ❌ Hours-days |
-| **Modernization Focus** | ❌ No | ❌ No | ❌ No | ❌ No | ✅ Core |
-| **Target User** | Developer | Developer | Tech Lead | Developer | Architect/CTO |
-| **Price Range** | $10-50/user/mo | $30-100/user/mo | $50-150/user/mo | Free-$150/user/mo | $100K-500K+/yr |
+| Capability | CodeRisk | Greptile | Codescene | SonarQube |
+|------------|----------|----------|-----------|-----------|
+| **Pre-Commit Timing** | ✅ Core | ❌ No | ❌ No | ⚠️ IDE only |
+| **Local-First** | ✅ Core | ❌ Cloud | ❌ Cloud | ⚠️ Optional |
+| **Low Cost (<$5/month)** | ✅ BYOK | ❌ $30-100 | ❌ $50-150 | ⚠️ Free tier |
+| **AI Code Focus** | ✅ Core | ⚠️ General | ❌ No | ❌ No |
+| **Temporal Coupling** | ✅ Core | ❌ No | ✅ Yes | ❌ No |
+| **Low FP Rate (<5%)** | ✅ Target | ⚠️ Varies | ⚠️ ~5-10% | ❌ ~10-20% |
+| **Real-Time (<5s)** | ✅ Core | ⚠️ 30s-2min | ❌ Batch | ⚠️ Varies |
+| **CLI-First** | ✅ Core | ❌ Web | ❌ Dashboard | ⚠️ CI/CD |
+| **Privacy (100% Local)** | ✅ Core | ❌ Cloud | ❌ Cloud | ⚠️ Optional |
+| **Graph Database** | ✅ Local Neo4j | ⚠️ Vector DB | ❌ SQL | ❌ Files |
+| **LLM Integration** | ✅ BYOK | ✅ Included | ❌ No | ❌ No |
 
 **Legend:**
 - ✅ Strong capability
@@ -347,157 +278,186 @@ vFunction and CodeRisk target different workflow moments and users. vFunction he
 
 ## Pricing Comparison
 
-| Product | Free Tier | Starter | Pro | Enterprise |
-|---------|-----------|---------|-----|------------|
-| **CodeRisk** | Public repos only | $10/user/month | $25/user/month | $50/user/month |
-| **Greptile** | Limited (10 queries) | $30/user/month (est) | $70/user/month (est) | Custom |
-| **Codescene** | No | $50/user/month | $100/user/month | $150+/user/month |
-| **SonarQube** | Community (free) | N/A | $10/user/month | $150/user/month |
+### Solo Developer Scenario (100 checks/month)
 
-**CodeRisk Cost Advantage:**
-- **BYOK Model**: User pays OpenAI/Anthropic directly ($0.03-0.05/check)
-- **No LLM Markup**: Competitors include LLM costs with 2-3x markup
-- **Shared Cache**: First user pays graph build cost, subsequent users get instant access
-- **Infrastructure Only**: We charge $2.30/user/month infrastructure, user controls LLM spend
+| Product | Monthly Cost | What's Included |
+|---------|-------------|-----------------|
+| **CodeRisk (MVP)** | **$1-2** | Free tool + BYOK LLM (~$0.01/check) |
+| Greptile | $30-70 | All-inclusive (LLM marked up 2-3x) |
+| Codescene | $50-100 | Cloud dashboard |
+| SonarQube | $0-10 | Community free, Developer $10/month |
 
-**Example Total Cost (100 checks/month):**
-- **CodeRisk**: $10/month (plan) + $3-5/month (LLM) = **$13-15/month**
-- **Greptile**: $30-70/month (all-inclusive, but LLM marked up) = **$30-70/month**
-- **Codescene**: $50-100/month (no LLM) = **$50-100/month**
+**CodeRisk Savings:** 80-98% vs competitors
 
-**Savings: 50-85% vs competitors**
+### Small Team Scenario (5 developers, 500 checks/month)
+
+| Product | Monthly Cost | What's Included |
+|---------|-------------|-----------------|
+| **CodeRisk (MVP)** | **$5-10** | Free tool + BYOK LLM (~$5 total) |
+| Greptile | $150-350 | 5 users × $30-70/user |
+| Codescene | $250-500 | 5 users × $50-100/user |
+| SonarQube | $50-750 | $10-150/user (depends on tier) |
+
+**CodeRisk Savings:** 95-98% vs competitors
+
+### Cost Breakdown (Transparent)
+
+**CodeRisk Total Cost:**
+```
+Tool: $0 (free, open source)
+Infrastructure: $0 (runs locally on user's Docker)
+LLM API: ~$0.01/check × 100 checks = $1/month (user's OpenAI/Anthropic)
+
+Total: $1-2/month
+```
+
+**Greptile Total Cost:**
+```
+Subscription: $30-70/month (includes LLM with 2-3x markup)
+Infrastructure: Included (cloud-hosted)
+
+Total: $30-70/month
+```
+
+**Why CodeRisk is 95%+ cheaper:**
+- User runs locally (no cloud infrastructure costs for us)
+- User provides API key (no LLM markup)
+- We don't pay for compute (user's Docker container)
 
 ---
 
-## Market Positioning Map
+## Positioning Map
 
 ```
-                    High Intelligence (LLM/Agentic)
+                    High Intelligence (LLM/AI)
                               ▲
                               │
                          CodeRisk
                          (Pre-commit)
+                      LOCAL + FAST
                               │
                          Greptile
                          (PR Review)
+                      CLOUD + CONVERSATIONAL
                               │
     Fast ◄────────────────────┼────────────────────► Slow
-    (Real-time)               │                  (Batch)
+  (Real-time)                 │                  (Batch)
+   LOCAL                      │                  CLOUD
                               │
                          SonarQube              Codescene
                          (CI/CD)                (Dashboard)
+                      RULES-BASED           STATISTICAL
                               │
                               ▼
                     Low Intelligence (Rules/Stats)
 ```
 
 **CodeRisk Positioning:**
-- **Top-Left Quadrant**: High intelligence + Fast (unique position)
-- **Workflow Moat**: Earliest intervention point
-- **Technical Moat**: Only agentic graph search in market
+- **Top-Left Quadrant**: High intelligence + Fast + Local (UNIQUE)
+- **Workflow Moat**: Earliest intervention point (pre-commit)
+- **Economic Moat**: BYOK model (95%+ cheaper)
+- **Privacy Moat**: 100% local (except LLM API call)
 
 ---
 
-## Competitive Moats
+## Competitive Moats (MVP)
 
-### 1. Workflow Habit Formation
+### 1. Workflow Timing (Pre-Commit)
 
-**Thesis:** Once `crisk check` becomes muscle memory (like `git status`), developers won't switch
+**Thesis:** Once developers adopt pre-commit checks, they won't switch to post-commit tools
 
 **Evidence:**
-- Git displaced SVN by owning local workflow
-- ESLint/Prettier displaced JSLint by being faster
-- Pre-commit hooks are sticky (run automatically)
+- Pre-commit = private feedback (no embarrassment)
+- Post-commit = public commitment (sunk cost fallacy)
+- Developers prefer catching issues early
 
 **Defensibility:**
-- First-mover advantage in "pre-flight check" category
-- Competitors anchored to later workflow stages (PR review, dashboards)
-- Switching cost: Retrain muscle memory + lose shared cache
+- First-mover advantage in "pre-commit for AI code" category
+- Competitors anchored to later workflow stages
+- Habit formation (muscle memory)
 
-### 2. Network Effects (Shared Public Cache)
+### 2. Local-First Architecture
 
-**Thesis:** More users → More pre-built repos → Faster onboarding → More users
+**Thesis:** Privacy-conscious developers prefer local tools over cloud SaaS
 
-**Mechanics:**
-1. First user of React triggers graph build (5-10 min wait)
-2. Subsequent users get instant access (0-2s)
-3. Popular repos (React, Next.js, Kubernetes) cached by Day 1
-4. Long tail repos cached over time (organic growth)
-
-**Defensibility:**
-- 99% storage reduction (only build once per repo)
-- Instant access to popular OSS repos (competitive UX advantage)
-- New entrants must rebuild cache from scratch
-
-### 3. Technical Moat (Agentic Graph Search)
-
-**Thesis:** Agentic graph search is fundamentally different from competitors' approaches
-
-**Key Differences:**
-- **vs Rule-Based (SonarQube)**: Selective calculation, not brute force
-- **vs Vector Search (Greptile)**: Graph relationships, not embedding similarity
-- **vs Statistical (Codescene)**: LLM reasoning, not fixed models
+**Evidence:**
+- Code never leaves developer's machine (except LLM API)
+- Fast (no network latency)
+- Works offline (no internet required for graph analysis)
 
 **Defensibility:**
-- Requires hybrid graph (AST + temporal data) infrastructure
-- Requires metric validation framework (self-improving system)
-- Requires agentic reasoning (not just prompting)
+- Competitors built for cloud (can't easily pivot to local)
+- Network effects favor cloud (they won't cannibalize)
+- We own privacy-first positioning
 
-### 4. Data Moat (Incident Linking)
+### 3. BYOK Economics
 
-**Thesis:** Manual incident → commit linking creates high-quality training data
+**Thesis:** Developers prefer transparent costs over all-inclusive pricing with markup
 
-**Data Flywheel:**
-1. User links Incident #123 → Commit abc123 (manual, high quality)
-2. System learns patterns (auth issues → timeout incidents)
-3. Future incidents auto-suggest similar commits (semi-automated)
-4. More usage → Better patterns → Higher accuracy
+**Evidence:**
+- Reddit discussions: "Greptile's pricing is opaque"
+- Developers want to see exact LLM costs
+- BYOK model proven by Cursor, other AI dev tools
 
 **Defensibility:**
-- Manual linking is tedious (competitors won't do it)
-- High-quality data beats quantity (low FP rate)
-- Accumulated over time (new entrants start from zero)
+- Competitors rely on LLM markup for margins
+- Can't pivot to BYOK without losing revenue
+- We have 95%+ cost advantage
+
+### 4. AI Coding Assistant Focus
+
+**Thesis:** AI-generated code has unique risks (coupling, patterns) that general tools miss
+
+**Evidence:**
+- AI generates code 5-10x faster (can't manually review all)
+- AI doesn't understand codebase architecture
+- Developers using Claude Code, Cursor need safety check
+
+**Defensibility:**
+- Competitors optimize for general code quality
+- We optimize for AI-generated code specifically
+- Pattern library focused on AI coding risks
 
 ---
 
-## Win/Loss Analysis
+## Win/Loss Scenarios
 
 ### When CodeRisk Wins
 
-**Scenario 1: Developer-First Culture**
-- **Customer Profile**: Startup/mid-size tech companies (50-500 engineers)
-- **Decision Maker**: Engineering manager or tech lead (bottom-up adoption)
-- **Trigger**: Developer frustration with existing tools (SonarQube noise, slow PR reviews)
-- **Objection Handled**: "We already use SonarQube" → "CodeRisk complements SonarQube (architecture vs security)"
+**Scenario 1: Solo Developer Using AI**
+- **Profile:** Solo dev or small team (2-5 people)
+- **Trigger:** Using Claude Code, Cursor, Copilot daily
+- **Pain Point:** Uncertain if AI-generated code is safe
+- **Why CodeRisk:** Free, local, instant pre-commit check
 
-**Scenario 2: High Incident Rate**
-- **Customer Profile**: Fast-growing companies with production incidents
-- **Decision Maker**: VP Engineering or CTO (top-down mandate)
-- **Trigger**: Recent major outage, post-mortem identified "unknown coupling"
-- **Objection Handled**: "We have observability tools" → "CodeRisk prevents incidents, not just detects them"
+**Scenario 2: Privacy-Conscious Team**
+- **Profile:** Startup handling sensitive data (health, finance)
+- **Trigger:** Can't send code to cloud (compliance, privacy)
+- **Pain Point:** Cloud tools like Greptile not allowed
+- **Why CodeRisk:** 100% local (except LLM API call)
 
-**Scenario 3: Budget-Conscious Teams**
-- **Customer Profile**: Bootstrapped startups, small teams
-- **Decision Maker**: Founder or lead developer
-- **Trigger**: Sticker shock from Greptile/Codescene pricing
-- **Objection Handled**: "LLM costs are too high" → "You control LLM spend with BYOK"
+**Scenario 3: Budget-Conscious Startup**
+- **Profile:** Bootstrapped startup, 5-10 developers
+- **Trigger:** Sticker shock from Greptile ($150-700/month for team)
+- **Pain Point:** Can't afford $30-100/user/month tools
+- **Why CodeRisk:** $5-10/month total (BYOK model)
 
 ### When CodeRisk Loses
 
-**Scenario 1: Management-Driven Dashboard Needs**
-- **Lost To**: Codescene
-- **Reason**: VP Engineering wants codebase health dashboard, not developer CLI tool
-- **Learning**: Better positioning for management (add lightweight dashboard view)
+**Scenario 1: Enterprise Compliance**
+- **Lost To:** SonarQube
+- **Reason:** Must satisfy OWASP/CWE security compliance
+- **Learning:** Integrate with SonarQube (complementary)
 
-**Scenario 2: Security Compliance Requirements**
-- **Lost To**: SonarQube + GHAS
-- **Reason**: Must satisfy OWASP/CWE compliance (CodeRisk doesn't scan for CVEs)
-- **Learning**: Integrate with SonarQube (complementary, not competitive)
+**Scenario 2: Management Dashboards**
+- **Lost To:** Codescene
+- **Reason:** VP Engineering wants codebase health dashboard
+- **Learning:** Not our MVP target (defer to v2)
 
 **Scenario 3: Conversational UX Preference**
-- **Lost To**: Greptile
-- **Reason**: Team prefers chat-based exploration over binary risk checks
-- **Learning**: Not our target user (we optimize for speed, not conversation)
+- **Lost To:** Greptile
+- **Reason:** Team prefers chat-based exploration
+- **Learning:** Not our target (we optimize for speed, not conversation)
 
 ---
 
@@ -505,148 +465,132 @@ vFunction and CodeRisk target different workflow moments and users. vFunction he
 
 ### If Greptile Adds Pre-Commit Mode
 
-**Threat Level**: Medium
-**Response**:
-1. **Workflow Moat**: Already own pre-commit habit (first-mover advantage)
-2. **Speed**: Our 2-5s is faster than their 30s-2min (architectural difference)
-3. **Economics**: BYOK model is 50-70% cheaper
+**Threat Level:** Medium
+
+**Response:**
+1. **Timing Advantage:** Already own pre-commit habit (first-mover)
+2. **Architecture:** We're local (faster), they're cloud (network latency)
+3. **Economics:** BYOK is 95% cheaper (they can't match)
+4. **Privacy:** We're 100% local (they need cloud for business model)
 
 ### If SonarQube Adds LLM Intelligence
 
-**Threat Level**: High (large user base)
-**Response**:
-1. **False Positive Rate**: Emphasize our <3% FP vs their historical 10-20%
-2. **Graph Intelligence**: We have temporal coupling + incident data (they don't)
-3. **Shared Cache**: Our network effects (they rebuild for every org)
+**Threat Level:** Medium (large user base)
+
+**Response:**
+1. **False Positives:** Emphasize our <5% FP rate vs their 10-20% history
+2. **Timing:** We're pre-commit (private), they're CI/CD (public)
+3. **Cost:** BYOK vs their all-inclusive (we're 90%+ cheaper)
+4. **Focus:** We're for AI code, they're for general security
 
 ### If Codescene Adds Real-Time Mode
 
-**Threat Level**: Low (different target user)
-**Response**:
-1. **Developer-First**: We're CLI-first, they're dashboard-first (UX mismatch)
-2. **Cost**: Our $10-25/user vs their $50-150/user
-3. **Setup**: Our 0-1 min vs their historical data requirements
+**Threat Level:** Low (different target user)
 
-### If GitHub Builds Native Graph Analysis
+**Response:**
+1. **Target User:** We're for developers (CLI), they're for managers (dashboard)
+2. **Cost:** $1-2/month vs $50-150/month (98% cheaper)
+3. **Setup:** `brew install` vs historical data ingestion
 
-**Threat Level**: High (distribution advantage)
-**Response**:
-1. **Agentic Intelligence**: We have LLM-guided investigation (they'd have rules)
-2. **Shared Cache**: We support multi-repo (GitHub is repo-siloed)
-3. **BYOK**: User controls LLM costs (GitHub would bundle/markup)
-4. **Enterprise**: Offer on-prem (GitHub Cloud-only for GHAS)
+### If GitHub Builds Native Pre-Commit Analysis
 
-### If vFunction Adds Real-Time Developer Checks
+**Threat Level:** High (distribution advantage)
 
-**Threat Level**: Very Low (different market)
-**Response**:
-1. **Target User**: We're for developers (daily), they're for architects (multi-year projects)
-2. **Price Point**: We're $10-50/user/month, they're $100K-500K+/year (100x difference)
-3. **Workflow**: We're pre-commit (seconds), they're planning (months)
-4. **Integration**: Not competitive—companies use vFunction for modernization planning, then use CodeRisk to protect daily changes during transformation
+**Response:**
+1. **Local-First:** We run locally (private, fast), GitHub would be cloud
+2. **BYOK:** User controls LLM costs, GitHub would bundle/markup
+3. **AI Focus:** We're optimized for AI code, GitHub would be general
+4. **Privacy:** We're 100% local, GitHub requires cloud
 
 ---
 
-## Market Opportunities
-
-### Whitespace (No Good Solution Today)
-
-**1. Temporal Coupling Detection**
-- **Problem**: Files that change together but have no structural dependency
-- **Current Solutions**: None (Codescene has basic hotspots, but not real-time)
-- **CodeRisk Advantage**: Only tool with graph-based temporal analysis
-
-**2. Pre-Commit Architectural Guardrails**
-- **Problem**: Architectural patterns regress over time (no enforcement)
-- **Current Solutions**: Manual PR reviews (inconsistent, slow)
-- **CodeRisk Advantage**: Only tool at pre-commit workflow moment
-
-**3. Incident-Driven Risk Assessment**
-- **Problem**: Past incidents don't inform future risk checks
-- **Current Solutions**: Post-mortem docs (unused, siloed)
-- **CodeRisk Advantage**: Only tool linking incidents → code changes
-
----
-
-## Recommended Positioning Statements
+## Market Positioning Statements
 
 ### Primary Message (Developers)
-> **"CodeRisk: The ARC Database (CVE for Architecture)"**
+> **"CodeRisk: Pre-commit safety check for AI-generated code"**
 >
-> Pre-commit risk checking backed by 100 architectural patterns from analyzing 10,000 real production incidents.
-> Run `crisk check` before committing—instant risk analysis in 2-5 seconds.
-
-### Secondary Message (Engineering Managers)
-> **"Learn from 10,000 production incidents before they happen to you"**
->
-> CodeRisk's ARC database catalogs architectural risks from 1,000 top GitHub repos, preventing known incident patterns before they reach production.
+> Run `crisk check` before committing—instant risk analysis in 5 seconds.
+> Free, local-first, privacy-friendly. Just pay your own LLM costs (~$1-2/month).
 
 ### Against Greptile
-> **"Use CodeRisk before you commit, Greptile during PR review"**
+> **"Use CodeRisk *before* you commit, Greptile *during* PR review"**
 >
-> CodeRisk is your pre-flight safety check. Greptile is your in-flight assistant. Use both.
+> CodeRisk: Pre-commit (private, local, $1-2/month)
+> Greptile: PR review (public, cloud, $30-100/month)
+>
+> Not competitive—use both.
+
+### Against SonarQube
+> **"SonarQube finds security bugs. CodeRisk finds architectural risks in AI code."**
+>
+> SonarQube: Security focus, 10-20% false positives, CI/CD timing
+> CodeRisk: Architecture focus, <5% false positives, pre-commit timing
+>
+> Complementary—run both.
 
 ### Against Codescene
 > **"Codescene is for your manager. CodeRisk is for you."**
 >
-> Codescene tells you where technical debt is (dashboard). CodeRisk prevents new debt (CLI).
-
-### Against SonarQube
-> **"SonarQube finds bugs. CodeRisk finds architectural risks."**
->
-> SonarQube: Security + code quality (10-20% FP rate)
-> CodeRisk: Coupling + blast radius + incidents (<3% FP rate)
-
-### Against vFunction
-> **"vFunction modernizes applications. CodeRisk protects daily changes."**
->
-> vFunction is for multi-year modernization projects (architect-driven, 6-7 figures)
-> CodeRisk is for daily development (developer-driven, $10-50/user/month)
->
-> Use both: vFunction plans the transformation, CodeRisk prevents new coupling during it
+> Codescene: Health dashboard (batch, hours, $50-150/month)
+> CodeRisk: Pre-commit check (real-time, 5 seconds, $1-2/month)
 
 ---
 
-## Analyst & Media Positioning
+## MVP Go-to-Market Focus
 
-### Category Creation: "Pre-Flight Check"
+### Target Audience (Prioritized)
 
-**Thesis:** Create new category between "Static Analysis" and "PR Review"
+**Tier 1: Solo Developers Using AI**
+- 1-5 person teams
+- Using Claude Code, Cursor, Copilot daily
+- Budget-conscious ($1-2/month acceptable)
+- Privacy-conscious (prefer local tools)
 
-**Talking Points:**
-- ✅ "Pre-flight check" is a new developer workflow category
-- ✅ Analogous to `git status` (reflexive, habitual, fast)
-- ✅ Addresses "moment of uncertainty" before committing
-- ✅ Complements existing tools (not replacement)
+**Tier 2: Small Teams (2-10 people)**
+- Startup or small company
+- Team uses AI coding assistants
+- Tech lead wants quality gates
+- Budget constraints ($30-100/user/month too expensive)
 
-**Target Analysts:**
-- Gartner: "Application Security Testing" category
-- Forrester: "Software Composition Analysis" wave
-- RedMonk: Developer tools coverage
+**NOT Targeting for MVP:**
+- ❌ Enterprise (50-500+ people) - v2
+- ❌ Managers wanting dashboards - v2
+- ❌ Security/compliance teams - different tool
 
-**Target Media:**
-- TechCrunch: "Y Combinator-backed CodeRisk launches pre-commit risk checker"
-- The New Stack: "How CodeRisk Uses Graph Databases to Prevent Production Incidents"
-- InfoQ: "Agentic Code Analysis: LLMs Meet Graph Databases"
+### Positioning by Use Case
+
+**Use Case 1: "Is my AI code safe to commit?"**
+- **Target:** Solo developer using Claude Code daily
+- **Message:** "Pre-commit safety check for AI code. 5 seconds. Free."
+- **Competitor:** Manual review (slow) or blind commit (risky)
+
+**Use Case 2: "My team generates too much AI code to review"**
+- **Target:** Tech lead managing 2-10 AI users
+- **Message:** "Automated pre-commit checks. Catch issues before PR."
+- **Competitor:** Manual PR review (bottleneck)
+
+**Use Case 3: "I can't afford $30-100/month per developer"**
+- **Target:** Budget-conscious startup
+- **Message:** "$1-2/month total. BYOK model. 95% cheaper."
+- **Competitor:** Greptile, Codescene (too expensive)
 
 ---
 
 ## Related Documents
 
-**Product & Business:**
-- [vision_and_mission.md](vision_and_mission.md) - Product vision and differentiation
-- [user_personas.md](user_personas.md) - Target users (Ben, Clara, Alex)
-- [pricing_strategy.md](pricing_strategy.md) - Pricing tiers and rationale
-- [success_metrics.md](success_metrics.md) - OKRs and tracking
+**Product:**
+- [mvp_vision.md](mvp_vision.md) - MVP vision and scope
+- [user_personas.md](user_personas.md) - Ben (solo dev), Clara (small team)
+- [simplified_pricing.md](simplified_pricing.md) - Free BYOK model
 
-**Technical:**
-- [spec.md](../spec.md) - Complete requirements specification (Section 1.4)
-- [01-architecture/agentic_design.md](../01-architecture/agentic_design.md) - Technical differentiation
+**User Experience:**
+- [developer_experience.md](developer_experience.md) - Local tool UX
+- [developer_workflows.md](developer_workflows.md) - Git workflows
+
+**Archived (Future):**
+- [../99-archive/00-product-future-vision/](../99-archive/00-product-future-vision/) - Complex positioning (v2-v4)
 
 ---
 
-**Last Updated:** October 10, 2025
-**Next Review:** January 2026 (quarterly competitive scan)
-**Recent Changes:**
-- Added GitHub mining bootstrap strategy and updated positioning (ARC Database first-mover)
-- Added vFunction (Application Modernization) to competitive analysis - non-competitive, different market (architect vs developer, multi-year vs daily)
+**Last Updated:** October 17, 2025
+**Next Review:** After MVP launch (Week 7-8), after 50+ user feedback

@@ -19,14 +19,20 @@ help:
 	@echo ''
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/  /'
 
-## dev: Build + start services + install (full development setup)
-dev: clean build start install
+## dev: Build + start services (full development setup)
+dev: clean build start
 	@echo ""
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "✅ Development environment ready!"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo ""
-	@echo "Run: crisk --version"
+	@echo "🚀 Run the CLI:"
+	@echo "   ./bin/crisk --version"
+	@echo "   ./bin/crisk init owner/repo"
+	@echo ""
+	@echo "💡 Add to PATH for this session:"
+	@echo "   export PATH=\"$(pwd)/bin:\$$PATH\""
+	@echo "   crisk --version  # Now works without ./bin/"
 	@echo ""
 
 ## build: Build CLI binary
@@ -36,21 +42,28 @@ build:
 	@CGO_ENABLED=1 go build -v -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
 	@echo "✅ Binary: $(BUILD_DIR)/$(BINARY_NAME)"
 
-## install: Install binary globally
+## install: Install binary globally (requires sudo, optional for dev)
 install: build
-	@echo "📦 Installing globally..."
+	@echo "📦 Installing globally to /usr/local/bin..."
+	@echo "⚠️  This requires sudo password"
 	@sudo cp $(BUILD_DIR)/$(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
 	@sudo chmod +x /usr/local/bin/$(BINARY_NAME)
-	@echo "✅ Installed to /usr/local/bin/$(BINARY_NAME)"
+	@echo "✅ Installed - now run 'crisk' from anywhere"
 
-## rebuild: Quick rebuild and install (fast iteration)
-rebuild: build install
-	@echo "✅ Rebuild complete"
+## rebuild: Quick rebuild (fast iteration)
+rebuild: build
+	@echo "✅ Rebuild complete - run ./bin/crisk"
 
 ## start: Start Docker services
 start:
 	@echo "🐳 Starting services..."
+	@if docker ps -a --format '{{.Names}}' | grep -q 'coderisk-'; then \
+		echo "⚠️  Found existing CodeRisk containers. Cleaning up..."; \
+		docker rm -f coderisk-neo4j coderisk-postgres coderisk-redis 2>/dev/null || true; \
+		echo "   Cleaned up old containers"; \
+	fi
 	@docker compose up -d
+	@echo "⏳ Waiting for services to initialize..."
 	@sleep 5
 	@docker compose ps
 	@echo ""
@@ -81,6 +94,19 @@ logs:
 test:
 	@echo "🧪 Running tests..."
 	@go test -v ./...
+
+## test-cli: Quick test of built CLI binary
+test-cli: build
+	@echo "🧪 Testing CLI binary..."
+	@echo ""
+	@echo "Version:"
+	@./bin/crisk --version
+	@echo ""
+	@echo "✅ CLI binary works!"
+	@echo ""
+	@echo "💡 Test graph construction:"
+	@echo "   cd /tmp && ../bin/crisk init hashicorp/terraform-exec"
+	@echo ""
 
 ## coverage: Generate test coverage
 coverage:

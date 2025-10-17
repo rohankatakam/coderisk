@@ -41,16 +41,29 @@ crisk --version
 # Start services
 make start
 
+# Build and test CLI
+make build
+./bin/crisk --version
+
 # Make code changes...
 
 # Quick rebuild
 make rebuild
+./bin/crisk --version
 
 # Run tests
 make test
+```
 
-# View logs
-make logs
+### Testing Graph Construction
+
+```bash
+# From coderisk directory
+cd /tmp
+../coderisk/bin/crisk init hashicorp/terraform-exec
+
+# Verify in Neo4j browser
+open http://localhost:7475
 ```
 
 ### Available Commands
@@ -59,13 +72,16 @@ make logs
 make help      # Show all commands
 make dev       # Full development setup
 make build     # Build CLI binary
-make rebuild   # Fast rebuild + reinstall
+make rebuild   # Fast rebuild
+make test-cli  # Test built binary
 make start     # Start Docker services
 make stop      # Stop services
-make test      # Run tests
+make test      # Run unit tests
 make lint      # Run linters
 make clean-db  # Reset databases
 ```
+
+**Note:** `make install` is available but requires sudo - not needed for development.
 
 ### Environment Setup
 

@@ -1,949 +1,675 @@
-# Developer Workflows: Git, Vibe Coding, and CodeRisk Integration
+# Developer Workflows (MVP): Local Git + AI Coding
 
-**Last Updated:** October 3, 2025
-**Purpose:** Map how CodeRisk (crisk) seamlessly integrates into modern developer workflows across team sizes, coding styles, and git patterns
+**Last Updated:** October 17, 2025
+**Status:** Active - Simplified for MVP launch
+**Focus:** Solo developers + small teams using AI coding assistants
+
+> **📘 Strategic Simplification:** Focused on local git workflows with AI coding integration. Enterprise workflows, CI/CD pipelines, and OSS patterns archived to [99-archive/00-product-future-vision](../99-archive/00-product-future-vision/) for v2-v4.
 
 ---
 
 ## Overview
 
-Modern software development exists on a spectrum from **traditional git workflows** to **AI-assisted "vibe coding"** with tools like Claude Code and Cursor. CodeRisk is designed to integrate seamlessly into both paradigms, becoming as reflexive as `git status` regardless of how developers write code.
+Modern software development has evolved with AI coding assistants (Claude Code, Cursor, Copilot). CodeRisk integrates seamlessly into **local git workflows** to validate AI-generated code before it becomes public.
 
-**Key Insight:** Whether developers write code manually or use AI assistance, the **git workflow patterns remain identical**—but vibe coding accelerates iteration velocity, making pre-commit risk assessment even more critical.
+**Key Insight:** AI coding generates code 5-10x faster, but git workflows remain the same. CodeRisk adds a safety check at the pre-commit stage—the earliest intervention point.
 
 ---
 
-## The Git Workflow Spectrum
+## The AI Coding Challenge
 
-### Traditional Manual Coding
+### Traditional vs AI-Assisted Workflows
+
+**Traditional Manual Coding:**
 ```bash
-# Developer writes code manually in IDE
-vim src/auth.py
-# Frequent commits, careful testing
+# Developer writes code manually (slow, deliberate)
+vim src/auth.py         # 30-60 min
 git add src/auth.py
-git commit -m "Add rate limiting to auth endpoint"
+git commit -m "Add rate limiting"
+# Developer understands every line (low risk)
 ```
 
-### Vibe Coding (AI-Assisted)
+**AI-Assisted Coding (Claude Code/Cursor/Copilot):**
 ```bash
-# Developer prompts Claude Code
-> "Add rate limiting to the auth endpoint with Redis backend"
-# AI generates 200 lines across 3 files in 30 seconds
-git add src/auth.py src/middleware/rate_limit.py tests/test_auth.py
-git commit -m "Add Redis-based rate limiting to auth"
-```
-
-**The Risk:** Vibe coding generates more code, faster, with less manual review—but uses the **exact same git workflow**.
-
----
-
-## Core Git Patterns (Team Size Agnostic)
-
-These patterns appear universally across solo developers, startups, and large enterprises:
-
-### 1. Feature Branch Workflow (Universal)
-```bash
-# Start new feature
-git checkout -b feature/auth-improvements
-# Make changes (manual or AI-assisted)
-# ... code changes ...
+# Developer prompts AI (fast, less review)
+> "Add rate limiting to auth endpoint with Redis"
+# AI generates 3 files, 200 lines in 30 seconds
 git add .
-git commit -m "WIP: auth improvements"
-# Continue iterating
-git push origin feature/auth-improvements
-# Create PR when ready
-gh pr create --title "Auth improvements"
+git commit -m "Add Redis rate limiting"
+# Developer may not understand every line (higher risk)
 ```
 
-### 2. Main Branch Protection (Teams 5+)
-- Main/master is protected
-- All changes via pull requests
-- CI checks required before merge
-- Code review required (1-2 approvers)
-
-### 3. Commit Frequency Patterns
-
-| Developer Type | Commits/Day | Commit Style | Risk Profile |
-|----------------|-------------|--------------|--------------|
-| **Manual coder** | 5-15 | Small, incremental | Lower blast radius |
-| **Vibe coder (beginner)** | 3-8 | Large, multi-file | Higher blast radius |
-| **Vibe coder (experienced)** | 10-20 | Mixed (AI + manual fixes) | Variable |
+**The Gap:** AI generates code faster than developers can thoroughly review. Pre-commit checks catch issues before they become public.
 
 ---
 
-## Team-Size Specific Workflows
+## Core Git Workflow Patterns
 
-### Solo Developer / Side Project (1 person)
-**Git Pattern:**
+### Pattern 1: Direct Commit to Main (Solo Developers)
+
 ```bash
-# Often commits directly to main
+# Solo developer commits directly to main
 git checkout main
-# Make changes
+# Make changes (manual or AI-assisted)
+vim src/feature.py
 git add .
 git commit -m "Add feature X"
 git push origin main
 ```
 
 **CodeRisk Integration:**
+
 ```bash
-# Pre-commit check (catches issues before they hit main)
-crisk check
-# Output: "MEDIUM risk: auth.py has 0% test coverage"
-# Fix issues
-git add tests/test_auth.py
-git commit --amend
-crisk check  # Verify fix
-git push
+# Pre-commit hook runs automatically
+git commit -m "Add feature X"
+
+🔍 CodeRisk: Analyzing 1 file... (1.2s)
+
+✅ LOW risk - Safe to commit
+   - Test coverage: 78%
+   - No coupling issues
+
+[main abc1234] Add feature X
 ```
 
-**Value:** Acts as a personal code reviewer when working alone.
+**Value:** Acts as personal code reviewer when working alone.
 
 ---
 
-### Startup / Small Team (2-10 people)
+### Pattern 2: Feature Branch Workflow (Small Teams)
 
-**Git Pattern:**
 ```bash
-# Feature branches, but fast iteration
-git checkout -b feature/payments
-# Vibe code with Claude Code (3-5 files changed)
-> "Integrate Stripe payments with webhook handling"
-# Quick self-review
+# Create feature branch
+git checkout -b feature/auth-improvements
+
+# Make changes (manual or AI-assisted)
+# ... code changes ...
+
 git add .
-git commit -m "Add Stripe integration"
-git push origin feature/payments
-# Create PR (often self-merge or single reviewer)
-gh pr create --fill
+git commit -m "Improve auth logic"
+
+# Push to remote
+git push origin feature/auth-improvements
+
+# Create PR
+gh pr create --title "Auth improvements"
 ```
 
-**CodeRisk Integration (Pre-Commit):**
+**CodeRisk Integration:**
+
 ```bash
-# Before committing vibe-generated code
-crisk check
-# Output:
-# HIGH risk detected:
-#   - payment_handler.py calls 8 other functions (high coupling)
-#   - webhook.py has no tests
-#   - payment_handler.py changed with database.py in 90% of commits
-# Developer reviews AI code more carefully
-# Adds tests before committing
+# Pre-commit hook runs on each commit
+git commit -m "Improve auth logic"
+
+🔍 CodeRisk: Analyzing 2 files... (2.1s)
+
+⚠️  MEDIUM risk detected:
+   - auth.py: 0% test coverage
+   - High coupling with user_service.py
+
+Fix or override: git commit --no-verify
+
+# Developer adds tests before committing
 ```
 
-**CodeRisk Integration (Pre-PR):**
-```bash
-# Before opening PR
-git commit -am "Add Stripe integration"
-crisk check --branch feature/payments
-# Output: "50 files changed on this branch vs main"
-# crisk creates branch delta graph (3-5s)
-# Shows cumulative risk across all branch changes
-```
-
-**Value:** Prevents vibe-coded changes from breaking existing code, catches missing tests.
+**Value:** Catches issues before PR review, reduces review cycles.
 
 ---
 
-### Growth Company (10-50 people)
+## AI Coding Workflow Integration
 
-**Git Pattern:**
-```bash
-# Stricter branch naming, PR templates
-git checkout -b rohan/JIRA-123-add-caching
-# Mix of manual and AI coding
-# Multiple commits per feature
-git add src/cache.py
-git commit -m "[JIRA-123] Add Redis cache layer"
-# More commits...
-git commit -m "[JIRA-123] Add cache invalidation"
-git push origin rohan/JIRA-123-add-caching
-# PR requires CI + 2 reviewers
-gh pr create --template feature.md
-```
+### Scenario 1: AI Generates Feature (Validation Loop)
 
-**CodeRisk Integration (CI Pipeline):**
-```yaml
-# .github/workflows/ci.yml
-name: CI
-on: [pull_request]
-jobs:
-  risk-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: CodeRisk Check
-        run: |
-          crisk check --branch ${{ github.head_ref }}
-          # Fails if CRITICAL risk detected
-          # Posts comment to PR with risk summary
-```
+**Problem:** Developer uses Claude Code to generate feature, uncertain if it's safe.
 
-**CodeRisk Integration (Local Pre-Commit Hook):**
-```bash
-# .git/hooks/pre-commit
-#!/bin/bash
-crisk check --quick
-if [ $? -ne 0 ]; then
-  echo "❌ CodeRisk detected issues. Run 'crisk check --explain' for details."
-  exit 1
-fi
-```
+**Solution:** Pre-commit hook validates before commit.
 
-**Value:** Automated quality gate before code review, reduces reviewer burden.
-
----
-
-### Enterprise (50-500+ people)
-
-**Git Pattern:**
-```bash
-# Monorepo with strict policies
-git checkout -b users/rohan.katakam/feature/auth-rbac
-# Extensive branch protection
-# Multiple levels of review (team lead, security, architect)
-# Slow PR cycle (1-3 days)
-git add services/auth/rbac.go
-git commit -m "feat(auth): Add RBAC middleware"
-# Push triggers CI/CD pipeline
-git push origin users/rohan.katakam/feature/auth-rbac
-# PR requires 3 approvals + security scan + architect review
-```
-
-**CodeRisk Integration (Multi-Stage Gates):**
-
-**Stage 1: Developer Local Check**
-```bash
-# Before committing
-crisk check --mode=enterprise
-# Uses self-hosted Neptune in VPC
-# No data leaves corporate network
-```
-
-**Stage 2: Pre-Commit Hook**
-```bash
-# Enforced via git hooks
-crisk check --policy=strict
-# Blocks commit if:
-# - Test coverage < 70%
-# - Coupling score > 8
-# - Touches incident-prone files
-```
-
-**Stage 3: CI Pipeline**
-```yaml
-# Required status check on PR
-- name: CodeRisk Enterprise Scan
-  run: |
-    crisk check \
-      --branch $BRANCH \
-      --compare main \
-      --output sarif \
-      --fail-on critical
-    # Upload to security dashboard
-```
-
-**Stage 4: PR Comment Bot**
-```markdown
-## CodeRisk Analysis
-
-**Branch:** feature/auth-rbac
-**Risk Level:** MEDIUM
-
-### Findings:
-- ✅ Test coverage: 78% (target: 70%)
-- ⚠️  High coupling detected in `rbac.go` (8 dependencies)
-- ⚠️  File `auth_service.go` has incident history (3 incidents in 90 days)
-
-### Recommendations:
-1. Review coupling with `user_service.go` (changed together in 85% of commits)
-2. Add integration tests for RBAC edge cases
-```
-
-**Value:** Prevents security/reliability issues in critical systems, provides audit trail.
-
----
-
-## Vibe Coding Integration Patterns
-
-### Pattern 1: Iterative AI Generation
-
-**Scenario:** Developer uses Claude Code to generate feature, then refines.
+**Workflow:**
 
 ```bash
-# Initial AI generation
-> "Create a user authentication system with JWT tokens"
-# Claude generates 5 files, 400 lines
+# Developer prompts Claude Code
+> "Build a payment processing system with Stripe"
 
-# Before committing, run crisk
-crisk check
-# Output: CRITICAL - no tests, high complexity
+# Claude generates 5 files, 500 lines in 30 seconds
+# - payment.py
+# - stripe_client.py
+# - webhook_handler.py
+# - config.py
+# - tests/test_payment.py
 
-# Refine with AI
-> "Add comprehensive tests for the auth system"
-# Claude adds test files
-
-crisk check
-# Output: MEDIUM - test coverage improved, but high coupling remains
-
-# Manual refinement
-vim src/auth.py  # Developer reduces coupling
-
-crisk check
-# Output: LOW - Ready to commit
+# Developer reviews briefly, looks good
 git add .
-git commit -m "Add JWT authentication with tests"
+git commit -m "Add Stripe payment processing"
+
+# Pre-commit hook triggers
+🔍 Analyzing AI-generated code... (2.3s)
+
+🔴 HIGH risk detected:
+
+   Security Issues:
+   1. payment.py - No input validation (injection risk)
+   2. config.py - Hardcoded API key (secrets exposure)
+   3. webhook_handler.py - No signature verification
+
+   Quality Issues:
+   4. 0% test coverage for payment logic
+   5. High complexity (15-20 per function)
+
+❌ Commit blocked
+
+💡 Fix these before committing:
+   - Add input validation with Pydantic
+   - Move API key to environment variable
+   - Add webhook signature verification
+   - Add payment tests
+
+# Developer fixes issues (manually or with AI)
+> "Add input validation to payment.py"
+> "Add signature verification to webhook_handler.py"
+> "Move API key to .env file"
+
+# Re-commit
+git commit -m "Add Stripe payment (security hardened)"
+
+🔍 Analyzing... (1.8s)
+
+✅ LOW risk
+   - Security issues resolved ✅
+   - Test coverage: 72% ✅
+   - Input validation added ✅
+
+[main abc1234] Add Stripe payment (security hardened)
 ```
 
-**CodeRisk Value:** Guides AI-assisted iteration toward safer code.
+**Key UX Elements:**
+- Catches AI mistakes automatically
+- Specific, actionable recommendations
+- Fast feedback loop (2-3 seconds)
+- Allows iterative fixes
 
 ---
 
-### Pattern 2: Rapid Prototyping → Production Hardening
+### Scenario 2: Rapid Prototyping → Production
 
-**Vibe Coding Phase (Velocity Focused):**
+**Prototype Phase (Velocity Focus):**
+
 ```bash
 git checkout -b spike/new-feature
-# Generate prototype quickly with AI
+
+# Use AI to generate prototype quickly
 > "Build a real-time chat feature with WebSockets"
 # AI generates 10 files in 2 minutes
-git add .
+
+# Solo dev mode: warnings only, never blocks
 git commit -m "WIP: chat prototype"
-crisk check
-# Output: CRITICAL (expected for prototype)
-# Developer ignores for now (prototyping)
+
+⚠️  CRITICAL risk detected (expected for prototype)
+   - 0% test coverage
+   - No error handling
+   - High coupling
+
+✅ Committed (solo mode - warnings only)
+💡 Tip: Harden before production
 ```
 
-**Production Hardening Phase (Safety Focused):**
+**Production Hardening Phase:**
+
 ```bash
 git checkout -b feature/chat-production
 git merge spike/new-feature
-# Now harden with AI assistance
-> "Add error handling, tests, and logging to chat system"
-crisk check --fix-suggestions
-# Output:
-# - Add error handling in message_handler.py (line 45)
-# - Test coverage for websocket_manager.py is 0%
-# - connection_pool.py has high coupling (7 deps)
 
-# Iteratively fix with AI + manual review
-crisk check  # Re-run after each fix
-# Eventually: LOW risk → Ready for PR
+# Harden with AI + manual fixes
+> "Add error handling and tests to chat system"
+
+git commit -m "Add production hardening"
+
+# Team mode: blocks on HIGH risk
+🔴 HIGH risk: 0% test coverage for WebSocket handler
+
+❌ Commit blocked (team mode)
+
+# Fix incrementally
+> "Add tests for WebSocket handlers"
+
+git commit -m "Add WebSocket tests"
+
+✅ LOW risk - Production ready
 ```
-
-**CodeRisk Value:** Differentiates prototype code from production-ready code.
 
 ---
 
-### Pattern 3: AI Code Review Assistant
+## Team Size Workflows
 
-**Scenario:** Developer reviews AI-generated code with CodeRisk.
+### Solo Developer / Side Project
+
+**Git Pattern:**
+- Direct commits to main (no PR process)
+- Frequent small commits
+- Self-review
+
+**CodeRisk Behavior:**
+- **Warnings only** (never blocks)
+- Educational feedback
+- Builds good habits
+
+**Example:**
 
 ```bash
-# Claude Code generates complex refactor
-> "Refactor the payment processing module to use async/await"
-# 15 files changed, 800 lines modified
+git commit -m "Add feature X"
 
-# Before accepting changes
-crisk check --explain --branch feature/async-payments
-# Output (detailed investigation trace):
-#
-# Investigation Summary (5 hops, 12s):
-#
-# Hop 1: payment_processor.py
-#   - Complexity increased from 8 → 15
-#   - Now async, but no error handling for network failures
-#
-# Hop 2: database.py (coupled 85% co-change rate)
-#   - Not updated to async → BLOCKING BUG
-#
-# Hop 3: test_payments.py
-#   - Tests not updated for async → will fail
-#
-# CRITICAL: database.py still uses sync calls, will deadlock
+⚠️  MEDIUM risk:
+   - Missing tests (consider adding)
+   - High coupling detected
 
-# Developer catches the issue
-> "Update database.py to use async database driver"
-# Fix applied, re-check
-crisk check
-# Output: MEDIUM (much better)
+✅ Committed (solo mode - warnings only)
+💡 Tip: Tests prevent future bugs
 ```
 
-**CodeRisk Value:** Acts as second reviewer for AI-generated code.
+**Why Warning-Only:**
+- Solo devs decide their own risk tolerance
+- No team to protect from risky code
+- Faster iteration more important
+- Educational, not enforcement
 
 ---
 
-## Open Source Workflow Integration
+### Small Team (2-10 people)
 
-### OSS Maintainer Workflow
+**Git Pattern:**
+- Feature branches
+- Pull requests (optional or required)
+- Quick review cycles
+- Fast iteration
 
-**Traditional OSS Flow:**
+**CodeRisk Behavior:**
+- **Blocks on HIGH/CRITICAL** risk only
+- Allows MEDIUM/LOW risk (velocity)
+- Override available for urgent cases
+- Logged overrides for visibility
+
+**Example:**
+
 ```bash
-# Contributor opens PR
-# Maintainer reviews manually (time-consuming)
-# Back-and-forth on code quality issues
+git commit -m "Add Stripe integration"
+
+🔴 HIGH risk detected:
+   - payment.py handles money but has 0% tests
+   - No error handling for network failures
+
+❌ Commit blocked (team mode)
+
+Fix or override with: git commit --no-verify
+(Overrides logged for team review)
 ```
 
-**With CodeRisk (Automated Quality Check):**
-```yaml
-# .github/workflows/pr-check.yml
-name: CodeRisk OSS Check
-on: [pull_request]
-jobs:
-  risk-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: coderisk/action@v1
-        with:
-          mode: oss
-          # Uses shared public cache (instant, no build time)
-          # Posts PR comment with risk assessment
-```
-
-**PR Comment (Automated):**
-```markdown
-## CodeRisk Analysis
-
-**Status:** ✅ LOW risk (safe to merge)
-
-### Changes:
-- Added feature X (50 lines)
-- Test coverage: 85%
-- No coupling issues detected
-
-**Maintainer Note:** This PR looks safe from an architectural perspective.
-```
-
-**Value for OSS:**
-- Reduces maintainer burden
-- Provides objective quality signal
-- Educates contributors on code quality
+**Why Block on HIGH:**
+- Protects team from major incidents
+- Maintains velocity for MEDIUM/LOW risks
+- Override escape hatch for urgent needs
+- Creates team visibility via logs
 
 ---
 
-### OSS Contributor Workflow
+## Common Git Patterns + CodeRisk
 
-**Before Opening PR:**
+### Pattern 1: WIP Commits (Iterative Development)
+
 ```bash
-# Fork and clone repo
-git clone https://github.com/facebook/react
-cd react
-
-# Make changes
-vim packages/react/src/ReactHooks.js
-
-# Check impact before opening PR
-crisk check --public
-# Uses shared cache for React (instant access, no build)
-# Output: MEDIUM - your change affects 50+ dependent functions
-
-# Contributor adds tests to reduce risk
-vim packages/react/src/__tests__/ReactHooks-test.js
-
-crisk check --public
-# Output: LOW - ready to submit PR
-
-git push origin my-feature-branch
-gh pr create
-```
-
-**Value:** Contributors self-assess quality before maintainer review.
-
----
-
-## Team Size Adoption Patterns
-
-### Startup → Scale-Up Evolution (1 → 50 people)
-
-**Phase 1: Solo/Small Team (1-5 people)**
-- **Usage:** `crisk check` before commits (optional, personal discipline)
-- **Value:** Personal code reviewer
-- **Adoption:** Organic (developers discover via word-of-mouth)
-
-**Phase 2: Product-Market Fit (5-15 people)**
-- **Usage:** Add to pre-commit hooks (recommended)
-- **Value:** Prevents vibe-coding accidents
-- **Adoption:** Team lead mandates for critical paths
-
-**Phase 3: Scaling (15-50 people)**
-- **Usage:** CI/CD integration (required status check)
-- **Value:** Automated quality gate
-- **Adoption:** Engineering manager enforces via branch protection
-
-**Phase 4: Enterprise (50+ people)**
-- **Usage:** Self-hosted, integrated with security tooling
-- **Value:** Compliance, audit trail, risk reduction
-- **Adoption:** Top-down (CTO/VP Eng decision)
-
----
-
-## Common Git Behaviors → CodeRisk Injection Points
-
-### Behavior 1: "WIP Commits" (All team sizes)
-```bash
-# Developers commit frequently with WIP messages
-git add .
+# Developers commit frequently with WIP
 git commit -m "WIP"
-git commit -m "WIP - still broken"
+git commit -m "WIP - fix tests"
 git commit -m "WIP - almost there"
+
+# Each triggers CodeRisk check
+🔍 Analyzing... (1.2s)
+⚠️  MEDIUM risk - continuing...
 ```
 
-**CodeRisk Injection:**
+**Optimization:**
+
 ```bash
-# Add to shell alias
-alias gwip='git add . && crisk check --quick && git commit -m "WIP"'
-# Developer now runs: gwip
-# CodeRisk checks even on WIP commits (fast feedback)
-```
+# Shell alias for fast WIP commits
+alias gwip='git add . && crisk check --quiet && git commit -m "WIP"'
 
----
-
-### Behavior 2: "Squash Before Merge" (Teams 10+)
-```bash
-# Many WIP commits on branch
-git log --oneline
-# ab12 WIP
-# cd34 WIP - fix tests
-# ef56 WIP - final
-
-# Before merge, squash commits
-git rebase -i main
-# Squash all into one commit
-```
-
-**CodeRisk Injection:**
-```bash
-# After squash, before push
-crisk check --branch feature/my-feature
-# Checks cumulative risk of all changes
-# (Not just last commit, but entire branch delta)
+# Developer runs: gwip
+# Gets instant feedback on each iteration
 ```
 
 ---
 
-### Behavior 3: "Hotfix Workflow" (All sizes, production issues)
+### Pattern 2: Hotfix Workflow (Production Issues)
+
 ```bash
-# Production is down, need urgent fix
+# Production is down, urgent fix needed
 git checkout -b hotfix/auth-bug
-# Make quick fix (often manual, high pressure)
+
+# Make quick fix (high pressure)
 vim src/auth.py
 git add src/auth.py
-git commit -m "hotfix: fix null pointer in auth"
-git push origin hotfix/auth-bug
-# Merge immediately (no review)
+git commit -m "hotfix: fix null pointer"
+
+# CodeRisk still checks (fast)
+🔍 Analyzing... (0.8s)
+
+⚠️  WARNING: auth.py has incident history (3 past issues)
+
+✅ Committed (hotfix allows override)
+💡 Consider adding test to prevent regression
 ```
 
-**CodeRisk Injection:**
+**Value:** Even in hotfixes, shows incident history (helps avoid repeat issues).
+
+---
+
+### Pattern 3: Large Refactors (Many Files)
+
 ```bash
-# Even in hotfix, run quick check
-crisk check --mode=hotfix
-# Uses cached graph (fast, <2s)
-# Output: "⚠️  WARNING: auth.py has 3 incident history items"
-# Developer adds extra validation before merging
+git commit -m "Refactor auth module"
+
+🔍 CodeRisk: Analyzing 25 files...
+
+[Progress]
+▓▓▓▓▓▓▓▓▓▓░░░░░ 65% (analyzing coupling)
+
+Estimated: 3s remaining
+
+⏱️  Large changeset (25 files) - taking ~4 seconds
+
+   Pro tip: Smaller commits = faster checks
+
+✅ LOW risk (complete)
 ```
 
 ---
 
-### Behavior 4: "Stacked Diffs" (Advanced teams, Meta/Google style)
-```bash
-# Developer creates multiple dependent PRs
-git checkout -b feature/step1
-# ... changes ...
-git commit -m "Step 1"
-git push
+## Complete End-to-End Examples
 
-git checkout -b feature/step2
-# ... depends on step1 ...
-git commit -m "Step 2"
-git push
-```
+### Example 1: Solo Developer + AI Coding
 
-**CodeRisk Injection:**
-```bash
-# Check each diff independently
-crisk check --branch feature/step1
-crisk check --branch feature/step2 --base feature/step1
-# Checks step2 changes relative to step1 (not main)
-```
-
----
-
-## Vibe Coding Prevalence by Organization Type
-
-### Startups & Small Teams (1-20 people)
-**Vibe Coding Adoption: 60-80%**
-- High AI tool usage (Claude Code, Cursor, Copilot)
-- Velocity over process
-- Less code review rigor
-- **CodeRisk Value:** Highest—acts as missing code reviewer
-
-### Mid-Size Tech Companies (20-200 people)
-**Vibe Coding Adoption: 40-60%**
-- Mixed adoption (some teams yes, some no)
-- Transitioning from startup to process-driven
-- **CodeRisk Value:** High—helps standardize quality across teams
-
-### Large Tech Companies (200-5000 people)
-**Vibe Coding Adoption: 20-40%**
-- Slower adoption due to security/compliance
-- Pockets of innovation (internal tools teams)
-- **CodeRisk Value:** Medium—complements existing tooling
-
-### Enterprises (5000+ people)
-**Vibe Coding Adoption: 5-20%**
-- Highly regulated, slow adoption
-- Security concerns around AI code generation
-- **CodeRisk Value:** Medium—more focused on compliance/audit
-
-### Open Source (Public repos)
-**Vibe Coding Adoption: 30-50%**
-- Maintainers skeptical, contributors enthusiastic
-- Quality variance (AI-generated PRs often lower quality)
-- **CodeRisk Value:** Very High—helps maintainers filter PRs
-
----
-
-## Complete End-to-End Workflow Examples
-
-### Example 1: Solo Vibe Coder (Side Project)
+**Scenario:** Weekend side project, using Claude Code
 
 ```bash
-# Saturday morning, coffee in hand
+# Saturday morning
 cd ~/projects/my-saas
 git checkout main
-git pull
 
-# Start new feature with Claude Code
-git checkout -b feature/user-dashboard
-> "Build a user analytics dashboard with charts using Chart.js"
+# Start new feature
+> "Build a user analytics dashboard with Chart.js"
 
 # Claude generates:
 # - dashboard.html (120 lines)
-# - dashboard_api.py (80 lines)
+# - api.py (80 lines)
 # - analytics.js (150 lines)
-# Total: 3 files, 350 lines, 45 seconds
+# Total: 3 files, 350 lines in 45 seconds
 
-# Quick manual review in IDE
-# Looks good, but check safety
+# Quick review, looks good
 crisk check
 
 # Output:
-# MEDIUM risk detected:
-#   - dashboard_api.py has no input validation (security risk)
-#   - analytics.js calls 12 API endpoints (high coupling)
-#   - Test coverage: 0%
+⚠️  MEDIUM risk:
+   - api.py: no input validation (security)
+   - analytics.js: 12 API endpoints (high coupling)
+   - 0% test coverage
 
-# Fix with AI assistance
-> "Add input validation to dashboard_api.py with Pydantic"
-> "Add unit tests for dashboard_api.py"
+# Fix with AI
+> "Add input validation to api.py with Pydantic"
+> "Add basic tests for api.py"
 
 # Re-check
 crisk check
-# Output: LOW risk (ready to commit)
+✅ LOW risk
 
+# Commit
 git add .
-git commit -m "Add user analytics dashboard with validation and tests"
-git push origin feature/user-dashboard
+git commit -m "Add analytics dashboard with validation"
 
-# Self-merge (solo project)
-git checkout main
-git merge feature/user-dashboard
-git push origin main
-
-# Deploy to production
-./deploy.sh
+[main abc1234] Add analytics dashboard
 ```
 
-**Time:** 15 minutes (vs 2-3 hours manual coding)
-**Risk:** Reduced via CodeRisk (caught security issue + missing tests)
+**Time:** 15 minutes (vs 2-3 hours manual)
+**Risk:** Reduced via CodeRisk (caught security + testing gaps)
 
 ---
 
-### Example 2: Startup Team with Vibe Coding (10 people)
+### Example 2: Small Team Using Cursor
+
+**Scenario:** Startup with 5 developers, assigned Slack integration task
 
 ```bash
-# Product team requests new feature: "Slack notifications"
-# Developer: Sarah, Full-stack engineer
-
-# Monday 9 AM standup: assigned JIRA-456
+# Monday morning: new ticket
 git checkout main
 git pull
-git checkout -b sarah/JIRA-456-slack-integration
+git checkout -b sara/slack-notifications
 
 # Use Cursor to scaffold
-> "Create Slack webhook integration that sends notifications on user signups"
+> "Create Slack webhook integration for user signups"
 
 # Cursor generates:
 # - slack_client.py (100 lines)
-# - webhook_handler.py (60 lines)
-# - slack_config.py (30 lines)
+# - webhook.py (60 lines)
+# - config.py (30 lines)
 # - tests/test_slack.py (80 lines)
 
 # Manual tweaks (5 min)
-# Add company-specific config
 
 # Pre-commit check
 crisk check
-# Output: MEDIUM
-#   - slack_client.py not handling rate limits
-#   - webhook_handler.py has high coupling with user_service.py
 
-# Fix rate limiting with AI
-> "Add exponential backoff retry logic to slack_client.py"
+⚠️  MEDIUM risk:
+   - slack_client.py: no rate limit handling
+   - webhook.py: high coupling with user_service.py
+
+# Fix with AI
+> "Add exponential backoff to slack_client.py"
 
 crisk check
-# Output: LOW - ready to commit
+✅ LOW risk
 
-git add .
-git commit -m "[JIRA-456] Add Slack notification integration"
-git push origin sarah/JIRA-456-slack-integration
+# Commit
+git commit -m "Add Slack notifications"
+git push origin sara/slack-notifications
 
 # Create PR
-gh pr create --title "[JIRA-456] Slack notifications for user signups" --body "$(crisk check --format=pr-description)"
+gh pr create --title "Slack notifications for signups"
 
-# PR description auto-populated with risk assessment:
-# Risk Level: LOW
-# Files Changed: 4
-# Test Coverage: 75%
-# No critical issues detected
-
-# Tech lead reviews (15 min)
-# Approves + merges
-
-git checkout main
-git pull
-git branch -d sarah/JIRA-456-slack-integration
+# Tech lead reviews (15 min) → Approves → Merges
 ```
 
 **Time:** 1 hour (vs 4-5 hours manual)
-**Quality:** High (CodeRisk caught rate limiting issue)
+**Quality:** High (caught rate limiting issue before PR)
 
 ---
 
-### Example 3: Enterprise Developer (500-person company)
+## Local-First Setup
+
+### One-Time Repository Setup
 
 ```bash
-# Developer: Marcus, Senior Engineer at FinTech company
-# Task: Add new compliance report feature
+# Install CodeRisk
+brew install coderisk
 
-# Tuesday 10 AM
-cd ~/work/fintech-monorepo
-git checkout main
-git pull origin main
+# Navigate to repo
+cd /path/to/your/repo
 
-# Create feature branch (strict naming convention)
-git checkout -b users/marcus.jones/PLAT-2341-compliance-reports
+# Initialize
+crisk init
 
-# Use Claude Code (approved AI tool)
-> "Create a compliance report generator that exports user audit logs to CSV with PII redaction"
+# What happens:
+🔍 CodeRisk Init
+→ Starting local Neo4j (Docker)... ✅
+→ Analyzing git history... ✅
+→ Building graph database... ✅
+→ Parsing codebase... ✅
 
-# Claude generates complex code:
-# - compliance/report_generator.py (200 lines)
-# - compliance/pii_redactor.py (150 lines)
-# - compliance/csv_exporter.py (100 lines)
-# - tests/ (300 lines)
-# Total: 4 files, 750 lines
+Initialization complete! (2.5 minutes)
 
-# Pre-commit hook triggers automatically
-crisk check --mode=enterprise --policy=strict
+# Install pre-commit hook
+crisk hook install
 
-# Output: CRITICAL
-# ❌ BLOCKING ISSUES:
-#   - pii_redactor.py handles SSN but no encryption at rest
-#   - report_generator.py missing audit log entry
-#   - csv_exporter.py allows arbitrary file paths (security)
-#   - Test coverage: 65% (policy requires 80%)
+Pre-commit hook installed!
+→ Will run before each commit
+→ Override with: git commit --no-verify
 
-# Marcus reviews AI code more carefully
-# Realizes these are serious compliance issues
+# Set API key (one-time)
+crisk config set openai-api-key sk-...
 
-# Fix manually (AI suggestions not trusted for security)
-vim compliance/pii_redactor.py
-# Add encryption layer
-
-vim compliance/report_generator.py
-# Add audit logging
-
-vim compliance/csv_exporter.py
-# Add path validation
-
-# Add more tests manually
-vim tests/test_compliance.py
-
-# Re-run CodeRisk
-crisk check --mode=enterprise --policy=strict
-# Output: MEDIUM (better, but still issues)
-#   - High coupling with user_service (8 dependencies)
-#   - Test coverage: 78% (need 80%)
-
-# Add 2 more test cases
-vim tests/test_compliance.py
-
-crisk check --mode=enterprise --policy=strict
-# Output: LOW ✅
-#   - All policies passed
-#   - Test coverage: 82%
-#   - Security checks passed
-
-# Commit
-git add compliance/ tests/
-git commit -m "feat(compliance): Add PII-safe audit report generator [PLAT-2341]"
-
-# Push triggers CI pipeline
-git push origin users/marcus.jones/PLAT-2341-compliance-reports
-
-# CI runs multiple checks:
-# 1. Unit tests
-# 2. Integration tests
-# 3. CodeRisk scan (in CI)
-# 4. SonarQube
-# 5. Security scan (Snyk)
-
-# Create PR (requires template)
-gh pr create --template compliance-feature.md
-
-# PR requires:
-# - 2 engineer approvals
-# - 1 security team approval
-# - 1 compliance team approval
-
-# CodeRisk posts automated comment:
-# Risk Assessment: LOW ✅
-# Compliance Policy: PASSED
-# Security Checks: PASSED
-# Audit Trail: https://coderisk.internal/reports/PLAT-2341
-
-# Review process (2-3 days)
-# Eventually merged to main
+# Test it
+crisk check
+✅ Ready to use
 ```
-
-**Time:** 4 hours (vs 2-3 days manual)
-**Quality:** Very High (caught 3 critical security issues)
-**Compliance:** Full audit trail via CodeRisk
 
 ---
 
-## Key Insights: Where CodeRisk Adds Most Value
+## Configuration (Optional)
 
-### 1. **AI Velocity × Safety Multiplier**
-- Vibe coding increases velocity 3-5x
-- CodeRisk maintains safety without slowing velocity
+### Solo Developer Config
+
+```bash
+# Set to solo mode (warnings only)
+crisk config set mode solo
+
+# Confirm
+crisk config list
+mode: solo (warnings only, never blocks)
+```
+
+### Small Team Config
+
+```bash
+# Set to team mode (blocks on HIGH)
+crisk config set mode team
+crisk config set block-on high
+
+# Confirm
+crisk config list
+mode: team
+block-on: high (blocks HIGH/CRITICAL, allows MEDIUM/LOW)
+```
+
+---
+
+## Shell Integration (Power Users)
+
+### Useful Aliases
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+
+# Quick check before commit
+alias gcheck='crisk check'
+
+# Check + commit if safe
+alias gcommit='crisk check && git commit'
+
+# WIP commits with check
+alias gwip='crisk check --quiet && git commit -m "WIP"'
+
+# Safe push (check before pushing)
+alias gpush='crisk check && git push'
+```
+
+### Git Hooks Setup
+
+```bash
+# Install pre-commit hook (automatic)
+crisk hook install
+
+# This creates .git/hooks/pre-commit:
+#!/bin/bash
+crisk check --quiet
+exit $?
+```
+
+---
+
+## Workflow Principles
+
+### 1. Early Intervention
+- **Pre-commit** (earliest point, private)
+- Before code becomes public
+- Before PR review
+- Before CI/CD
+
+### 2. Fast Feedback
+- <2s for single file
+- <5s for small changes
+- Progress indicator for large changes
+
+### 3. Minimal Friction
+- Runs automatically (pre-commit hook)
+- Easy override (standard git flag)
+- Smart defaults (no config needed)
+
+### 4. AI Coding Native
+- Designed for Claude Code, Cursor, Copilot
+- Validates AI-generated code automatically
+- Guides AI toward safer patterns
+
+### 5. Local-First
+- Everything runs locally (Docker + Neo4j)
+- No cloud dependency (except LLM API)
+- Fast, private, offline-capable
+
+---
+
+## Key Insights
+
+### 1. AI Velocity × Safety Multiplier
+- AI coding increases velocity 5-10x
+- CodeRisk maintains safety without slowing down
 - Result: Fast AND safe code
 
-### 2. **Shift-Left Quality Gates**
-- Traditional: Find issues in PR review (late, expensive)
-- CodeRisk: Find issues pre-commit (early, cheap)
-- Result: Faster PR cycles, less review burden
+### 2. Shift-Left Quality Gates
+- Traditional: Find issues in PR review (late)
+- CodeRisk: Find issues pre-commit (early)
+- Result: Faster PR cycles, less rework
 
-### 3. **Team Size Scaling**
-- Solo: Personal code reviewer
-- Small team: Automated quality gate
-- Enterprise: Compliance + audit
-- Result: Value at every scale
-
-### 4. **Git Workflow Agnostic**
-- Works with trunk-based development
-- Works with GitFlow
-- Works with stacked diffs
+### 3. Workflow Agnostic
+- Works with direct-to-main (solo)
+- Works with feature branches (teams)
+- Works with any git pattern
 - Result: Fits any workflow
 
-### 5. **Vibe Coding Accelerator**
-- Doesn't slow down AI coding
-- Guides AI toward safer patterns
-- Catches AI mistakes early
-- Result: Better AI code quality
+### 4. Habit Formation
+- `crisk check` becomes as natural as `git status`
+- Pre-commit hook makes it automatic
+- Result: Zero-friction safety check
 
 ---
 
-## Adoption Recommendations by Team Type
+## Success Metrics
 
-### For Startups (1-20 people)
-**Recommended Integration:**
-```bash
-# Add to package.json or Makefile
-"scripts": {
-  "precommit": "crisk check --quick",
-  "pre-push": "crisk check"
-}
-```
+### Adoption Metrics
+- % of commits checked (target: >90%)
+- % of developers with hook installed (target: >80%)
+- % of overrides (target: <10% for teams)
 
-**Adoption Strategy:**
-1. Introduce via CLI (low friction)
-2. Share impressive catches in Slack
-3. Add to pre-commit hooks (optional)
-4. Add to CI after 2-4 weeks
+### Workflow Metrics
+- Average check time (target: <3s)
+- Time to first commit (target: <5 min after install)
+- Developer satisfaction (target: NPS >40)
 
----
-
-### For Growth Companies (20-200 people)
-**Recommended Integration:**
-```yaml
-# Required CI check
-- name: CodeRisk
-  run: crisk check --fail-on high
-```
-
-**Adoption Strategy:**
-1. Pilot with 2-3 teams
-2. Measure impact (fewer production incidents)
-3. Roll out to all teams
-4. Enforce via branch protection
+### Quality Metrics
+- Incidents prevented (target: 60-80% reduction)
+- PR review cycles reduced (target: 30-50% fewer)
+- Test coverage increased (target: +10-20%)
 
 ---
 
-### For Enterprises (200+ people)
-**Recommended Integration:**
-```yaml
-# Multi-stage pipeline
-stages:
-  - pre-commit-hook
-  - ci-check
-  - security-scan
-  - compliance-report
-```
+## Related Documents
 
-**Adoption Strategy:**
-1. Security/compliance team evaluates
-2. Self-hosted deployment in VPC
-3. Pilot with internal tools team
-4. Expand to customer-facing services
-5. Integrate with existing dashboards
+**Product:**
+- [mvp_vision.md](mvp_vision.md) - MVP vision and scope
+- [user_personas.md](user_personas.md) - Ben (solo dev), Clara (small team)
+- [simplified_pricing.md](simplified_pricing.md) - Free BYOK model
+
+**User Experience:**
+- [developer_experience.md](developer_experience.md) - Detailed UX patterns
+
+**Archived (Future):**
+- [../99-archive/00-product-future-vision/](../99-archive/00-product-future-vision/) - Enterprise workflows, CI/CD, OSS patterns (v2-v4)
 
 ---
 
-### For Open Source Projects
-**Recommended Integration:**
-```yaml
-# GitHub Action (free for OSS)
-- uses: coderisk/action@v1
-  with:
-    mode: oss
-    comment: true
-```
-
-**Adoption Strategy:**
-1. Add as optional check (don't block PRs)
-2. Use for maintainer visibility
-3. Over time, educate contributors
-4. Eventually make recommended (not required)
-
----
-
-## Conclusion
-
-CodeRisk integrates seamlessly into modern development workflows by:
-
-1. **Meeting developers where they are** (pre-commit, CI, PR comments)
-2. **Supporting both manual and AI coding** (vibe coding accelerator)
-3. **Scaling from solo to enterprise** (same tool, different deployment)
-4. **Working with any git pattern** (workflow agnostic)
-
-The rise of vibe coding makes CodeRisk **more valuable**, not less—because AI-generated code needs intelligent review, and CodeRisk provides that at machine speed.
-
-**Key Principle:** `crisk check` should feel as natural as `git status`—a reflexive habit, not a burdensome gate.
-
----
-
-**Related Documentation:**
-- [User Personas](user_personas.md) - Detailed user profiles (Ben, Clara)
-- [Vision & Mission](vision_and_mission.md) - Strategic positioning as "pre-flight check"
-- [Success Metrics](success_metrics.md) - How we measure workflow integration success
-- [spec.md](../spec.md) - Technical requirements (FR-6 to FR-10: Multi-branch workflows)
+**Last Updated:** October 17, 2025
+**Next Review:** After MVP launch (Week 7-8), after 50+ user feedback
