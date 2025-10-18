@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -51,24 +52,37 @@ func DetectMode() DeploymentMode {
 	}
 
 	// Development mode indicators (in order of priority)
-	// 1. .env file exists (Docker Compose development)
+	// 1. Check if binary is in a bin/ directory with parent having .env (development binary)
+	if execPath, err := os.Executable(); err == nil {
+		binDir := filepath.Dir(execPath)
+		repoRoot := filepath.Dir(binDir)
+
+		// Check if we're in a development structure: bin/crisk with ../.env
+		if filepath.Base(binDir) == "bin" {
+			if _, err := os.Stat(filepath.Join(repoRoot, ".env")); err == nil {
+				return ModeDevelopment
+			}
+		}
+	}
+
+	// 2. .env file exists in current directory (Docker Compose development)
 	if _, err := os.Stat(".env"); err == nil {
 		return ModeDevelopment
 	}
 
-	// 2. Inside git repository with go.mod (source development)
+	// 3. Inside git repository with go.mod (source development)
 	if _, err := os.Stat(".git"); err == nil {
 		if _, err := os.Stat("go.mod"); err == nil {
 			return ModeDevelopment
 		}
 	}
 
-	// 3. go.mod exists (running from source)
+	// 4. go.mod exists (running from source)
 	if _, err := os.Stat("go.mod"); err == nil {
 		return ModeDevelopment
 	}
 
-	// 4. Makefile exists (development environment)
+	// 5. Makefile exists (development environment)
 	if _, err := os.Stat("Makefile"); err == nil {
 		return ModeDevelopment
 	}

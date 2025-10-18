@@ -41,6 +41,11 @@ func (e *EnvLoader) Load() error {
 		return fmt.Errorf("failed to load %s: %w", envPath, err)
 	}
 
+	// In verbose mode, log the loaded .env path
+	if os.Getenv("VERBOSE") != "" || os.Getenv("DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "📝 Loaded .env from: %s\n", envPath)
+	}
+
 	e.loaded = true
 	return nil
 }
@@ -99,9 +104,30 @@ func (e *EnvLoader) ValidateWithGitHub() error {
 	return nil
 }
 
-// findEnvFile searches for .env file in current and parent directories
+// findEnvFile searches for .env file based on deployment mode
 func findEnvFile() (string, error) {
-	// Try current directory first
+	// In development mode, look for .env relative to the binary location
+	// This allows running ./bin/crisk from anywhere and finding the coderisk repo's .env
+	if IsDevelopment() {
+		execPath, err := os.Executable()
+		if err == nil {
+			// Get the directory containing the binary
+			// For ./bin/crisk, this gives us /path/to/coderisk/bin
+			binDir := filepath.Dir(execPath)
+
+			// Go up one level to get the repo root
+			// /path/to/coderisk/bin -> /path/to/coderisk
+			repoRoot := filepath.Dir(binDir)
+
+			// Check if .env exists in repo root
+			envPath := filepath.Join(repoRoot, ".env")
+			if _, err := os.Stat(envPath); err == nil {
+				return envPath, nil
+			}
+		}
+	}
+
+	// Fall back to searching from current directory (for other modes or if binary path fails)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err

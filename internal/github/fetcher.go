@@ -58,48 +58,64 @@ func (f *Fetcher) FetchAll(ctx context.Context, owner, repo string) (int64, *Fet
 	}
 	log.Printf("  ✓ Repository ID: %d", repoID)
 
-	// Check if data already exists (smart checkpointing)
+	// Check if data already exists (selective fetch only missing data)
 	existingStats, err := f.checkExistingData(ctx, repoID)
 	if err != nil {
 		log.Printf("  ⚠️  Could not check existing data: %v", err)
-	} else if existingStats.hasData() {
-		log.Printf("  ℹ️  Data already exists in PostgreSQL (skipping fetch):")
-		log.Printf("     Commits: %d | Issues: %d | PRs: %d | Branches: %d",
-			existingStats.Commits, existingStats.Issues, existingStats.PRs, existingStats.Branches)
-		return repoID, existingStats, nil
+		existingStats = &FetchStats{} // Start fresh if we can't check
 	}
 
-	// 2. Fetch commits (90-day window)
-	commitCount, err := f.FetchCommits(ctx, repoID, owner, repo)
-	if err != nil {
-		return repoID, stats, fmt.Errorf("fetch commits failed: %w", err)
+	// 2. Fetch commits (90-day window) - only if missing
+	if existingStats.Commits > 0 {
+		log.Printf("  ℹ️  Commits already exist (%d), skipping fetch", existingStats.Commits)
+		stats.Commits = existingStats.Commits
+	} else {
+		commitCount, err := f.FetchCommits(ctx, repoID, owner, repo)
+		if err != nil {
+			return repoID, stats, fmt.Errorf("fetch commits failed: %w", err)
+		}
+		stats.Commits = commitCount
+		log.Printf("  ✓ Fetched %d commits", commitCount)
 	}
-	stats.Commits = commitCount
-	log.Printf("  ✓ Fetched %d commits", commitCount)
 
-	// 3. Fetch issues (90-day filtered)
-	issueCount, err := f.FetchIssues(ctx, repoID, owner, repo)
-	if err != nil {
-		return repoID, stats, fmt.Errorf("fetch issues failed: %w", err)
+	// 3. Fetch issues (90-day filtered) - only if missing
+	if existingStats.Issues > 0 {
+		log.Printf("  ℹ️  Issues already exist (%d), skipping fetch", existingStats.Issues)
+		stats.Issues = existingStats.Issues
+	} else {
+		issueCount, err := f.FetchIssues(ctx, repoID, owner, repo)
+		if err != nil {
+			return repoID, stats, fmt.Errorf("fetch issues failed: %w", err)
+		}
+		stats.Issues = issueCount
+		log.Printf("  ✓ Fetched %d issues", issueCount)
 	}
-	stats.Issues = issueCount
-	log.Printf("  ✓ Fetched %d issues", issueCount)
 
-	// 4. Fetch pull requests (90-day filtered)
-	prCount, err := f.FetchPullRequests(ctx, repoID, owner, repo)
-	if err != nil {
-		return repoID, stats, fmt.Errorf("fetch PRs failed: %w", err)
+	// 4. Fetch pull requests (90-day filtered) - only if missing
+	if existingStats.PRs > 0 {
+		log.Printf("  ℹ️  Pull requests already exist (%d), skipping fetch", existingStats.PRs)
+		stats.PRs = existingStats.PRs
+	} else {
+		prCount, err := f.FetchPullRequests(ctx, repoID, owner, repo)
+		if err != nil {
+			return repoID, stats, fmt.Errorf("fetch PRs failed: %w", err)
+		}
+		stats.PRs = prCount
+		log.Printf("  ✓ Fetched %d pull requests", prCount)
 	}
-	stats.PRs = prCount
-	log.Printf("  ✓ Fetched %d pull requests", prCount)
 
-	// 5. Fetch branches
-	branchCount, err := f.FetchBranches(ctx, repoID, owner, repo)
-	if err != nil {
-		return repoID, stats, fmt.Errorf("fetch branches failed: %w", err)
+	// 5. Fetch branches - only if missing
+	if existingStats.Branches > 0 {
+		log.Printf("  ℹ️  Branches already exist (%d), skipping fetch", existingStats.Branches)
+		stats.Branches = existingStats.Branches
+	} else {
+		branchCount, err := f.FetchBranches(ctx, repoID, owner, repo)
+		if err != nil {
+			return repoID, stats, fmt.Errorf("fetch branches failed: %w", err)
+		}
+		stats.Branches = branchCount
+		log.Printf("  ✓ Fetched %d branches", branchCount)
 	}
-	stats.Branches = branchCount
-	log.Printf("  ✓ Fetched %d branches", branchCount)
 
 	// 6. Fetch languages
 	if err := f.FetchLanguages(ctx, repoID, owner, repo); err != nil {

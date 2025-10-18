@@ -11,7 +11,7 @@ GIT_TAG=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0-dev")
 BUILD_DATE=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 VERSION_FLAGS=-X main.GitCommit=$(GIT_COMMIT) -X main.Version=$(GIT_TAG) -X main.BuildTime=$(BUILD_DATE)
 
-.PHONY: help build clean test dev start stop logs status rebuild test-cli coverage lint clean-db clean-all restart
+.PHONY: help build clean test dev start stop logs status rebuild test-cli coverage lint clean-db clean-all restart init-db
 
 ## help: Show available commands
 help:
@@ -20,7 +20,7 @@ help:
 	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/  /'
 
 ## dev: Build + start services (full development setup)
-dev: clean build start
+dev: clean build start init-db
 	@echo ""
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "✅ Development environment ready!"
@@ -65,8 +65,8 @@ start:
 		echo "   Cleaned up old containers"; \
 	fi
 	@docker compose up -d
-	@echo "⏳ Waiting for services to initialize..."
-	@sleep 5
+	@echo "⏳ Waiting for services to be healthy..."
+	@sleep 8
 	@docker compose ps
 	@echo ""
 	@echo "✅ Services running:"
@@ -134,13 +134,35 @@ clean:
 	@rm -f coverage.out coverage.html
 	@echo "✅ Cleaned"
 
+## init-db: Initialize database schemas
+init-db:
+	@echo "🗄️  Initializing database schemas..."
+	@echo "   Waiting for PostgreSQL to be ready..."
+	@sleep 3
+	@echo "   Applying base schema (init_postgres.sql)..."
+	@PGPASSWORD="$${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD_IN_PRODUCTION_123}" \
+		psql -h localhost -p $${POSTGRES_PORT_EXTERNAL:-5433} \
+		-U $${POSTGRES_USER:-coderisk} -d $${POSTGRES_DB:-coderisk} \
+		-f scripts/init_postgres.sql -q 2>&1 | grep -v "NOTICE" || true
+	@echo "   Applying GitHub staging schema (postgresql_staging.sql)..."
+	@PGPASSWORD="$${POSTGRES_PASSWORD:-CHANGE_THIS_PASSWORD_IN_PRODUCTION_123}" \
+		psql -h localhost -p $${POSTGRES_PORT_EXTERNAL:-5433} \
+		-U $${POSTGRES_USER:-coderisk} -d $${POSTGRES_DB:-coderisk} \
+		-f scripts/schema/postgresql_staging.sql -q 2>&1 | grep -v "NOTICE" || true
+	@echo "✅ Database schemas initialized"
+	@echo ""
+
 ## clean-db: Reset databases (WARNING: deletes all data)
 clean-db:
-	@echo "⚠️  Cleaning databases..."
-	@docker compose down -v
-	@echo "✅ Databases reset"
+	@echo "⚠️  Resetting databases..."
+	@echo "   Stopping containers..."
+	@docker compose down
+	@echo "   Removing volumes..."
+	@docker volume rm coderisk_neo4j_data coderisk_postgres_data coderisk_redis_data 2>/dev/null || true
+	@echo "✅ Databases reset (all data cleared)"
 
-## clean-all: Complete cleanup
-clean-all: clean stop
-	@docker system prune -f
+## clean-all: Complete cleanup (removes everything)
+clean-all: clean clean-db
+	@echo "🧹 Pruning Docker system..."
+	@docker system prune -f --volumes
 	@echo "✅ Complete cleanup done"
