@@ -5,6 +5,19 @@ import (
 	"sort"
 )
 
+// DEPRECATED: CalculateCoChanges is the OLD pre-calculation approach
+// This function is being replaced by dynamic co-change queries in the graph
+// See: simplified_graph_schema.md - Co-change computed at query time
+//
+// Current usage:
+//   - internal/ingestion/processor.go (old graph builder, being removed)
+//   - internal/agent/adapters.go (temporary, will use graph queries)
+//
+// Replacement: Use graph queries with [:ON_BRANCH] filtering
+//   Query: MATCH (f:File)<-[:MODIFIES]-(c:Commit)-[:ON_BRANCH]->(b:Branch {is_default: true})
+//
+// DO NOT USE for new code - compute co-change dynamically instead
+//
 // CalculateCoChanges finds files that frequently change together
 func CalculateCoChanges(commits []Commit, minFrequency float64) []CoChangeResult {
 	// Track pairs of files that change together
