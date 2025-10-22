@@ -7,6 +7,12 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
+// LLMClientInterface defines the interface for LLM clients
+type LLMClientInterface interface {
+	Query(ctx context.Context, prompt string) (string, int, error)
+	SetModel(model string)
+}
+
 // LLMClient wraps OpenAI SDK for GPT-4o access
 type LLMClient struct {
 	openaiClient *openai.Client

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
+	
 )
 
 // extractTypeScriptEntities extracts entities from TypeScript AST

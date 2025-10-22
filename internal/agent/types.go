@@ -27,19 +27,33 @@ type BaselineMetrics struct {
 	OwnershipDays     int     // Days since ownership transition
 }
 
+// Breakthrough represents a significant change in risk assessment (from advanced multi-hop system)
+type Breakthrough struct {
+	HopNumber          int       // Which hop triggered the breakthrough
+	RiskBefore         float64   // Risk score before this evidence (0.0-1.0)
+	RiskAfter          float64   // Risk score after this evidence (0.0-1.0)
+	RiskLevelBefore    RiskLevel // Risk level before (LOW, MEDIUM, HIGH, etc.)
+	RiskLevelAfter     RiskLevel // Risk level after
+	RiskChange         float64   // Absolute change (riskAfter - riskBefore)
+	TriggeringEvidence string    // What evidence caused the change
+	Reasoning          string    // LLM's explanation for the change
+	Timestamp          time.Time // When the breakthrough occurred
+	IsEscalation       bool      // True if risk increased, false if decreased
+}
+
 // Investigation represents the full investigation state
 type Investigation struct {
-	Request            InvestigationRequest
-	Hops               []HopResult
-	Evidence           []Evidence
-	RiskScore          float64 // 0.0-1.0
-	Confidence         float64 // 0.0-1.0 (final confidence)
-	ConfidenceHistory  []ConfidencePoint // Confidence progression per hop
-	Breakthroughs      []Breakthrough // Significant risk level changes
-	StoppingReason     string // Why investigation stopped
-	Summary            string
-	CompletedAt        time.Time
-	TotalTokens        int
+	Request           InvestigationRequest
+	Hops              []HopResult
+	Evidence          []Evidence
+	RiskScore         float64 // 0.0-1.0
+	Confidence        float64 // 0.0-1.0 (final confidence)
+	ConfidenceHistory []ConfidencePoint // Confidence progression per hop
+	Breakthroughs     []Breakthrough    // Significant risk level changes
+	StoppingReason    string            // Why investigation stopped
+	Summary           string
+	CompletedAt       time.Time
+	TotalTokens       int
 }
 
 // HopResult represents the result of a single hop
@@ -86,6 +100,26 @@ const (
 	EvidenceMissingTests EvidenceType = "missing_tests" // No test coverage
 )
 
+// CoordinationInfo describes who needs to be contacted (MVP Phase 2)
+type CoordinationInfo struct {
+	ShouldContactOwner  bool     `json:"should_contact_owner"`
+	ShouldContactOthers []string `json:"should_contact_others"`
+	Reason              string   `json:"reason"`
+}
+
+// ForgottenUpdateInfo describes files that might need to be updated together (MVP Phase 2)
+type ForgottenUpdateInfo struct {
+	LikelyForgottenFiles []string `json:"likely_forgotten_files"`
+	Reason               string   `json:"reason"`
+}
+
+// IncidentRiskInfo describes similar past incidents (MVP Phase 2)
+type IncidentRiskInfo struct {
+	SimilarIncident string `json:"similar_incident"`
+	Pattern         string `json:"pattern"`
+	Prevention      string `json:"prevention"`
+}
+
 // RiskAssessment is the final output
 type RiskAssessment struct {
 	FilePath      string
@@ -95,6 +129,12 @@ type RiskAssessment struct {
 	Summary       string
 	Evidence      []Evidence
 	Investigation *Investigation // Full details
+
+	// MVP Phase 2 due diligence fields
+	CoordinationNeeded CoordinationInfo    `json:"coordination_needed,omitempty"`
+	ForgottenUpdates   ForgottenUpdateInfo `json:"forgotten_updates,omitempty"`
+	IncidentRisk       IncidentRiskInfo    `json:"incident_risk,omitempty"`
+	Recommendations    []string            `json:"recommendations,omitempty"`
 }
 
 // RiskLevel categorizes risk

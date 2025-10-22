@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rohankatakam/coderisk/internal/cache"
 	"github.com/rohankatakam/coderisk/internal/database"
 	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/metrics"
@@ -26,13 +25,13 @@ import (
 // - Test ratio: 0 (no test file exists) (HIGH - below threshold of 0.3)
 //
 // This function intentionally violates multiple risk thresholds:
-// 1. Couples to 15+ packages (structural coupling > 10)
+// 1. Couples to 14+ packages (structural coupling > 10)
 // 2. Has NO corresponding test file (test ratio = 0 < 0.3)
 // 3. Contains complex logic with network calls, database operations, and file I/O
 // 4. Mixes multiple concerns (HTTP, DB, file system)
 //
 // This should trigger Phase 2 escalation in production.
-func HighRiskFunction(ctx context.Context, db *sql.DB, apiURL string, redisClient *cache.Client) error {
+func HighRiskFunction(ctx context.Context, db *sql.DB, apiURL string) error {
 	// Network call (external dependency)
 	resp, err := http.Get(apiURL)
 	if err != nil {
@@ -64,12 +63,8 @@ func HighRiskFunction(ctx context.Context, db *sql.DB, apiURL string, redisClien
 		return fmt.Errorf("file write failed: %w", err)
 	}
 
-	// Cache operations
-	cacheKey := fmt.Sprintf("risk:%s", strings.TrimSpace(apiURL))
-	if err := redisClient.Set(ctx, cacheKey, data); err != nil {
-		// Non-fatal cache error
-		fmt.Printf("Warning: cache write failed: %v\n", err)
-	}
+	// Additional processing to maintain complexity
+	_ = fmt.Sprintf("risk:%s", strings.TrimSpace(apiURL))
 
 	// Complex processing (uses multiple internal packages)
 	_ = &graph.Client{}

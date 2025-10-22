@@ -2,13 +2,13 @@ package config
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 
-	"github.com/rohankatakam/coderisk/internal/errors"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
@@ -68,11 +68,10 @@ func (cm *CredentialManager) GetOpenAIAPIKey() (string, error) {
 	}
 
 	// Not found anywhere
-	return "", errors.ConfigErrorf(
-		"OPENAI_API_KEY not found. Set it via:\n"+
-			"  1. Environment variable: export OPENAI_API_KEY=sk-...\n"+
-			"  2. Run: crisk configure (to set up keychain)\n"+
-			"  3. Config file: %s", cm.configPath)
+	return "", fmt.Errorf("OPENAI_API_KEY not found. Set it via:\n"+
+		"  1. Environment variable: export OPENAI_API_KEY=sk-...\n"+
+		"  2. Run: crisk configure (to set up keychain)\n"+
+		"  3. Config file: %s", cm.configPath)
 }
 
 // GetGitHubToken retrieves the GitHub token using priority chain
@@ -125,14 +124,12 @@ func (cm *CredentialManager) SaveCredentials(creds Credentials) error {
 	if cm.keyring.IsAvailable() {
 		if creds.OpenAIAPIKey != "" {
 			if err := cm.keyring.SetAPIKey(creds.OpenAIAPIKey); err != nil {
-				return errors.Wrap(err, errors.ErrorTypeConfig, errors.SeverityHigh,
-					"failed to save OpenAI API key to keychain")
+				return fmt.Errorf("failed to save OpenAI API key to keychain: %w", err)
 			}
 		}
 		if creds.GitHubToken != "" {
 			if err := cm.keyring.SetGitHubToken(creds.GitHubToken); err != nil {
-				return errors.Wrap(err, errors.ErrorTypeConfig, errors.SeverityHigh,
-					"failed to save GitHub token to keychain")
+				return fmt.Errorf("failed to save GitHub token to keychain: %w", err)
 			}
 		}
 		return nil
@@ -188,12 +185,12 @@ func (cm *CredentialManager) promptForAPIKey() (string, error) {
 	}
 
 	if key == "" {
-		return "", errors.ConfigError("OpenAI API key is required")
+		return "", errors.New("OpenAI API key is required")
 	}
 
 	// Validate format (starts with sk-)
 	if !strings.HasPrefix(key, "sk-") {
-		return "", errors.ValidationError("OpenAI API key should start with 'sk-'")
+		return "", errors.New("OpenAI API key should start with 'sk-'")
 	}
 
 	// Save to keychain if available

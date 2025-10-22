@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rohankatakam/coderisk/internal/cache"
 	"github.com/rohankatakam/coderisk/internal/graph"
 )
 
@@ -27,18 +26,7 @@ type CoChangePartner struct {
 // Reference: risk_assessment_methodology.md §2.2
 // Formula: co_change_frequency = COUNT(commits where both changed) / COUNT(commits where either changed)
 // Pre-computed as CO_CHANGED edges during graph construction
-// 12-factor: Factor 5 - Unify execution state (reads pre-computed edges from graph)
-func CalculateCoChange(ctx context.Context, neo4j *graph.Client, redis *cache.Client, repoID, filePath string) (*CoChangeResult, error) {
-	// Try cache first (15-min TTL per risk_assessment_methodology.md §2.2)
-	cacheKey := cache.CacheKey("co_change", repoID, filePath)
-	var cached CoChangeResult
-	hit, err := redis.Get(ctx, cacheKey, &cached)
-	if err != nil {
-		fmt.Printf("cache error (non-fatal): %v\n", err)
-	} else if hit {
-		return &cached, nil
-	}
-
+func CalculateCoChange(ctx context.Context, neo4j *graph.Client, repoID, filePath string) (*CoChangeResult, error) {
 	// Query Neo4j for co-change count (pre-computed CO_CHANGED edges)
 	// Note: This currently returns count, but should return list of partners with frequencies
 	// Reference: risk_assessment_methodology.md §2.2 - Graph query
@@ -60,11 +48,6 @@ func CalculateCoChange(ctx context.Context, neo4j *graph.Client, redis *cache.Cl
 		MaxFrequency: maxFrequency,
 		RiskLevel:    riskLevel,
 		Partners:     []CoChangePartner{}, // Will populate when CO_CHANGED edges exist
-	}
-
-	// Cache result (15-min TTL)
-	if err := redis.Set(ctx, cacheKey, result); err != nil {
-		fmt.Printf("failed to cache co-change result: %v\n", err)
 	}
 
 	return result, nil

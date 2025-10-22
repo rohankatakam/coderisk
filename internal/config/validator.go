@@ -1,11 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
-
-	"github.com/rohankatakam/coderisk/internal/errors"
 )
 
 // ValidationContext specifies what configuration is required
@@ -121,7 +120,7 @@ func (c *Config) ValidateOrFatalWithMode(ctx ValidationContext, mode DeploymentM
 		fmt.Println(result.Error())
 		fmt.Printf("\nDeployment mode: %s (%s)\n", mode, mode.Description())
 		// Exit with error code
-		panic(errors.ConfigError(result.Error()))
+		panic(errors.New(result.Error()))
 	}
 
 	// Print warnings if any
@@ -371,7 +370,7 @@ func (c *Config) RequireNeo4j() error {
 	c.validateNeo4j(result, true, mode)
 
 	if result.HasErrors() {
-		return errors.ConfigError(result.Error())
+		return errors.New(result.Error())
 	}
 
 	return nil
@@ -384,7 +383,7 @@ func (c *Config) RequirePostgres() error {
 	c.validatePostgres(result, true, mode)
 
 	if result.HasErrors() {
-		return errors.ConfigError(result.Error())
+		return errors.New(result.Error())
 	}
 
 	return nil
@@ -396,7 +395,7 @@ func (c *Config) RequireAPI() error {
 	c.validateAPI(result, true)
 
 	if result.HasErrors() {
-		return errors.ConfigError(result.Error())
+		return errors.New(result.Error())
 	}
 
 	return nil

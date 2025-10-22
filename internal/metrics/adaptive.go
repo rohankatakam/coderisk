@@ -5,12 +5,10 @@ import (
 	"fmt"
 
 	"github.com/rohankatakam/coderisk/internal/analysis/config"
-	"github.com/rohankatakam/coderisk/internal/cache"
 	"github.com/rohankatakam/coderisk/internal/graph"
 )
 
 // AdaptivePhase1Result extends Phase1Result with adaptive configuration
-// 12-factor: Factor 3 - Own your context window (domain-specific thresholds)
 type AdaptivePhase1Result struct {
 	*Phase1Result
 	SelectedConfig config.RiskConfig `json:"selected_config"`
@@ -18,27 +16,25 @@ type AdaptivePhase1Result struct {
 }
 
 // CalculatePhase1WithConfig performs Phase 1 assessment using adaptive thresholds
-// 12-factor: Factor 8 - Own your control flow (config-driven decision making)
 func CalculatePhase1WithConfig(
 	ctx context.Context,
 	neo4j *graph.Client,
-	redis *cache.Client,
 	repoID string,
 	filePath string,
 	riskConfig config.RiskConfig,
 ) (*AdaptivePhase1Result, error) {
 	// Calculate baseline metrics (raw values)
-	coupling, err := CalculateCoupling(ctx, neo4j, redis, repoID, filePath)
+	coupling, err := CalculateCoupling(ctx, neo4j, repoID, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("coupling calculation failed: %w", err)
 	}
 
-	coChange, err := CalculateCoChange(ctx, neo4j, redis, repoID, filePath)
+	coChange, err := CalculateCoChange(ctx, neo4j, repoID, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("co-change calculation failed: %w", err)
 	}
 
-	testRatio, err := CalculateTestRatio(ctx, neo4j, redis, repoID, filePath)
+	testRatio, err := CalculateTestRatio(ctx, neo4j, repoID, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("test ratio calculation failed: %w", err)
 	}

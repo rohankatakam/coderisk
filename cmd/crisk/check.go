@@ -10,18 +10,14 @@ import (
 	"time"
 
 	"github.com/rohankatakam/coderisk/internal/agent"
-	"github.com/rohankatakam/coderisk/internal/ai"
 	"github.com/rohankatakam/coderisk/internal/analysis/config"
-	"github.com/rohankatakam/coderisk/internal/analysis/phase0"
 	"github.com/rohankatakam/coderisk/internal/auth"
-	"github.com/rohankatakam/coderisk/internal/cache"
 	appconfig "github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/database"
 	"github.com/rohankatakam/coderisk/internal/git"
 	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/incidents"
 	"github.com/rohankatakam/coderisk/internal/metrics"
-	"github.com/rohankatakam/coderisk/internal/models"
 	"github.com/rohankatakam/coderisk/internal/output"
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver for sqlx
 	"github.com/jmoiron/sqlx"
@@ -140,12 +136,6 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 	defer neo4jClient.Close(ctx)
 
-	redisClient, err := initRedis(ctx)
-	if err != nil {
-		return fmt.Errorf("redis initialization failed: %w", err)
-	}
-	defer redisClient.Close()
-
 	pgClient, err := initPostgres(ctx)
 	if err != nil {
 		return fmt.Errorf("postgres initialization failed: %w", err)
@@ -233,65 +223,20 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	for i, file := range files {
 		resolvedPath := resolvedFiles[i]
 
-		// Phase 0: Pre-Analysis (security, docs, config detection)
-		// Reference: ADR-005 §1 - Phase 0 Adaptive Pre-Analysis
-		phase0Start := time.Now()
-
-		// TODO: Get actual file diff for more accurate Phase 0 analysis
-		// For now, Phase 0 works with just file path and extension
-		phase0Result := phase0.RunPhase0(file, "")
-		phase0Duration := time.Since(phase0Start)
-
-		if !quiet && !preCommit {
-			slog.Info("phase 0 complete",
-				"file", file,
-				"duration_us", phase0Duration.Microseconds(),
-				"modification_types", phase0Result.ModificationTypes,
-				"skip_analysis", phase0Result.SkipAnalysis,
-				"force_escalate", phase0Result.ForceEscalate)
-		}
-
-		// If Phase 0 says skip all analysis (e.g., documentation-only)
-		if phase0Result.SkipAnalysis {
-			// Create simple result for documentation skip
-			skipResult := &metrics.Phase1Result{
-				FilePath:       file,
-				OverallRisk:    metrics.RiskLevel(phase0Result.AggregatedRisk),
-				ShouldEscalate: false,
-				DurationMS:     phase0Duration.Milliseconds(),
-			}
-			riskResult := output.ConvertPhase1ToRiskResult(skipResult)
-
-			if err := formatter.Format(riskResult, os.Stdout); err != nil {
-				return fmt.Errorf("formatting error: %w", err)
-			}
-			continue
-		}
-
 		// Phase 1: Baseline Assessment with Adaptive Config
-		// Reference: ADR-005 §2 - Adaptive Configuration Selection
-		adaptiveResult, err := metrics.CalculatePhase1WithConfig(ctx, neo4jClient, redisClient, repoID, resolvedPath, riskConfig)
+		adaptiveResult, err := metrics.CalculatePhase1WithConfig(ctx, neo4jClient, repoID, resolvedPath, riskConfig)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			continue
 		}
 
-		// If Phase 0 forces escalation, override Phase 1 decision
-		if phase0Result.ForceEscalate {
-			adaptiveResult.ShouldEscalate = true
-			// Override risk level if Phase 0 detected higher risk
-			if phase0Result.AggregatedRisk == "CRITICAL" || phase0Result.AggregatedRisk == "HIGH" {
-				adaptiveResult.OverallRisk = metrics.RiskLevel(phase0Result.AggregatedRisk)
-			}
-		}
+		// Phase 0 escalation removed - rely solely on Phase 1 metrics
 
 		// Convert to RiskResult and format
 		riskResult := output.ConvertPhase1ToRiskResult(adaptiveResult.Phase1Result)
 
-		// If AI mode, enhance with AI prompts and confidence scores
+		// If AI mode, pass Phase 1 result to formatter for enhanced analysis
 		if aiMode {
-			enrichWithAIData(riskResult)
-			// Pass Phase 1 result to formatter for enhanced analysis
 			if aiFormatter, ok := formatter.(*output.AIFormatter); ok {
 				aiFormatter.SetPhase1Result(adaptiveResult.Phase1Result)
 			}
@@ -346,10 +291,10 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			// Create investigator
+			// Create simple investigator (MVP-aligned single LLM call)
 			// 12-factor: Factor 10 - Small, focused agents (investigator is specialized)
 			// Note: Passing nil for graph client as GetNeighbors not yet implemented in graph.Client
-			investigator := agent.NewInvestigator(llmClient, temporalClient, incidentsClient, nil)
+			investigator := agent.NewSimpleInvestigator(llmClient, temporalClient, incidentsClient, nil)
 
 			// Build investigation request from Phase 1 result
 			// Timeout increased to 60s to accommodate complex file analysis and API latency
@@ -461,39 +406,6 @@ func initNeo4j(ctx context.Context) (*graph.Client, error) {
 	}
 
 	slog.Info("successfully connected to Neo4j")
-	return client, nil
-}
-
-// initRedis creates Redis client from config
-func initRedis(ctx context.Context) (*cache.Client, error) {
-	slog.Debug("initializing Redis connection")
-
-	cfg, err := appconfig.Load("")
-	if err != nil {
-		slog.Error("failed to load config for Redis", "error", err)
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Validate Redis configuration
-	if cfg.Cache.RedisHost == "" {
-		slog.Error("Redis configuration missing", "field", "REDIS_HOST")
-		return nil, fmt.Errorf("REDIS_HOST is required in .env or environment variable")
-	}
-
-	if cfg.Cache.RedisPort == 0 {
-		slog.Error("Redis configuration missing", "field", "REDIS_PORT_EXTERNAL")
-		return nil, fmt.Errorf("REDIS_PORT_EXTERNAL is required in .env or environment variable")
-	}
-
-	slog.Info("connecting to Redis", "host", cfg.Cache.RedisHost, "port", cfg.Cache.RedisPort)
-
-	client, err := cache.NewClient(ctx, cfg.Cache.RedisHost, cfg.Cache.RedisPort, cfg.Cache.RedisPassword)
-	if err != nil {
-		slog.Error("failed to connect to Redis", "error", err, "host", cfg.Cache.RedisHost, "port", cfg.Cache.RedisPort)
-		return nil, err
-	}
-
-	slog.Info("successfully connected to Redis")
 	return client, nil
 }
 
@@ -632,87 +544,6 @@ func getCoChangeScore(result *metrics.Phase1Result) float64 {
 	}
 	// Use the max co-change frequency (already 0-1)
 	return result.CoChange.MaxFrequency
-}
-
-// enrichWithAIData adds AI-specific fields to RiskResult for AI Mode
-func enrichWithAIData(result *models.RiskResult) {
-	promptGen := ai.NewPromptGenerator()
-	confCalc := ai.NewConfidenceCalculator()
-
-	// Enhance each issue with AI data
-	for i := range result.Issues {
-		issue := &result.Issues[i]
-
-		// Find corresponding file
-		var fileRisk models.FileRisk
-		for _, f := range result.Files {
-			if f.Path == issue.File {
-				fileRisk = f
-				break
-			}
-		}
-
-		// Determine fix type if not set
-		if issue.FixType == "" {
-			issue.FixType = promptGen.DetermineFixType(*issue, fileRisk)
-		}
-
-		// Calculate confidence
-		issue.FixConfidence = confCalc.Calculate(*issue, fileRisk)
-
-		// Generate AI prompt
-		issue.AIPromptTemplate = promptGen.GeneratePrompt(*issue, fileRisk)
-
-		// Mark as auto-fixable if prompt exists and confidence is high
-		issue.AutoFixable = issue.AIPromptTemplate != "" && confCalc.ShouldAutoFix(issue.FixConfidence)
-
-		// Estimate fix time and lines
-		complexity := 0.0
-		if comp, ok := fileRisk.Metrics["complexity"]; ok {
-			complexity = comp.Value
-		}
-		issue.EstimatedFixTimeMin = confCalc.EstimateFixTime(issue.FixType, complexity)
-		issue.EstimatedLines = confCalc.EstimateLines(issue.FixType)
-
-		// Determine expected files
-		issue.ExpectedFiles = confCalc.DetermineExpectedFiles(issue.FixType, issue.File, fileRisk.Language)
-
-		// Generate fix command
-		issue.FixCommand = fmt.Sprintf("crisk fix-with-ai --%s %s:%d-%d", issue.FixType, issue.File, issue.LineStart, issue.LineEnd)
-	}
-
-	// Set commit control flags based on risk level
-	switch result.RiskLevel {
-	case "CRITICAL":
-		result.ShouldBlock = true
-		result.BlockReason = "critical_risk_detected"
-		result.OverrideAllowed = false
-		result.OverrideRequiresJustification = true
-	case "HIGH":
-		result.ShouldBlock = true
-		result.BlockReason = "high_risk_detected"
-		result.OverrideAllowed = true
-		result.OverrideRequiresJustification = true
-	case "MEDIUM":
-		result.ShouldBlock = false
-		result.BlockReason = ""
-		result.OverrideAllowed = true
-		result.OverrideRequiresJustification = false
-	default:
-		result.ShouldBlock = false
-		result.OverrideAllowed = true
-	}
-
-	// Set performance metrics (simplified - would be calculated during actual analysis)
-	result.Performance = models.Performance{
-		TotalDurationMS: int(result.Duration.Milliseconds()),
-		Breakdown: map[string]int{
-			"phase1_metrics": int(result.Duration.Milliseconds()),
-		},
-		CacheEfficiency: map[string]interface{}{
-			"cache_hit": result.CacheHit,
-		},
-	}
 }
 
 // collectRepoMetadata gathers repository characteristics for adaptive config selection

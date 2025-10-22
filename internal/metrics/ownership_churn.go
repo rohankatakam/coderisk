@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rohankatakam/coderisk/internal/cache"
 	"github.com/rohankatakam/coderisk/internal/graph"
 )
 
@@ -32,18 +31,7 @@ type DeveloperCommitCount struct {
 // CalculateOwnershipChurn computes ownership churn for a file (Tier 2 metric)
 // Reference: risk_assessment_methodology.md §3.1
 // Formula: Queries MODIFIES edges for last 90 days, identifies ownership transitions
-// 12-factor: Factor 8 - Own your control flow (LLM-requested metric, on-demand only)
-func CalculateOwnershipChurn(ctx context.Context, neo4j *graph.Client, redis *cache.Client, repoID, filePath string) (*OwnershipChurnResult, error) {
-	// Try cache first (15-min TTL per risk_assessment_methodology.md §3.1)
-	cacheKey := cache.CacheKey("ownership_churn", repoID, filePath)
-	var cached OwnershipChurnResult
-	hit, err := redis.Get(ctx, cacheKey, &cached)
-	if err != nil {
-		fmt.Printf("cache error (non-fatal): %v\n", err)
-	} else if hit {
-		return &cached, nil
-	}
-
+func CalculateOwnershipChurn(ctx context.Context, neo4j *graph.Client, repoID, filePath string) (*OwnershipChurnResult, error) {
 	// Query Neo4j for MODIFIES edges in last 90 days
 	// Cypher: MATCH (f:File {file_path: $path})<-[:MODIFIES]-(c:Commit)-[:AUTHORED]->(d:Developer)
 	//         WHERE c.author_date > timestamp() - duration({days: 90})
@@ -61,10 +49,6 @@ func CalculateOwnershipChurn(ctx context.Context, neo4j *graph.Client, redis *ca
 			ModifyCount: 0,
 			WindowDays:  windowDays,
 			RiskLevel:   RiskLevelLow,
-		}
-		// Cache result
-		if err := redis.Set(ctx, cacheKey, result); err != nil {
-			fmt.Printf("failed to cache ownership_churn result: %v\n", err)
 		}
 		return result, nil
 	}
@@ -100,11 +84,6 @@ func CalculateOwnershipChurn(ctx context.Context, neo4j *graph.Client, redis *ca
 		DaysSinceTransition: daysSinceTransition,
 		RiskLevel:           riskLevel,
 		Developers:          developerList,
-	}
-
-	// Cache result (15-min TTL)
-	if err := redis.Set(ctx, cacheKey, result); err != nil {
-		fmt.Printf("failed to cache ownership_churn result: %v\n", err)
 	}
 
 	return result, nil

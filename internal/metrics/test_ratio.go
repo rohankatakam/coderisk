@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rohankatakam/coderisk/internal/cache"
 	"github.com/rohankatakam/coderisk/internal/graph"
 )
 
@@ -25,18 +24,7 @@ type TestRatioResult struct {
 // Reference: risk_assessment_methodology.md §2.3
 // Formula: test_ratio = SUM(test_file.loc) / source_file.loc
 // Test file discovery: naming conventions (*_test.py, *.test.js) or graph relationship
-// 12-factor: Factor 5 - Unify execution state (queries graph for test relationships)
-func CalculateTestRatio(ctx context.Context, neo4j *graph.Client, redis *cache.Client, repoID, filePath string) (*TestRatioResult, error) {
-	// Try cache first (15-min TTL per risk_assessment_methodology.md §2.3)
-	cacheKey := cache.CacheKey("test_ratio", repoID, filePath)
-	var cached TestRatioResult
-	hit, err := redis.Get(ctx, cacheKey, &cached)
-	if err != nil {
-		fmt.Printf("cache error (non-fatal): %v\n", err)
-	} else if hit {
-		return &cached, nil
-	}
-
+func CalculateTestRatio(ctx context.Context, neo4j *graph.Client, repoID, filePath string) (*TestRatioResult, error) {
 	// Query Neo4j for source file LOC
 	// TODO: Once graph construction is complete, use actual LOC from File nodes
 	// For now, use placeholder logic
@@ -65,11 +53,6 @@ func CalculateTestRatio(ctx context.Context, neo4j *graph.Client, redis *cache.C
 		Ratio:     ratio,
 		RiskLevel: riskLevel,
 		TestFiles: testFiles,
-	}
-
-	// Cache result (15-min TTL)
-	if err := redis.Set(ctx, cacheKey, result); err != nil {
-		fmt.Printf("failed to cache test_ratio result: %v\n", err)
 	}
 
 	return result, nil
