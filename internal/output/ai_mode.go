@@ -10,7 +10,7 @@ import (
 	"github.com/rohankatakam/coderisk/internal/git"
 	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/metrics"
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 )
 
 // Helper functions (moved from ai_converter.go)
@@ -443,7 +443,7 @@ func ToAIMode(ctx context.Context, phase1 *metrics.Phase1Result, riskResult *mod
 
 func convertToFileAnalysis(phase1 *metrics.Phase1Result, result *models.RiskResult) FileAnalysis {
 	// Find the file in the result
-	var fileRisk models.FileRisk
+	var fileRisk types.FileRisk
 	for _, f := range result.Files {
 		if f.Path == phase1.FilePath {
 			fileRisk = f

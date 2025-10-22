@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 	"github.com/google/go-github/v57/github"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
@@ -30,7 +30,7 @@ func NewClient(token string, rateLimit int) *Client {
 }
 
 // FetchRepository gets repository metadata
-func (c *Client) FetchRepository(ctx context.Context, owner, name string) (*models.Repository, error) {
+func (c *Client) FetchRepository(ctx context.Context, owner, name string) (*types.Repository, error) {
 	if err := c.rateLimiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limiter: %w", err)
 	}
@@ -40,7 +40,7 @@ func (c *Client) FetchRepository(ctx context.Context, owner, name string) (*mode
 		return nil, fmt.Errorf("fetch repository: %w", err)
 	}
 
-	return &models.Repository{
+	return &types.Repository{
 		ID:            fmt.Sprintf("%s/%s", owner, name),
 		Owner:         owner,
 		Name:          name,
@@ -56,7 +56,7 @@ func (c *Client) FetchRepository(ctx context.Context, owner, name string) (*mode
 }
 
 // FetchCommits retrieves commits from the repository
-func (c *Client) FetchCommits(ctx context.Context, owner, name string, since time.Time) ([]*models.Commit, error) {
+func (c *Client) FetchCommits(ctx context.Context, owner, name string, since time.Time) ([]*types.Commit, error) {
 	opts := &github.CommitsListOptions{
 		Since: since,
 		ListOptions: github.ListOptions{
@@ -64,7 +64,7 @@ func (c *Client) FetchCommits(ctx context.Context, owner, name string, since tim
 		},
 	}
 
-	var allCommits []*models.Commit
+	var allCommits []*types.Commit
 
 	for {
 		if err := c.rateLimiter.Wait(ctx); err != nil {
@@ -77,7 +77,7 @@ func (c *Client) FetchCommits(ctx context.Context, owner, name string, since tim
 		}
 
 		for _, commit := range commits {
-			modelCommit := &models.Commit{
+			modelCommit := &types.Commit{
 				SHA:         commit.GetSHA(),
 				RepoID:      fmt.Sprintf("%s/%s", owner, name),
 				Author:      commit.GetAuthor().GetLogin(),
@@ -104,7 +104,7 @@ func (c *Client) FetchCommits(ctx context.Context, owner, name string, since tim
 }
 
 // FetchFiles retrieves all files from the repository
-func (c *Client) FetchFiles(ctx context.Context, owner, name, ref string) ([]*models.File, error) {
+func (c *Client) FetchFiles(ctx context.Context, owner, name, ref string) ([]*types.File, error) {
 	if err := c.rateLimiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limiter: %w", err)
 	}
@@ -114,12 +114,12 @@ func (c *Client) FetchFiles(ctx context.Context, owner, name, ref string) ([]*mo
 		return nil, fmt.Errorf("fetch tree: %w", err)
 	}
 
-	var files []*models.File
+	var files []*types.File
 	repoID := fmt.Sprintf("%s/%s", owner, name)
 
 	// Process files in parallel
 	g, ctx := errgroup.WithContext(ctx)
-	fileChan := make(chan *models.File, len(tree.Entries))
+	fileChan := make(chan *types.File, len(tree.Entries))
 
 	// Worker pool
 	workerCount := min(c.maxWorkers, len(tree.Entries))
@@ -130,7 +130,7 @@ func (c *Client) FetchFiles(ctx context.Context, owner, name, ref string) ([]*mo
 					continue
 				}
 
-				file := &models.File{
+				file := &types.File{
 					ID:     fmt.Sprintf("%s:%s", repoID, entry.GetPath()),
 					RepoID: repoID,
 					Path:   entry.GetPath(),
@@ -165,7 +165,7 @@ func (c *Client) FetchFiles(ctx context.Context, owner, name, ref string) ([]*mo
 }
 
 // FetchPullRequests retrieves pull requests
-func (c *Client) FetchPullRequests(ctx context.Context, owner, name string, state string) ([]*models.PullRequest, error) {
+func (c *Client) FetchPullRequests(ctx context.Context, owner, name string, state string) ([]*types.PullRequest, error) {
 	opts := &github.PullRequestListOptions{
 		State: state,
 		ListOptions: github.ListOptions{
@@ -173,7 +173,7 @@ func (c *Client) FetchPullRequests(ctx context.Context, owner, name string, stat
 		},
 	}
 
-	var allPRs []*models.PullRequest
+	var allPRs []*types.PullRequest
 	repoID := fmt.Sprintf("%s/%s", owner, name)
 
 	for {
@@ -187,7 +187,7 @@ func (c *Client) FetchPullRequests(ctx context.Context, owner, name string, stat
 		}
 
 		for _, pr := range prs {
-			modelPR := &models.PullRequest{
+			modelPR := &types.PullRequest{
 				ID:          int(pr.GetID()),
 				RepoID:      repoID,
 				Number:      pr.GetNumber(),
@@ -222,7 +222,7 @@ func (c *Client) FetchPullRequests(ctx context.Context, owner, name string, stat
 }
 
 // FetchIssues retrieves issues from the repository
-func (c *Client) FetchIssues(ctx context.Context, owner, name string, labels []string) ([]*models.Issue, error) {
+func (c *Client) FetchIssues(ctx context.Context, owner, name string, labels []string) ([]*types.Issue, error) {
 	opts := &github.IssueListByRepoOptions{
 		Labels: labels,
 		State:  "all",
@@ -231,7 +231,7 @@ func (c *Client) FetchIssues(ctx context.Context, owner, name string, labels []s
 		},
 	}
 
-	var allIssues []*models.Issue
+	var allIssues []*types.Issue
 	repoID := fmt.Sprintf("%s/%s", owner, name)
 
 	for {
@@ -250,7 +250,7 @@ func (c *Client) FetchIssues(ctx context.Context, owner, name string, labels []s
 				continue
 			}
 
-			modelIssue := &models.Issue{
+			modelIssue := &types.Issue{
 				ID:        int(issue.GetID()),
 				RepoID:    repoID,
 				Number:    issue.GetNumber(),

@@ -1,0 +1,18 @@
+?   	github.com/rohankatakam/coderisk/cmd/crisk	[no test files]
+ok  	github.com/rohankatakam/coderisk/internal/agent	(cached)
+ok  	github.com/rohankatakam/coderisk/internal/analysis/config	(cached)
+?   	github.com/rohankatakam/coderisk/internal/auth	[no test files]
+ok  	github.com/rohankatakam/coderisk/internal/config	(cached)
+?   	github.com/rohankatakam/coderisk/internal/database	[no test files]
+ok  	github.com/rohankatakam/coderisk/internal/git	(cached)
+?   	github.com/rohankatakam/coderisk/internal/github	[no test files]
+?   	github.com/rohankatakam/coderisk/internal/graph	[no test files]
+ok  	github.com/rohankatakam/coderisk/internal/incidents	(cached)
+?   	github.com/rohankatakam/coderisk/internal/ingestion	[no test files]
+?   	github.com/rohankatakam/coderisk/internal/llm	[no test files]
+ok  	github.com/rohankatakam/coderisk/internal/metrics	(cached)
+?   	github.com/rohankatakam/coderisk/internal/models	[no test files]
+ok  	github.com/rohankatakam/coderisk/internal/output	(cached)
+ok  	github.com/rohankatakam/coderisk/internal/temporal	(cached)
+?   	github.com/rohankatakam/coderisk/internal/treesitter	[no test files]
+ok  	github.com/rohankatakam/coderisk/test/fixtures/known_risk	(cached)

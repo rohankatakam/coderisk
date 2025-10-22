@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
@@ -27,11 +27,11 @@ func NewExtractor(client *Client, logger *logrus.Logger) *Extractor {
 
 // ExtractResult contains all extracted data from a repository
 type ExtractResult struct {
-	Repository   *models.Repository
-	Commits      []*models.Commit
-	Files        []*models.File
-	PullRequests []*models.PullRequest
-	Issues       []*models.Issue
+	Repository   *types.Repository
+	Commits      []*types.Commit
+	Files        []*types.File
+	PullRequests []*types.PullRequest
+	Issues       []*types.Issue
 	ExtractedAt  time.Time
 }
 
@@ -157,7 +157,7 @@ func (e *Extractor) IncrementalExtract(ctx context.Context, owner, name string, 
 		}
 
 		// Filter for recently updated PRs
-		var recentPRs []*models.PullRequest
+		var recentPRs []*types.PullRequest
 		for _, pr := range prs {
 			if pr.CreatedAt.After(since) ||
 				(pr.MergedAt != nil && pr.MergedAt.After(since)) ||
@@ -178,7 +178,7 @@ func (e *Extractor) IncrementalExtract(ctx context.Context, owner, name string, 
 		}
 
 		// Filter for recently updated issues
-		var recentIssues []*models.Issue
+		var recentIssues []*types.Issue
 		for _, issue := range issues {
 			if issue.CreatedAt.After(since) ||
 				(issue.ClosedAt != nil && issue.ClosedAt.After(since)) {
@@ -198,8 +198,8 @@ func (e *Extractor) IncrementalExtract(ctx context.Context, owner, name string, 
 }
 
 // ExtractFileChanges extracts changed files from commits
-func (e *Extractor) ExtractFileChanges(ctx context.Context, commits []*models.Commit) (map[string][]*models.File, error) {
-	fileChanges := make(map[string][]*models.File)
+func (e *Extractor) ExtractFileChanges(ctx context.Context, commits []*types.Commit) (map[string][]*types.File, error) {
+	fileChanges := make(map[string][]*types.File)
 	mu := sync.Mutex{}
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -210,7 +210,7 @@ func (e *Extractor) ExtractFileChanges(ctx context.Context, commits []*models.Co
 			// In production, this would fetch actual file changes from GitHub API
 			// For now, we'll store the reference
 			mu.Lock()
-			fileChanges[commit.SHA] = []*models.File{} // Initialize empty for now
+			fileChanges[commit.SHA] = []*types.File{} // Initialize empty for now
 			mu.Unlock()
 			return nil
 		})

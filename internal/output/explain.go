@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 )
 
 // ExplainFormatter outputs full investigation trace
@@ -95,7 +95,7 @@ func (f *ExplainFormatter) Format(result *models.RiskResult, w io.Writer) error 
 	return nil
 }
 
-func (f *ExplainFormatter) metricStatus(metric models.Metric) string {
+func (f *ExplainFormatter) metricStatus(metric types.Metric) string {
 	if metric.Threshold != nil && metric.Value > *metric.Threshold {
 		return "❌"
 	} else if metric.Warning != nil && metric.Value > *metric.Warning {

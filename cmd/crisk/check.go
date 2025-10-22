@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/rohankatakam/coderisk/internal/agent"
-	"github.com/rohankatakam/coderisk/internal/analysis/config"
+	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/auth"
 	appconfig "github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/database"

@@ -14,7 +14,7 @@ import (
 	"github.com/rohankatakam/coderisk/internal/database"
 	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/metrics"
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 	"github.com/rohankatakam/coderisk/internal/output"
 )
 
