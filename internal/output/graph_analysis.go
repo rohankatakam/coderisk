@@ -9,6 +9,8 @@ import (
 	"github.com/rohankatakam/coderisk/internal/models"
 )
 
+// Note: Helper functions minFloat64/maxFloat64 are defined in ai_converter.go
+
 // CalculateBlastRadius determines impact of changing a file
 // 12-factor: Factor 4 - Tools are structured outputs
 func CalculateBlastRadius(ctx context.Context, filePath string, graphClient *graph.Client) BlastRadius {

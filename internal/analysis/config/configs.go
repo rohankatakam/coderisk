@@ -2,6 +2,27 @@ package config
 
 import "fmt"
 
+// RepoMetadata contains repository characteristics for config selection
+// NOTE: Adaptive config selection deferred to v2 (MVP uses fixed thresholds)
+type RepoMetadata struct {
+	PrimaryLanguage string            // e.g., "Python", "Go", "TypeScript"
+	FilePaths       []string          // Sample of file paths from repo
+	Dependencies    map[string]string // Package dependencies (name -> version)
+	DirectoryNames  []string          // Top-level directory names
+	PackageJSON     map[string]interface{} // package.json content (if exists)
+	RequirementsTxt []string          // requirements.txt lines (if exists)
+	GoMod           []string          // go.mod lines (if exists)
+}
+
+// Domain represents the application type
+type Domain string
+
+const (
+	DomainUnknown Domain = "unknown"
+	DomainWeb     Domain = "web"
+	DomainBackend Domain = "backend"
+)
+
 // RiskConfig defines domain-specific risk assessment thresholds
 // 12-factor: Factor 3 - Own your context window (adaptive thresholds reduce FP noise)
 type RiskConfig struct {
@@ -262,4 +283,18 @@ func getPermissivenessWord(valA, valB int) string {
 		return "strict"
 	}
 	return "equal"
+}
+
+// SelectConfigWithReason returns default config for MVP
+// NOTE: Adaptive config selection deferred to v2
+func SelectConfigWithReason(metadata RepoMetadata) (RiskConfig, string) {
+	// MVP: Always use default config with fixed thresholds
+	return GetDefaultConfig(), "MVP uses default fixed thresholds (adaptive config deferred to v2)"
+}
+
+// InferDomain returns unknown domain for MVP
+// NOTE: Domain inference deferred to v2
+func InferDomain(metadata RepoMetadata) Domain {
+	// MVP: Domain inference not implemented
+	return DomainUnknown
 }
