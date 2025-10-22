@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rohankatakam/coderisk/internal/analysis/config"
+	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/graph"
 )
 

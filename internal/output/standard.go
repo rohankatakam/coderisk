@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/rohankatakam/coderisk/internal/agent"
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 )
 
 // StandardFormatter outputs issues + recommendations (default)

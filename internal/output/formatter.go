@@ -4,7 +4,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 )
 
 // Formatter defines output formatting interface

@@ -3,7 +3,7 @@ package metrics
 import (
 	"testing"
 
-	"github.com/rohankatakam/coderisk/internal/analysis/config"
+	"github.com/rohankatakam/coderisk/internal/config"
 )
 
 func TestClassifyCouplingWithThreshold(t *testing.T) {

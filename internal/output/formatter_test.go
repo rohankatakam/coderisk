@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 )
 
 func TestQuietFormatter(t *testing.T) {
@@ -293,12 +293,12 @@ func TestMetricStatus(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		metric   models.Metric
+		metric   types.Metric
 		expected string
 	}{
 		{
 			name: "below threshold",
-			metric: models.Metric{
+			metric: types.Metric{
 				Value:     5.0,
 				Threshold: ptrFloat64(10.0),
 			},
@@ -306,7 +306,7 @@ func TestMetricStatus(t *testing.T) {
 		},
 		{
 			name: "above threshold",
-			metric: models.Metric{
+			metric: types.Metric{
 				Value:     15.0,
 				Threshold: ptrFloat64(10.0),
 			},
@@ -314,7 +314,7 @@ func TestMetricStatus(t *testing.T) {
 		},
 		{
 			name: "above warning but below threshold",
-			metric: models.Metric{
+			metric: types.Metric{
 				Value:     8.0,
 				Warning:   ptrFloat64(7.0),
 				Threshold: ptrFloat64(10.0),

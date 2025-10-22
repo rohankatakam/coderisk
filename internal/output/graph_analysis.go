@@ -6,7 +6,7 @@ import (
 
 	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/metrics"
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 )
 
 // Note: Helper functions minFloat64/maxFloat64 are defined in ai_converter.go

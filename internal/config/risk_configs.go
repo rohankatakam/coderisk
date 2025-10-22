@@ -25,7 +25,7 @@ const (
 
 // RiskConfig defines domain-specific risk assessment thresholds
 // 12-factor: Factor 3 - Own your context window (adaptive thresholds reduce FP noise)
-type RiskConfig struct {
+type AdaptiveRiskConfig struct {
 	// ConfigKey is the identifier for this config (e.g., "python_web", "go_backend")
 	ConfigKey string
 
@@ -65,7 +65,7 @@ const (
 
 // Pre-defined risk configurations for different domain types
 // Based on empirical analysis in ADR-005 and testing results
-var RiskConfigs = map[string]RiskConfig{
+var RiskConfigs = map[string]AdaptiveRiskConfig{
 	ConfigKeyPythonWeb: {
 		ConfigKey:          ConfigKeyPythonWeb,
 		Description:        "Python web applications (Flask, Django, FastAPI)",
@@ -108,7 +108,7 @@ var RiskConfigs = map[string]RiskConfig{
 		CouplingThreshold:  10, // Web routers increase coupling slightly
 		CoChangeThreshold:  0.65,
 		TestRatioThreshold: 0.45,
-		Rationale: `Go web frameworks add coupling through route handlers, middleware, and models.
+		Rationale: `Go web frameworks add coupling through route handlers, middleware, and types.
 		Slightly more permissive than pure backend (10 vs 8) but still stricter than Python web.
 		Test ratio 0.45 accounts for handler-focused testing patterns.`,
 	},
@@ -203,13 +203,13 @@ var RiskConfigs = map[string]RiskConfig{
 func GetConfig(key string) (RiskConfig, error) {
 	config, exists := RiskConfigs[key]
 	if !exists {
-		return RiskConfig{}, fmt.Errorf("config not found: %s", key)
+		return AdaptiveRiskConfig{}, fmt.Errorf("config not found: %s", key)
 	}
 	return config, nil
 }
 
 // GetDefaultConfig returns the default fallback config
-func GetDefaultConfig() RiskConfig {
+func GetDefaultConfig() AdaptiveRiskConfig {
 	return RiskConfigs[ConfigKeyDefault]
 }
 

@@ -5,7 +5,7 @@ import (
 
 	"github.com/rohankatakam/coderisk/internal/git"
 	"github.com/rohankatakam/coderisk/internal/metrics"
-	"github.com/rohankatakam/coderisk/internal/models"
+	"github.com/rohankatakam/coderisk/internal/types"
 )
 
 // AIJSONOutput is the complete schema for --ai-mode
@@ -217,7 +217,7 @@ func convertMetrics(phase1 *metrics.Phase1Result) map[string]models.Metric {
 
 	if phase1.Coupling != nil {
 		threshold := 10.0
-		metrics["coupling"] = models.Metric{
+		metrics["coupling"] = types.Metric{
 			Name:      "Structural Coupling",
 			Value:     float64(phase1.Coupling.Count),
 			Threshold: &threshold,
@@ -226,7 +226,7 @@ func convertMetrics(phase1 *metrics.Phase1Result) map[string]models.Metric {
 
 	if phase1.CoChange != nil {
 		threshold := 0.7
-		metrics["co_change"] = models.Metric{
+		metrics["co_change"] = types.Metric{
 			Name:      "Temporal Co-Change",
 			Value:     phase1.CoChange.MaxFrequency,
 			Threshold: &threshold,
@@ -235,7 +235,7 @@ func convertMetrics(phase1 *metrics.Phase1Result) map[string]models.Metric {
 
 	if phase1.TestRatio != nil {
 		threshold := 0.3
-		metrics["test_coverage"] = models.Metric{
+		metrics["test_coverage"] = types.Metric{
 			Name:      "Test Coverage",
 			Value:     phase1.TestRatio.Ratio,
 			Threshold: &threshold,
@@ -249,7 +249,7 @@ func convertToIssues(phase1 *metrics.Phase1Result) []models.RiskIssue {
 	var issues []models.RiskIssue
 
 	if phase1.Coupling != nil && phase1.Coupling.ShouldEscalate() {
-		issues = append(issues, models.RiskIssue{
+		issues = append(issues, types.RiskIssue{
 			ID:       "COUPLING_HIGH",
 			Severity: string(phase1.Coupling.RiskLevel),
 			Category: "coupling",
@@ -259,7 +259,7 @@ func convertToIssues(phase1 *metrics.Phase1Result) []models.RiskIssue {
 	}
 
 	if phase1.CoChange != nil && phase1.CoChange.ShouldEscalate() {
-		issues = append(issues, models.RiskIssue{
+		issues = append(issues, types.RiskIssue{
 			ID:       "COCHANGE_HIGH",
 			Severity: string(phase1.CoChange.RiskLevel),
 			Category: "temporal",
@@ -269,7 +269,7 @@ func convertToIssues(phase1 *metrics.Phase1Result) []models.RiskIssue {
 	}
 
 	if phase1.TestRatio != nil && phase1.TestRatio.ShouldEscalate() {
-		issues = append(issues, models.RiskIssue{
+		issues = append(issues, types.RiskIssue{
 			ID:       "TEST_COVERAGE_LOW",
 			Severity: string(phase1.TestRatio.RiskLevel),
 			Category: "quality",
