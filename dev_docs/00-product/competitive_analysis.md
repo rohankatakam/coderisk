@@ -11,27 +11,35 @@
 ## Executive Summary
 
 **CodeRisk MVP Positioning:**
-> **"Local-first pre-commit risk scanner for AI-generated code"**
+> **"Automated due diligence before code review—prevents regressions through temporal analysis"**
 
-**Category:** Pre-commit architectural safety check (NEW workflow moment)
+**Category:** Pre-commit regression prevention (NEW workflow layer)
+
+**Core Value Proposition:**
+Automates the due diligence developers need before committing:
+- Blast radius analysis (what depends on this?)
+- Co-change detection (what files change together?)
+- Ownership context (who should review?)
+- Incident history (has this pattern failed before?)
 
 **Key Differentiators:**
-1. **Timing:** Pre-commit (before code becomes public) vs post-commit (PR review, CI/CD)
-2. **Architecture:** Local-first (Docker + local Neo4j) vs cloud-based
-3. **Economics:** BYOK model (~$1-2/month) vs all-inclusive pricing ($30-150/month)
-4. **Focus:** Architectural risks for AI-generated code vs general code quality
+1. **Purpose:** Regression prevention (not code quality review)
+2. **Timing:** Pre-commit (private) vs PR review (public)
+3. **Intelligence:** Temporal coupling + ownership context (unique)
+4. **Psychology:** Private feedback (no embarrassment, no sunk cost)
+5. **Architecture:** Local-first (Docker + Neo4j) vs cloud-based
 
-**Primary Competitors:**
-- **Greptile** - Cloud PR review tool (later timing, higher cost)
-- **SonarQube** - Rule-based static analysis (high false positives)
-- **Codescene** - Health dashboard for managers (batch, not real-time)
+**Competitive Positioning:**
+- **Complementary to Greptile/CodeRabbit** - Different problems (regressions vs code quality), different timing (pre-commit vs PR)
+- **Complementary to SonarQube** - Different focus (architecture vs security)
+- **Different from Codescene** - Developer tool (not manager dashboard)
 
 **Competitive Advantages:**
-- ✅ **Earliest intervention** - Pre-commit, not PR review
+- ✅ **Temporal intelligence** - Only tool with co-change pattern detection
+- ✅ **Pre-commit timing** - Private feedback before public commitment
+- ✅ **Regression focus** - Prevents silent failures, not just code quality
 - ✅ **Local-first** - Fast, private, no cloud costs
 - ✅ **Low cost** - Free BYOK (~$1-2/month LLM costs)
-- ✅ **AI-focused** - Designed for AI coding assistant users
-- ✅ **Low false positives** - <5% target vs 10-20% industry
 
 ---
 

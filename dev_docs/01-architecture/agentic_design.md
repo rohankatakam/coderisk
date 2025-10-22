@@ -1,17 +1,18 @@
 # Agentic Investigation Design
 
 **Version:** 5.0 (MVP)
-**Last Updated:** October 17, 2025
-**Purpose:** LLM-guided code risk investigation for local-first MVP
+**Last Updated:** January 2025
+**Purpose:** LLM-guided regression prevention through automated due diligence for local-first MVP
 **Deployment:** Docker + local Neo4j, no cloud infrastructure
 
 ---
 
 ## Overview
 
-CodeRisk uses an **LLM-guided agent** that selectively investigates code changes based on what matters, not exhaustive pre-computation. The agent decides what metrics to calculate and when it has enough evidence to make a risk assessment.
+CodeRisk uses an **LLM-guided agent** that automates the due diligence developers should perform manually before committing—but rarely do because it takes 10-15 minutes. The agent prevents regressions by checking blast radius, co-change patterns, ownership context, and incident history in <5 seconds.
 
 **Core Principles:**
+- **Regression prevention** - Automates due diligence that prevents regressions (blast radius, co-change, ownership)
 - **Selective, not exhaustive** - Only analyze what the LLM needs, when it needs it
 - **Evidence-driven** - Combine multiple low-FP metrics instead of single scores
 - **Fast baseline** - 80% of checks complete in <500ms without LLM
@@ -43,6 +44,31 @@ Developer changes 1 file (auth.py)
 ```
 
 **Key insight:** 99% of relationships are irrelevant to any given change. The LLM navigates to the 1% that matters.
+
+### Why Agentic Investigation Prevents Regressions
+
+**Traditional Approach (Manual Due Diligence):**
+- Developer manually runs: `git log --follow payment.py` → **5 minutes**
+- Developer manually searches: "what imports payment.py?" → **5 minutes**
+- Developer manually checks: `git blame` for ownership → **3 minutes**
+- Developer manually reviews: past incidents related to payment → **2 minutes**
+- **Total: 15+ minutes, often skipped entirely**
+
+**CodeRisk Approach (Automated Due Diligence):**
+- Phase 1 loads 1-hop neighbors with CO_CHANGED edges → **200ms**
+- Calculates temporal coupling + ownership automatically → **50ms**
+- LLM synthesizes: "This usually changes with X, owned by @bob" → **2-5 seconds**
+- **Total: 2-5 seconds, always performed**
+
+**Regression Prevention in Practice:**
+Without CodeRisk → Developer skips due diligence → Commits incomplete change → PR merged → Production breaks
+With CodeRisk → Automated check flags coupled file → Developer updates both → Regression prevented
+
+**Why This Works:**
+- **Pre-commit timing:** Catches issues before public PR (private feedback, no sunk cost)
+- **Always runs:** Developers won't spend 15 minutes manually, but automated checks always happen
+- **Temporal coupling (unique moat):** CO_CHANGED edges reveal hidden dependencies structural analysis misses
+- **Ownership context:** Surfaces who to ask for review, reducing knowledge gaps
 
 ### Graph as Database, Not Calculator
 
@@ -128,6 +154,7 @@ Calculated during Phase 1 baseline, cached for 15 minutes:
 - FP Rate: ~1-2% (dependencies are factual)
 - Cost: <50ms
 - Evidence: "Function `check_auth()` is called by 12 other functions"
+- **Regression Prevention Use Case:** Prevents breaking changes to widely-used functions—developer sees 12 dependents and adds defensive checks or tests all call sites
 
 **2. Temporal Co-Change**
 - Definition: Files that frequently change together in git history
@@ -135,6 +162,7 @@ Calculated during Phase 1 baseline, cached for 15 minutes:
 - FP Rate: ~3-5% (temporal patterns are observable)
 - Cost: <20ms
 - Evidence: "File A and File B changed together in 15 of last 20 commits (75%)"
+- **Regression Prevention Use Case:** Prevents incomplete changes—developer modifies A.py but forgets B.py (which changes together 80% of time), CodeRisk warns, developer updates both, regression avoided
 
 **3. Test Coverage Ratio**
 - Definition: Ratio of test code to source code
@@ -142,6 +170,7 @@ Calculated during Phase 1 baseline, cached for 15 minutes:
 - FP Rate: ~5-8% (depends on naming consistency)
 - Cost: <50ms
 - Evidence: "auth.py has test ratio 0.45 (auth_test.py is 45% the size)"
+- **Regression Prevention Use Case:** Prevents untested changes from reaching production—developer sees low test coverage, adds tests before committing, catches bugs pre-commit instead of in production
 
 ### Tier 2: Calculate on LLM Request (Context-Dependent)
 
@@ -154,6 +183,7 @@ Only calculated during Phase 2 if LLM asks for them:
 - Cost: <50ms
 - Evidence: "Primary owner changed from Bob to Alice 14 days ago"
 - When: LLM asks "Who owns this code?"
+- **Regression Prevention Use Case:** Prevents knowledge gaps—new owner may lack context on subtle behavior, CodeRisk recommends pinging previous owner @bob for review, prevents regression from misunderstanding original intent
 
 **5. Incident Similarity**
 - Definition: Similarity between current change and past incident descriptions
@@ -162,24 +192,27 @@ Only calculated during Phase 2 if LLM asks for them:
 - Cost: <50ms
 - Evidence: "Commit mentions 'timeout' similar to Incident #123"
 - When: LLM asks "Are there similar past incidents?"
+- **Regression Prevention Use Case:** Prevents repeating past failures—developer modifying timeout logic sees warning about Incident #123 (auth timeout after 30s), adds defensive timeout handling, prevents recurrence of same incident
 
 ---
 
 ## Working Memory
 
-**Goal:** Load graph data once, navigate in-memory during investigation.
+**Goal:** Load graph data once, navigate in-memory during investigation to provide regression prevention context.
 
-**What gets loaded:**
+**What gets loaded (Regression Prevention Data):**
 - Changed files (from git diff)
-- 1-hop neighbor files (imports, importers, co-changed files)
+- 1-hop neighbor files (imports, importers, **co-changed files via CO_CHANGED edges**)
 - Tier 1 metrics (pre-calculated)
-- Git commit history (90-day window)
-- Incident links (if any exist)
+- **Git commit history (90-day window) with ownership context**
+- **Incident links (if any exist) for failure history**
 
-**Benefits:**
+**Benefits for Regression Prevention:**
 - Single Neo4j query per investigation (fast)
-- LLM context stays small (<2K tokens)
+- LLM has full context: **ownership + temporal coupling + incident history**
 - Can expand to 2-hop if LLM requests (controlled growth)
+- **Ownership context:** Surfaces who wrote code, who to ask for review
+- **Temporal context:** Reveals which files change together (hidden dependencies)
 
 **Limits:**
 - Max 3 investigation rounds (prevents runaway costs)

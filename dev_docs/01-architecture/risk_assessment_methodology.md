@@ -1,17 +1,18 @@
-# Risk Assessment Methodology
+# Regression Prevention Methodology
 
 **Version:** 2.0 (MVP)
-**Last Updated:** October 17, 2025
-**Purpose:** Simple, robust risk calculation logic for code change assessment
+**Last Updated:** January 2025
+**Purpose:** Simple, robust regression detection through automated due diligence
 **Deployment:** Local MVP with Neo4j, no cloud infrastructure
 
 ---
 
 ## Core Principles
 
-### Design Philosophy
+### Regression Detection Philosophy
 
-**Simplified Approach:**
+**Automated Due Diligence Approach:**
+- **Regression prevention** - Detect patterns that lead to production failures (incomplete changes, untested code)
 - **Factual metrics** - Coupling counts, co-change frequencies (1-5% FP rate)
 - **Evidence-based reasoning** - LLM synthesizes multiple low-FP signals
 - **Selective calculation** - Only compute what the investigation needs
@@ -48,9 +49,14 @@
 
 ## Tier 1 Metrics (Baseline Assessment)
 
-### 1. Structural Coupling
+### 1. Structural Coupling (Regression Detector)
 
 **Definition:** Count of files/functions that directly depend on changed code
+
+**What Regression It Prevents:**
+**Scenario:** Developer modifies widely-used function signature without checking dependents
+- **Without CodeRisk:** Merge → Production → 12 call sites break (changed function signature incompatible)
+- **With CodeRisk:** Pre-commit warning shows 12 dependents → Developer checks all call sites → No regression
 
 **Calculation:** Query Neo4j for 1-hop neighbors connected via IMPORTS or CALLS relationships.
 
@@ -67,13 +73,18 @@
 - FP Rate: ~1-2% (false positives occur with intentional framework patterns)
 
 **Evidence Format:**
-> "File auth.py is imported by 12 other files (HIGH coupling)"
+> "File auth.py is imported by 12 other files (HIGH coupling). Did you check all dependents?"
 
-**Why This Works:** Dependencies are observable facts, not statistical inferences.
+**Why This Works:** Dependencies are observable facts, not statistical inferences. Blast radius awareness prevents breaking changes.
 
-### 2. Temporal Co-Change
+### 2. Temporal Co-Change (Regression Detector)
 
 **Definition:** Files that frequently change together in git history (90-day window)
+
+**What Regression It Prevents:**
+**Scenario:** Developer updates A.py but forgets B.py (which changes together 80% of time)
+- **Without CodeRisk:** Merge → Production → B.py breaks (A/B coupling violated, e.g., config format changed in A but not in B)
+- **With CodeRisk:** Pre-commit warning → "A.py and B.py changed together in 16/20 commits (80%). Did you update B.py?" → Developer updates both → No regression
 
 **Calculation:** Read pre-computed CO_CHANGED edge weight from Neo4j. The frequency represents how often two files change together in the same commit.
 
@@ -92,13 +103,20 @@
 - FP Rate: ~3-5% (false positives from unrelated mass changes like formatting)
 
 **Evidence Format:**
-> "auth.py and permissions.py changed together in 15 of last 20 commits (75% co-change frequency)"
+> "A.py and B.py changed together in 16/20 commits (80%). Did you update B.py?"
 
 **Pre-Computation:** CO_CHANGED edges computed during `crisk init` and stored in Neo4j, so runtime query is just a fast edge property lookup.
 
-### 3. Test Coverage Ratio
+**Why This Is CodeRisk's Unique Moat:** No other tool tracks temporal coupling. Structural analysis (imports/calls) misses evolutionary patterns. Example: payment.py doesn't import fraud.py (no structural coupling) but they changed together in 18/20 commits (90% temporal coupling).
+
+### 3. Test Coverage Ratio (Regression Detector)
 
 **Definition:** Ratio of test code to source code (lines of code)
+
+**What Regression It Prevents:**
+**Scenario:** Developer modifies critical auth logic without adequate tests
+- **Without CodeRisk:** Merge → Production → Auth bug breaks login (untested edge case)
+- **With CodeRisk:** Pre-commit warning → "auth.py has test ratio 0.2 (LOW coverage)" → Developer adds tests → Bug caught pre-commit
 
 **Calculation:** Find test files via naming convention (test_*.py, *_test.py, *.test.js) and directory patterns (tests/, __tests__/), then calculate ratio.
 
@@ -120,7 +138,7 @@
 - FP Rate: ~5-8% (false positives with non-standard test locations)
 
 **Evidence Format:**
-> "auth.py (250 LOC) has auth_test.py (75 LOC), test ratio = 0.3 (MEDIUM coverage)"
+> "auth.py (250 LOC) has auth_test.py (75 LOC), test ratio = 0.3 (MEDIUM coverage). Consider adding tests."
 
 **Smoothing:** To avoid division by zero, use (test_loc + 1) / (source_loc + 1)
 
@@ -258,6 +276,52 @@ Recommendations:
 - Ensure new owner (alice@) is familiar with incident #123
 
 Reasoning: High coupling + ownership churn + incident history = elevated risk
+
+---
+
+## Regression Detection in Practice
+
+**End-to-End Scenario:**
+
+1. **Developer commits change to payment_processor.py**
+2. **Phase 1 baseline (200ms):**
+   - Structural coupling: 12 dependents (HIGH)
+   - Temporal co-change: fraud_detector.py (75% frequency, HIGH)
+   - Test coverage: 0.4 (MEDIUM)
+   - **Decision:** Escalate to Phase 2 (HIGH coupling + HIGH co-change)
+
+3. **Phase 2 LLM investigation (3s):**
+   - LLM asks: "Who owns fraud_detector.py?" → Ownership metric calculated
+   - Result: @bob owns it, last active 3 days ago
+   - LLM asks: "Similar past incidents?" → Incident search
+   - Result: Incident #123 "Payment timeout after fraud check"
+   - LLM synthesizes: **HIGH risk, confidence 0.85**
+
+4. **Recommendation delivered:**
+   > **Risk Level: HIGH (Confidence: 0.85)**
+   >
+   > **Key Evidence:**
+   > - 12 files depend on payment_processor.py (blast radius)
+   > - fraud_detector.py changed together 75% of time (temporal coupling)
+   > - @bob owns fraud_detector.py (ownership context)
+   > - Similar to Incident #123: "Payment timeout after fraud check"
+   >
+   > **Recommendations:**
+   > - Review fraud_detector.py for needed updates
+   > - Ping @bob for review before merging
+   > - Add timeout handling tests (reference Incident #123)
+
+5. **Regression prevented:**
+   - Developer updates both payment_processor.py and fraud_detector.py
+   - Adds timeout tests
+   - Pings @bob for review
+   - **Production incident avoided**
+
+**Without CodeRisk:**
+- Developer commits only payment_processor.py → PR merged → Production → fraud_detector.py breaks → Incident #124 (same as #123)
+
+**With CodeRisk:**
+- Automated due diligence flags coupled file + ownership + incident history → Developer takes action → No regression
 
 ---
 
@@ -476,5 +540,5 @@ See [graph_ontology.md](graph_ontology.md) for full schema details.
 
 ---
 
-**Last Updated:** October 17, 2025
+**Last Updated:** January 2025
 **Next Review:** After MVP deployment, analyze actual FP rates and adjust thresholds

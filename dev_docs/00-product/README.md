@@ -1,9 +1,27 @@
 # Product & Business Documentation (MVP Focus)
 
-**Last Updated:** October 17, 2025
+**Last Updated:** January 2025
 **Purpose:** Product vision, user research, and market positioning for CodeRisk MVP
 
 > **📘 Strategic Shift:** Simplified to local-first MVP based on market research. Complex cloud features moved to [99-archive/00-product-future-vision](../99-archive/00-product-future-vision/) for v2-v4.
+
+---
+
+## Strategic Positioning (January 2025)
+
+**CodeRisk = Automated Due Diligence Layer**
+
+Prevents regressions by automating what developers should check before committing:
+- **Blast radius:** What depends on my changes?
+- **Co-change patterns:** What files change together? (temporal coupling)
+- **Ownership context:** Who wrote this? Who should review?
+- **Incident history:** Has this pattern failed before?
+
+**Complementary to PR Review Tools:**
+- **Layer 1 (Pre-commit):** CodeRisk prevents regressions through temporal analysis
+- **Layer 2 (PR review):** Greptile/CodeRabbit review code quality (bugs, style, best practices)
+
+**Unique Moat:** Temporal coupling analysis (CO_CHANGED edges)—no other tool tracks which files evolve together.
 
 ---
 
@@ -27,9 +45,9 @@
 ## What Goes Here
 
 **Product Strategy:**
-- MVP vision and mission (local-first focus)
+- MVP vision and mission (regression prevention focus, local-first)
 - User personas (solo developers + small teams)
-- Competitive positioning (local-first vs cloud tools)
+- Competitive positioning (complementary to Greptile/CodeRabbit, regression prevention positioning)
 
 **User Experience:**
 - Developer workflows (local git-based)
@@ -45,10 +63,11 @@
 
 ### Core Product Vision
 
-1. **[mvp_vision.md](mvp_vision.md)** - Simplified product vision for local-first MVP
-   - **When to read:** Understanding CodeRisk's MVP strategy and positioning
-   - **Key topics:** Local-first architecture, pre-commit timing, BYOK model, 4-6 week launch plan
+1. **[mvp_vision.md](mvp_vision.md)** - Regression prevention positioning for local-first MVP
+   - **When to read:** Understanding CodeRisk's MVP strategy and regression prevention positioning
+   - **Key topics:** Regression prevention, automated due diligence, temporal coupling moat, complementary to Greptile/CodeRabbit
    - **Changed from:** `vision_and_mission.md` (cloud platform vision archived)
+   - **Updated:** January 2025 with regression prevention messaging
 
 ### User Research
 
@@ -59,10 +78,10 @@
 
 ### Market Positioning
 
-3. **[competitive_analysis.md](competitive_analysis.md)** - Local-first positioning vs competitors
+3. **[competitive_analysis.md](competitive_analysis.md)** - Regression prevention positioning vs competitors
    - **When to read:** Understanding competitive landscape and differentiation
-   - **Key topics:** vs Greptile (cloud), vs SonarQube (rules-based), local-first advantage
-   - **Changed:** Updated positioning for local tool, not cloud platform
+   - **Key topics:** Complementary to Greptile/CodeRabbit (not competitive), temporal coupling unique moat, regression prevention focus
+   - **Changed:** Updated positioning for regression prevention, complementary to PR review tools
 
 ### User Experience
 
@@ -215,5 +234,5 @@ These documents represent v2-v4 vision (cloud platform, trust infrastructure, AR
 
 ---
 
-**Last Updated:** October 17, 2025
+**Last Updated:** January 2025
 **Next Review:** After MVP launch (Week 7-8)

@@ -1,556 +1,361 @@
-# Next Steps: Post-DX Foundation Implementation Roadmap
+# Next Steps: MVP Implementation Roadmap
 
-**Created:** October 4, 2025
-**Purpose:** Define immediate next steps after DX Foundation phase completion
-**Reference:** [status.md](status.md), [spec.md](../spec.md)
+**Last Updated:** October 17, 2025
+**Purpose:** Actionable roadmap for MVP completion (4-6 weeks)
+**Reference:** [status.md](status.md), [mvp_vision.md](../00-product/mvp_vision.md)
 
 ---
 
 ## Current State ✅
 
-**Completed:**
-- ✅ **DX Foundation Phase** - Pre-commit hook, 4 verbosity levels, AI Mode
-- ✅ **Layer 1 (Tree-sitter)** - AST parsing for code structure
-- ✅ **Layers 2-3 (GitHub API)** - GitHub fetching and graph construction
-- ✅ **Phase 1 Metrics** - Coupling, co-change, test ratio
-- ✅ **Local Infrastructure** - Docker Compose, Neo4j, PostgreSQL, Redis
-- ✅ **Week 1 Core Functionality** - Git integration, init flow, risk validation (October 4, 2025)
+**Completed (Ready for MVP):**
+- ✅ 3-layer graph ingestion (structure, temporal, incidents)
+- ✅ Pre-commit hook integration
+- ✅ 4 verbosity levels (quiet, standard, explain, AI mode)
+- ✅ Docker Compose deployment (local Neo4j)
+- ✅ CLI commands (`init`, `check`, `hook`, `incident`, `config`)
+- ✅ Git utilities (detection, diff, history analysis)
+- ✅ Tree-sitter AST parsing (Python, JS, TS, Go)
+- ✅ Development tooling (GoReleaser, GitHub Actions, Homebrew)
 
-**What We Have:**
-- Working CLI with `crisk check`, `crisk hook`, `crisk status`, `crisk config`, `crisk init-local`
-- Pre-commit hook that runs risk assessments
-- 4 verbosity levels (quiet, standard, explain, AI mode)
-- AI-ready JSON output for Claude Code/Cursor integration
-- Phase 1 metrics calculation (coupling, temporal co-change, test coverage)
-- Git utilities (repo detection, URL parsing, changed file detection)
-- End-to-end init flow (clone → parse → graph construction)
-- Validated risk calculation with test fixtures
+**In Progress (Current Sprint):**
+- 🚧 Risk assessment integration
+- 🚧 LLM client (OpenAI/Anthropic)
+- 🚧 Performance optimization
+- 🚧 Test coverage improvements
 
 ---
 
-## Gap Analysis
+## MVP Scope Reminder
 
-### What's Missing for MVP
+**✅ In Scope (Local-First MVP):**
+- Local Neo4j + Docker deployment
+- Two-phase risk assessment (fast baseline + LLM for high-risk)
+- Five simple metrics (coupling, co-change, test ratio, churn, incidents)
+- Pre-commit hook workflow
+- BYOK model (user's API key)
+- Solo developers + small teams
 
-Based on [status.md](status.md) critical missing pieces:
-
-**1. Git Integration** ✅ **COMPLETE**
-```go
-// Implemented in internal/git/repo.go:
-func DetectGitRepo() error                              // ✅ IMPLEMENTED
-func ParseRepoURL(remoteURL string) (org, repo string, error)  // ✅ IMPLEMENTED
-func GetChangedFiles() ([]string, error)                // ✅ IMPLEMENTED
-func GetRemoteURL() (string, error)                     // ✅ IMPLEMENTED
-func GetCurrentBranch() (string, error)                 // ✅ IMPLEMENTED
-```
-
-**2. Neptune Graph Client** ❌
-- openCypher query execution
-- Connection pooling
-- 2-hop context loading
-- Spatial cache integration
-
-**3. Settings Portal** ❌
-- API key configuration UI
-- GitHub OAuth flow
-- Team management
-- Repository listing
-
-**4. Agent Investigation Engine** ❌
-- Spatial context management
-- Hop-by-hop navigation
-- Metric validation
-- LLM integration (user's API key)
+**❌ Out of Scope (Post-MVP):**
+- Cloud deployment (Neptune, K8s, Lambda)
+- Settings portal / GitHub OAuth
+- Multi-tenancy / team features
+- Public repository caching
+- Complex agent orchestration
 
 ---
 
-## Priority Roadmap
+## Week-by-Week Roadmap
 
-### ~~Phase 1: Complete Core Functionality (Week 1)~~ ✅ **COMPLETE**
+### Week 1-2 (Current): Risk Assessment Integration
 
-**Goal:** Make `crisk check` fully functional end-to-end
+**Goal:** Complete end-to-end risk assessment in `crisk check`
 
-**✅ Priority 1A: Git Integration Functions** (COMPLETE - Session 4)
-- ✅ Implemented `git.DetectGitRepo()` in `internal/git/repo.go`
-- ✅ Implemented `git.ParseRepoURL()` with HTTPS, SSH, git:// support
-- ✅ Implemented `git.GetChangedFiles()` for pre-commit hook
-- ✅ Implemented `git.GetRemoteURL()` and `git.GetCurrentBranch()`
-- **Deliverables:** 5 git functions, 95% test coverage, 8/8 integration tests passing
-- **Files:** `internal/git/repo.go`, `internal/git/repo_test.go`, `test/integration/test_git_integration.sh`
+**Tasks:**
+1. ✅ Phase 1 baseline metrics (coupling, co-change, test ratio)
+2. 🚧 Phase 2 LLM integration (single call for high-risk files)
+3. 🚧 Threshold configuration (configurable risk levels)
+4. 🚧 Integration testing with real repositories
 
-**✅ Priority 1B: End-to-End `crisk init` Flow** (COMPLETE - Session 5)
-- ✅ Implemented `crisk init-local` orchestration (clone → parse → graph)
-- ✅ Progress reporting with emojis and statistics
-- ✅ Auto-detection from git remote
-- ✅ Tested with commander.js (2,291 nodes) and Next.js (144K entities)
-- **Deliverables:** Complete init flow, 11/11 integration tests passing
-- **Files:** `cmd/crisk/init_local.go`, `test/integration/test_init_e2e.sh`
-- **Performance:** ~6,500 files/sec, <10s for 17K files
+**Deliverables:**
+- Working `crisk check` with Phase 1 + 2
+- LLM client (OpenAI/Anthropic)
+- Integration tests passing
 
-**✅ Priority 1C: Phase 1 Risk Calculation** (COMPLETE - Session 6)
-- ✅ Validated Phase 1 metrics (coupling, co-change, test ratio)
-- ✅ Created test fixtures with known risk levels
-- ✅ Integrated with all verbosity modes (quiet, standard, explain, AI)
-- ✅ All tests passing (29 unit tests, 12 integration tests)
-- **Deliverables:** Validated risk engine, comprehensive test suite
-- **Files:** `internal/metrics/*_test.go`, `test/fixtures/known_risk/*`, `test/integration/test_check_e2e.sh`
-- **Performance:** 5ms per check (97% faster than 500ms target)
+**Success Criteria:**
+- Phase 1 completes in <200ms
+- Phase 2 completes in <5s
+- Accurate risk levels (LOW/MEDIUM/HIGH)
 
 ---
 
-### Phase 2: LLM Investigation Engine (Week 3-6)
+### Week 3-4: Performance & Validation
 
-**Goal:** Implement Phase 2 agent investigation for complex cases
+**Goal:** Achieve performance targets and validate accuracy
 
-Reference: [agentic_design.md](../01-architecture/agentic_design.md)
+**Tasks:**
+1. Performance optimization (caching, query optimization)
+2. False positive tracking implementation
+3. User feedback mechanism
+4. Real-world repository testing
 
-**Priority 2A: LLM Client Integration** (1 week)
-- Implement OpenAI client (GPT-4)
-- Implement Anthropic client (Claude 3.5)
-- User API key management (encrypted storage)
-- **Unlocks:** Agent can reason about code
-- **Files:** `internal/llm/openai.go`, `internal/llm/anthropic.go`, `internal/llm/client.go`
+**Deliverables:**
+- Performance targets met (<200ms, <5s)
+- False positive tracking system
+- Validation with 5-10 repositories
 
-**Priority 2B: Spatial Context Manager** (1 week)
-- Implement 2-hop context window
-- Implement spatial cache (hot/warm/cold zones)
-- Add context pruning (token limits)
-- **Unlocks:** Agent can navigate graph efficiently
-- **Files:** `internal/agent/context.go`, `internal/agent/spatial.go`
-
-**Priority 2C: Agent Decision Loop** (1-2 weeks)
-- Implement hop-by-hop investigation
-- Add Tier 2 metrics (ownership_churn, incident_similarity)
-- Implement reasoning trace for explain mode
-- **Unlocks:** Phase 2 escalation works end-to-end
-- **Files:** `internal/agent/investigator.go`, `internal/metrics/tier2.go`
+**Success Criteria:**
+- p50 latency <200ms (Phase 1)
+- p95 latency <5s (Phase 2)
+- False positive rate <10%
 
 ---
 
-### Phase 3: Neptune Cloud Deployment (Week 7-8)
+### Week 5-6: Production Hardening & Beta
 
-**Goal:** Deploy to AWS with Neptune Serverless
+**Goal:** Production-ready quality and beta user testing
 
-**Priority 3A: Neptune Client** (1 week)
-- Implement Neptune Serverless connection
-- Implement openCypher query execution
-- Add connection pooling
-- **Unlocks:** Cloud deployment ready
-- **Files:** `internal/graph/neptune/client.go`
+**Tasks:**
+1. Error handling improvements
+2. Edge case coverage
+3. Unit test coverage >70%
+4. Beta user onboarding (10 users)
 
-**Priority 3B: Settings Portal MVP** (1 week)
-- Build Next.js API key config UI
-- Implement GitHub OAuth flow
-- Add team management basics
-- **Unlocks:** Users can configure their own API keys
-- **Stack:** Next.js + PostgreSQL
+**Deliverables:**
+- Production-ready codebase
+- Comprehensive test suite
+- Beta user feedback
 
----
-
-## Immediate Next Actions (Week 1)
-
-### Task 1: Implement Git Integration Functions (Day 1-2)
-
-**File: `internal/git/repo.go`** (new file)
-
-```go
-package git
-
-import (
-    "fmt"
-    "os/exec"
-    "strings"
-)
-
-// DetectGitRepo checks if current directory is a git repository
-func DetectGitRepo() error {
-    cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
-    if err := cmd.Run(); err != nil {
-        return fmt.Errorf("not a git repository: %w", err)
-    }
-    return nil
-}
-
-// ParseRepoURL extracts org and repo name from git remote URL
-func ParseRepoURL(remoteURL string) (org, repo string, err error) {
-    // Handle both HTTPS and SSH formats:
-    // https://github.com/owner/repo.git
-    // git@github.com:owner/repo.git
-
-    // Implementation needed - see integration_guides/ux_pre_commit_hook.md
-}
-
-// GetChangedFiles returns list of files changed in working directory
-func GetChangedFiles() ([]string, error) {
-    cmd := exec.Command("git", "diff", "--name-only", "HEAD")
-    output, err := cmd.Output()
-    if err != nil {
-        return nil, fmt.Errorf("failed to get changed files: %w", err)
-    }
-
-    files := strings.Split(strings.TrimSpace(string(output)), "\n")
-    var result []string
-    for _, f := range files {
-        if f != "" {
-            result = append(result, f)
-        }
-    }
-    return result, nil
-}
-```
-
-**File: Update `cmd/crisk/init.go`**
-```go
-import "github.com/coderisk/coderisk-go/internal/git"
-
-func runInit(cmd *cobra.Command, args []string) error {
-    // Use git.DetectGitRepo() instead of stub
-    if err := git.DetectGitRepo(); err != nil {
-        return err
-    }
-
-    // Get remote URL and parse
-    remoteURL, err := git.GetRemoteURL()
-    if err != nil {
-        return err
-    }
-
-    org, repo, err := git.ParseRepoURL(remoteURL)
-    if err != nil {
-        return err
-    }
-
-    // Continue with existing ingestion logic...
-}
-```
-
-**File: Update `cmd/crisk/check.go`**
-```go
-import "github.com/coderisk/coderisk-go/internal/git"
-
-func runCheck(cmd *cobra.Command, args []string) error {
-    var files []string
-    var err error
-
-    if len(args) > 0 {
-        files = args
-    } else {
-        // Use git.GetChangedFiles() instead of stub
-        files, err = git.GetChangedFiles()
-        if err != nil {
-            return fmt.Errorf("failed to get changed files: %w", err)
-        }
-    }
-
-    // Continue with existing check logic...
-}
-```
-
-**Tests:**
-```bash
-# Unit tests
-go test ./internal/git/... -v
-
-# Integration test
-git init test_repo
-cd test_repo
-git add .
-crisk check  # Should detect changed files
-```
+**Success Criteria:**
+- Test coverage >70%
+- 10 beta users successfully using crisk
+- No critical bugs
 
 ---
 
-### Task 2: Wire `crisk init` End-to-End (Day 3-4)
+### Week 7 (Optional): Launch Preparation
 
-**Goal:** Complete orchestration from [cli_integration.md](integration_guides/cli_integration.md)
+**Goal:** Polish and launch
 
-**File: `cmd/crisk/init.go`** (complete implementation)
+**Tasks:**
+1. Documentation polish
+2. Bug fixes from beta
+3. Performance tuning
+4. Launch preparation
 
-**Steps:**
-1. Clone repository (Layer 1)
-2. Detect languages (GitHub API)
-3. Parse AST (Tree-sitter)
-4. Fetch GitHub data (Layer 2)
-5. Construct graph (Layer 3)
-6. Report statistics
-
-**Reference:** [cli_integration.md](integration_guides/cli_integration.md) has full implementation guide
-
-**Validation:**
-```bash
-crisk init
-# Expected output:
-# ✅ Repository detected: coderisk-go
-# ⏳ Cloning repository...
-# ⏳ Detecting languages...
-# ⏳ Parsing code structure...
-# ⏳ Fetching GitHub data...
-# ⏳ Building graph...
-# ✅ Initialization complete!
-#
-# Statistics:
-#   Files analyzed: 45
-#   Graph nodes: 1,234
-#   Graph edges: 2,456
-#   Duration: 23s
-```
+**Deliverables:**
+- Complete user documentation
+- Stable v1.0 release
+- Public announcement
 
 ---
 
-### Task 3: Validate Phase 1 Risk Calculation (Day 5)
+## Immediate Priorities (This Sprint)
 
-**Goal:** Ensure `crisk check` returns accurate risk levels
+### P0 - Critical (Must Complete This Week)
+
+**1. LLM Client Integration**
+- Implement OpenAI client
+- Implement Anthropic client
+- User API key configuration (environment variable)
+- Error handling (no API key, rate limits, timeouts)
 
 **Files:**
-- `internal/risk/phase1.go` - Phase 1 metric calculation
-- `internal/risk/scoring.go` - Risk level determination
+- `internal/llm/openai.go` (new)
+- `internal/llm/anthropic.go` (new)
+- `internal/llm/client.go` (interface)
 
-**Validation:**
-```bash
-# Test with different files
-crisk check --explain src/high_coupling.go
-# Should show: HIGH risk (coupling > 8)
+**2. Phase 2 Integration**
+- Connect Phase 2 to `crisk check` command
+- Escalation logic (Phase 1 → Phase 2 when high-risk)
+- Single LLM call (no multi-hop navigation in MVP)
+- Display results in all verbosity modes
 
-crisk check --quiet src/low_risk.go
-# Should show: ✅ LOW risk
+**Files:**
+- `cmd/crisk/check.go` (update)
+- `internal/agent/investigator.go` (simplify)
 
-# Test with AI mode
-crisk check --ai-mode src/no_tests.go | jq '.risk.level'
-# Should return: "MEDIUM" or "HIGH"
-```
+**3. Integration Testing**
+- Test with real repositories (omnara, react, next.js)
+- Validate risk levels match expectations
+- Measure performance
 
-**Tests:**
-```bash
-go test ./internal/risk/... -v -cover
-# Expected: >80% coverage, all tests pass
-```
-
----
-
-## Success Criteria
-
-### Week 1 Complete When:
-- ✅ `crisk init` works end-to-end (clones, parses, builds graph)
-- ✅ `crisk check` detects changed files automatically
-- ✅ Phase 1 risk calculation returns accurate levels
-- ✅ All verbosity modes work with real risk data
-- ✅ Pre-commit hook blocks HIGH risk commits
-- ✅ All tests passing (unit + integration)
-
-### Week 2-3 Complete When:
-- ✅ LLM clients integrated (OpenAI + Anthropic)
-- ✅ Spatial context manager working
-- ✅ Agent can navigate graph and reason about code
-- ✅ Phase 2 escalation triggers on Phase 1 thresholds
-- ✅ Explain mode shows hop-by-hop investigation trace
-
-### Month 1 Complete When:
-- ✅ Neptune Serverless deployed
-- ✅ Settings portal live (API key config)
-- ✅ 50 beta users onboarded
-- ✅ End-to-end flow: `crisk init` → `crisk check` → Phase 2 investigation
+**Files:**
+- `test/integration/test_risk_assessment.sh` (new)
 
 ---
 
-## Dependencies
+### P1 - Important (Next Week)
 
-### External Services Needed
+**4. Performance Optimization**
+- Cache Phase 1 results (filesystem)
+- Optimize Neo4j queries (use indexes)
+- Reduce LLM token usage (context pruning)
 
-**For Phase 1 (Immediate):**
-- ✅ GitHub API access (already have)
-- ✅ Neo4j (local, already running)
-- ✅ PostgreSQL (local, already running)
-- ✅ Redis (local, already running)
+**5. Configuration Management**
+- API key setup (env var, config file, keychain)
+- Threshold configuration (coupling, co-change, etc.)
+- Verbosity defaults
 
-**For Phase 2 (Week 3+):**
-- ❌ OpenAI API key (user-provided)
-- ❌ Anthropic API key (user-provided)
+**6. False Positive Tracking**
+- User feedback command (`crisk feedback --false-positive`)
+- Store feedback in SQLite
+- Display stats (`crisk stats --false-positives`)
 
-**For Phase 3 (Week 7+):**
-- ❌ AWS account
-- ❌ Neptune Serverless cluster
-- ❌ ElastiCache Redis
-- ❌ RDS PostgreSQL
-- ❌ S3 bucket
+---
+
+### P2 - Nice to Have (Later)
+
+**7. Monitoring & Logging**
+- Basic metrics (check count, phase escalation rate)
+- Error logging
+- Performance tracking
+
+**8. Documentation**
+- User guide (installation, usage)
+- Troubleshooting guide
+- FAQ
+
+---
+
+## Technical Decisions Needed
+
+### 1. LLM Provider Priority
+
+**Options:**
+- A) Support only OpenAI initially
+- B) Support both OpenAI + Anthropic from start
+- C) Support Anthropic only (cheaper, better for code)
+
+**Recommendation:** B (both) - Users have preferences, BYOK model supports both
+
+---
+
+### 2. API Key Storage
+
+**Options:**
+- A) Environment variable only (`OPENAI_API_KEY`)
+- B) Config file (`~/.coderisk/config.yaml`)
+- C) OS Keychain (macOS Keychain, Windows Credential Manager)
+- D) All of the above
+
+**Recommendation:** D (all) - Start with env var, add config file, then keychain
+
+---
+
+### 3. Phase 2 Escalation Threshold
+
+**Options:**
+- A) Fixed threshold (coupling >10, co-change >0.7)
+- B) Configurable threshold (user can adjust)
+- C) Adaptive threshold (learns from feedback)
+
+**Recommendation:** B (configurable) - Default thresholds, allow user customization
+
+---
+
+## Dependencies & Blockers
+
+### External Dependencies
+
+**Required:**
+- User's OpenAI/Anthropic API key (BYOK)
+- Docker installed (for local Neo4j)
+- Git installed (for repository analysis)
+
+**Optional:**
+- GitHub API token (for enhanced history analysis)
+
+---
+
+### Internal Blockers
+
+**None currently** - All MVP features can be implemented with existing infrastructure
 
 ---
 
 ## Testing Strategy
 
-### Integration Tests to Create
+### Unit Tests (Target: >70% Coverage)
 
-**Week 1:**
-```bash
-# test/integration/test_git_integration.sh
-test_detect_git_repo
-test_parse_repo_url
-test_get_changed_files
+**Priority packages:**
+- `internal/llm/` - LLM clients
+- `internal/risk/` - Risk assessment
+- `internal/metrics/` - Metric calculation
+- `internal/agent/` - Investigation logic
 
-# test/integration/test_init_e2e.sh
-test_init_omnara_repo
-test_init_with_existing_graph
-test_init_error_recovery
-
-# test/integration/test_check_e2e.sh
-test_check_no_args_detects_changes
-test_check_with_file_arg
-test_check_outputs_risk_levels
-```
-
-**Week 2-3:**
-```bash
-# test/integration/test_llm_investigation.sh
-test_phase1_escalates_to_phase2
-test_agent_navigates_graph
-test_explain_mode_shows_trace
-```
+**Current coverage:** ~45%
+**Gap:** Need 400+ additional test cases
 
 ---
 
-## Documentation to Create
+### Integration Tests
 
-**Week 1:**
-- [ ] Update [status.md](status.md) as tasks complete
-- [ ] Create `integration_guides/git_integration.md` - How git utilities work
-- [ ] Update [DX_FOUNDATION_COMPLETE.md](DX_FOUNDATION_COMPLETE.md) with next phase plan
+**Scenarios:**
+1. End-to-end `crisk check` with Phase 1 only
+2. End-to-end `crisk check` with Phase 2 escalation
+3. Performance testing (latency targets)
+4. Real repository testing (omnara, react, etc.)
 
-**Week 2-3:**
-- [ ] Create `phases/phase_llm_investigation.md` - Phase 2 roadmap
-- [ ] Create `integration_guides/llm_integration.md` - LLM client setup
-- [ ] Create `integration_guides/agent_investigation.md` - Agent design
-
-**Week 7-8:**
-- [ ] Create `phases/phase_cloud_deployment.md` - Neptune deployment
-- [ ] Create `integration_guides/neptune_setup.md` - AWS setup guide
+**Test repositories:**
+- Small: commander.js (~50 files)
+- Medium: omnara (~400 files)
+- Large: next.js (~1,500 files)
 
 ---
 
-## Risk Mitigation
+### Performance Benchmarks
 
-### Potential Blockers
-
-**1. Git Integration Complexity**
-- **Risk:** Parsing various git URL formats is error-prone
-- **Mitigation:** Use battle-tested regex patterns, extensive tests
-- **Fallback:** Prompt user for org/repo if parsing fails
-
-**2. LLM API Costs**
-- **Risk:** Users concerned about API costs for Phase 2
-- **Mitigation:** Only escalate 10-20% of checks, clear cost estimation
-- **Fallback:** Allow disabling Phase 2 (Phase 1 only mode)
-
-**3. Neptune Learning Curve**
-- **Risk:** Neptune openCypher different from Neo4j Cypher
-- **Mitigation:** Dual backend abstraction already designed (see [layers_2_3_graph_construction.md](integration_guides/layers_2_3_graph_construction.md))
-- **Fallback:** Continue using Neo4j locally until Neptune ready
-
-**4. Settings Portal Scope Creep**
-- **Risk:** Portal becomes too complex, delays MVP
-- **Mitigation:** MVP = API key CRUD only, defer team features
-- **Fallback:** Use .env file for API keys (no portal) in v1.0
+**Targets:**
+| Metric | Target | How to Test |
+|--------|--------|-------------|
+| Phase 1 latency (p50) | <200ms | Benchmark with 100 files |
+| Phase 2 latency (p95) | <5s | Test with high-risk files |
+| `crisk init` time | <10 min | Test with medium repo (omnara) |
+| Cache hit rate | >30% | Test repeated checks |
 
 ---
 
-## Resource Requirements
+## Success Metrics (MVP Launch)
 
-### Development Time
+### Functional Requirements
 
-**Solo Developer:**
-- Week 1 (Git + Init): 5 days
-- Week 2-3 (LLM Investigation): 10 days
-- Week 4-6 (Polish + Testing): 15 days
-- Week 7-8 (Cloud Deployment): 10 days
-- **Total:** 40 days (~2 months)
+- ✅ `crisk init` works for local repos
+- ✅ `crisk check` provides accurate risk assessment
+- ✅ Pre-commit hook blocks high-risk commits
+- ✅ All 4 verbosity levels functional
+- ✅ Performance targets met
 
-**With AI Assistance (Parallel Sessions):**
-- Week 1: 2 days (3x speedup)
-- Week 2-3: 4 days (2.5x speedup)
-- Week 4-6: 6 days (2.5x speedup)
-- Week 7-8: 4 days (2.5x speedup)
-- **Total:** 16 days (~3 weeks)
+### Non-Functional Requirements
 
-### Infrastructure Costs
+- ✅ Test coverage >70%
+- ✅ No critical bugs
+- ✅ Documentation complete
+- ✅ 10 beta users successful
 
-**Local Development:** $0/month (current)
+### User Validation
 
-**Cloud Deployment (50 beta users):**
-- Neptune Serverless: ~$50/month
-- ElastiCache Redis: ~$15/month
-- RDS PostgreSQL: ~$25/month
-- S3 + Data Transfer: ~$10/month
-- **Total:** ~$100/month
+- ✅ Users can install via Homebrew/curl
+- ✅ Users can run `crisk init` successfully
+- ✅ Users find risk assessments helpful
+- ✅ False positive rate acceptable (<10%)
 
 ---
 
-## Next Session Prompts
+## Post-MVP (Future Considerations)
 
-If using parallel sessions again, here are suggested prompts:
+**Deferred to validate demand first:**
+- Cloud deployment (Neptune, managed service)
+- Settings portal / GitHub OAuth
+- Team features (shared graphs)
+- Public repository caching
+- Advanced metrics (complexity, maintainability)
 
-### Session A: Git Integration & Init Flow (Week 1)
-```
-Implement git integration functions and complete crisk init end-to-end flow.
-
-Read:
-- dev_docs/03-implementation/NEXT_STEPS.md (Task 1 & 2)
-- dev_docs/03-implementation/integration_guides/cli_integration.md
-- dev_docs/03-implementation/integration_guides/ux_pre_commit_hook.md
-
-Files to create/modify:
-- internal/git/repo.go (new)
-- cmd/crisk/init.go (complete implementation)
-- cmd/crisk/check.go (use git functions)
-
-Tests:
-- internal/git/repo_test.go
-- test/integration/test_init_e2e.sh
-
-Goal: crisk init and crisk check work end-to-end
-```
-
-### Session B: Risk Calculation & Validation (Week 1)
-```
-Ensure Phase 1 risk calculation works correctly with all verbosity modes.
-
-Read:
-- dev_docs/03-implementation/NEXT_STEPS.md (Task 3)
-- dev_docs/01-architecture/risk_assessment_methodology.md
-- dev_docs/spec.md (NFR-13 to NFR-19: Performance)
-
-Files to create/modify:
-- internal/risk/phase1.go (validate)
-- internal/risk/scoring.go (validate)
-- Integration with formatters
-
-Tests:
-- internal/risk/phase1_test.go
-- test/integration/test_check_e2e.sh
-
-Goal: Accurate risk levels in all verbosity modes
-```
+**See archived docs:**
+- [../99-archive/02-operations-future-vision/](../99-archive/02-operations-future-vision/) - Cloud operations
+- [../99-archive/01-architecture-future-vision/](../99-archive/01-architecture-future-vision/) - Cloud architecture
 
 ---
 
-## References
+## Resources & References
 
-**Implementation Status:**
-- [status.md](status.md) - Current progress
-- [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md) - Historical log
+**Implementation:**
+- [status.md](status.md) - Current implementation status
+- [DEVELOPMENT_AND_DEPLOYMENT.md](DEVELOPMENT_AND_DEPLOYMENT.md) - Development workflow
+
+**Product:**
+- [../00-product/mvp_vision.md](../00-product/mvp_vision.md) - MVP scope
+- [../00-product/developer_experience.md](../00-product/developer_experience.md) - UX design
 
 **Architecture:**
-- [agentic_design.md](../01-architecture/agentic_design.md) - Phase 2 agent design
-- [risk_assessment_methodology.md](../01-architecture/risk_assessment_methodology.md) - Risk calculation
+- [../01-architecture/mvp_architecture_overview.md](../01-architecture/mvp_architecture_overview.md) - System design
+- [../01-architecture/agentic_design.md](../01-architecture/agentic_design.md) - Investigation flow
+- [../01-architecture/risk_assessment_methodology.md](../01-architecture/risk_assessment_methodology.md) - Risk calculation
 
-**Integration Guides:**
-- [cli_integration.md](integration_guides/cli_integration.md) - crisk init orchestration
-- [layers_2_3_github_fetching.md](integration_guides/layers_2_3_github_fetching.md) - GitHub API fetching
-- [layers_2_3_graph_construction.md](integration_guides/layers_2_3_graph_construction.md) - Graph building
-
-**Specifications:**
-- [spec.md](../spec.md) - Requirements and NFRs
-- [developer_experience.md](../00-product/developer_experience.md) - UX requirements
+**Operations:**
+- [../02-operations/local_deployment_operations.md](../02-operations/local_deployment_operations.md) - Deployment
 
 ---
 
-**Created:** October 4, 2025
-**Status:** Ready for implementation
-**Next Review:** After Week 1 completion
+**Last Updated:** October 17, 2025
+**Next Review:** Weekly (update after each sprint)

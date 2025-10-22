@@ -13,12 +13,14 @@
 - Component interactions and data flows
 - Technology stack choices
 - Local-first deployment strategy
+- Regression prevention methodology
 
 **Technical Specifications:**
 - Graph database schema (Neo4j)
 - LLM-guided investigation algorithms
-- Metric calculation and validation
+- Metric calculation and validation (regression detection)
 - Integration patterns
+- Temporal coupling analysis (CO_CHANGED edges)
 
 **Design Decisions:**
 - Architecture Decision Records (ADRs)
@@ -36,9 +38,9 @@
 - **[mvp_architecture_overview.md](mvp_architecture_overview.md)** - **READ THIS FIRST** - High-level overview of MVP architecture, deployment, and design principles
 
 **Detailed Specifications:**
-- **[agentic_design.md](agentic_design.md)** - Two-phase investigation flow (fast baseline + LLM investigation), working memory, evidence chain
-- **[graph_ontology.md](graph_ontology.md)** - Three-layer graph structure (Structure, Temporal, Incidents), Neo4j schema, branch-aware properties
-- **[risk_assessment_methodology.md](risk_assessment_methodology.md)** - Five simple metrics, threshold logic, false positive tracking, validation framework
+- **[agentic_design.md](agentic_design.md)** - Two-phase investigation flow (fast baseline + LLM investigation), automated due diligence, regression prevention through temporal analysis
+- **[graph_ontology.md](graph_ontology.md)** - Three-layer graph structure (Structure, Temporal, Incidents), Neo4j schema, CO_CHANGED edges for temporal coupling
+- **[risk_assessment_methodology.md](risk_assessment_methodology.md)** - Regression prevention methodology, five simple metrics, regression detection scenarios, validation framework
 
 ### Architecture Decisions
 
@@ -177,6 +179,29 @@ ADRs are stored in the `decisions/` subdirectory and numbered sequentially.
 
 **Why two-phase:** 10x cost savings ($0.60/day vs $6/day), 5x latency improvement (800ms avg vs 4s avg)
 
+### Temporal Coupling: The Regression Prevention Core
+
+**Why CO_CHANGED Edges Prevent Regressions:**
+
+Traditional tools analyze code structure (imports, calls) but miss evolutionary coupling.
+
+**Example:**
+- `payment.py` doesn't import `fraud.py` (no structural coupling)
+- But they changed together in 18/20 commits (90% temporal coupling)
+- Developer modifies `payment.py` → CodeRisk warns about `fraud.py`
+- Without warning: Merge → Production → Fraud detection breaks
+
+**This is CodeRisk's unique moat** - no other tool tracks temporal coupling.
+
+**How It Works:**
+- During `crisk init`: Analyze 90-day git history → Create CO_CHANGED edges with frequency weights
+- At pre-commit time: Query CO_CHANGED edges (< 20ms) → Warn about coupled files
+- Developer sees: "payment.py and fraud.py changed together 18/20 times (90%). Did you update fraud.py?"
+
+**Regression Prevention in Practice:**
+- **Without temporal analysis:** Developer updates A.py, forgets B.py → Production breaks
+- **With temporal analysis:** CodeRisk flags B.py as coupled → Developer updates both → Regression prevented
+
 ### Five Simple Metrics (Not 9+ Complex Ones)
 
 **Tier 1 (always calculated, factual):**
@@ -203,8 +228,9 @@ ADRs are stored in the `decisions/` subdirectory and numbered sequentially.
 - System tracks FP rate per metric in SQLite
 - Auto-disable if fp_rate > 3% (with >20 samples)
 - Admin reviews and adjusts thresholds
+- Tracks which metrics best prevent regressions (based on user feedback)
 
-**Why this matters:** Builds trust through self-correction, learns from user's domain knowledge, prevents metric degradation.
+**Why this matters:** Builds trust through self-correction, learns from user's domain knowledge, prevents metric degradation, continuously improves regression detection accuracy.
 
 ---
 
