@@ -1,9 +1,10 @@
 # MVP Development Plan: Complete Risk Assessment
 
 **Created:** October 21, 2025
+**Updated:** October 22, 2025 (Sequential Analysis Chain)
 **Timeline:** 4 weeks (Week 1-4 of strategic plan)
-**Goal:** Working `crisk check` with Phase 1 + Phase 2 risk assessment
-**Success Criteria:** <200ms (Phase 1), <5s (Phase 2), <15% FP rate, 2-3 beta users successful
+**Goal:** Working `crisk check` with Sequential Analysis Chain (8 specialized agents with validation)
+**Success Criteria:** <5s total (p95), <15% FP rate, 2-3 beta users successful
 
 **Core Value Proposition:**
 > **"Automate the due diligence developers should do before committing"**
@@ -34,181 +35,378 @@
 - **CLI Framework**: Cobra commands (`init`, `check`, `hook`, `incident`, `config`, `login`, `logout`, `whoami`, `status`)
 - **Infrastructure**: Neo4j (local Docker), SQLite (validation DB), Viper (config), Tree-sitter (AST parsing)
 - **Git Utilities**: Repo detection, diff parsing, history analysis, co-change detection
-- **Temporal Analysis**: Commit history, developer ownership, co-change patterns
+- **Temporal Analysis**: Commit history, developer ownership, co-change patterns (dynamic computation, no pre-calculated edges)
 - **Incident Tracking**: Issue ingestion, incident-to-file linking, BM25 search
 - **Output System**: 4 verbosity levels (quiet, standard, explain, AI mode)
+- **Phase 1 Metrics**: Coupling, co-change, incident count with adaptive config (basic implementation in `internal/metrics/`)
+- **Basic LLM Client**: OpenAI/Anthropic support in `internal/llm/client.go` (single completion method)
 
-### 🚧 In Progress
-- **Risk Assessment**: Phase 1 metrics implemented, Phase 2 LLM integration missing
-- **Metrics**: Coupling, co-change, test ratio calculated but not integrated into `crisk check`
-- **Test Coverage**: 45% (target: >60% for MVP)
+### 🚧 Partially Complete (Needs Alignment/Refactoring)
+- **crisk check**: Phase 1 metrics work, but uses old SimpleInvestigator instead of 8-agent chain
+- **Auth System**: Stub implementation in `cmd/crisk/login.go`, not connected to coderisk.dev
+- **Graph Schema**: Mostly aligned with simplified schema, needs verification (no [:CO_CHANGED_WITH], branch filtering)
 
 ### ❌ Missing (MVP Blockers)
-1. LLM client integration (OpenAI/Anthropic)
-2. Phase 2 risk assessment (LLM-based high-risk analysis)
-3. End-to-end `crisk check` flow (Phase 1 → escalation → Phase 2 → output)
-4. Performance optimization (<200ms, <5s targets)
-5. False positive tracking and feedback mechanism
-6. Integration testing with real repositories
+1. **Sequential Analysis Chain**: 8-agent system with 5 phases (current: single SimpleInvestigator call)
+2. **Tier 0 Heuristic Filter**: Trivial change detection (<50ms target)
+3. **Phase 1 Standardization**: Consolidate 7 Cypher queries into `internal/risk/collector.go`
+4. **LLM Multi-Agent Support**: Gemini Flash 2.0, parallel execution, agent_executor.go
+5. **Production Auth Bridge**: Device flow OAuth connecting CLI ↔ coderisk.dev
+6. **FR-6 Output Format**: Due diligence checklist in all 4 verbosity modes
+7. **False Positive Tracking**: Feedback mechanism with `crisk feedback` command
+8. **Integration Tests**: End-to-end testing with real repositories
+9. **Performance Optimization**: Achieve <5s total (p95) for full chain
 
 ---
 
 ## Functional Requirements (No Gaps)
 
-### FR-1: LLM Client Integration
+### FR-1: LLM Client Integration (Multi-Agent Support)
 
-**Requirement:** Support OpenAI and Anthropic APIs via user-provided API keys (BYOK model)
+**Requirement:** Support Gemini Flash 2.0 (primary) with OpenAI/Anthropic fallback for 8 specialized agents via user-provided API keys (BYOK model)
+
+**Model Selection:**
+- **Primary**: Gemini Flash 2.0 (~300-500ms per agent, ~$0.00002/agent call)
+- **Fallback 1**: GPT-4o-mini (~500ms, ~$0.0001/call)
+- **Fallback 2**: Claude Haiku (~500ms, ~$0.0001/call)
 
 **Acceptance Criteria:**
-- User can configure API key via environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`)
+- User can configure API key via environment variable (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`)
 - User can configure API key via config file (`~/.coderisk/config.yaml`)
-- Client auto-detects which provider based on available API key (prefer Anthropic if both present)
-- Error handling: No API key → graceful degradation (Phase 1 only, warn user)
+- Client auto-detects provider: prefer Gemini → OpenAI → Anthropic
+- Support for parallel agent execution (8 agents can run simultaneously)
+- Support for sequential chaining (agents can use prior agent outputs)
+- Error handling: No API key → graceful degradation (Tier 0 only, warn user)
 - Error handling: Rate limit → retry with exponential backoff (3 attempts)
 - Error handling: Timeout → fail gracefully, log error
-- Token usage logging for cost transparency
+- Token usage logging per agent for cost transparency
 
 **Implementation Notes:**
-- Use official SDKs: `github.com/openai/openai-go` and `github.com/anthropics/anthropic-sdk-go`
-- Single prompt template for both providers (see [Prompt Template](#prompt-template) below)
-- Max tokens: 1000 (cost control)
-- Temperature: 0.2 (deterministic risk assessment)
+- Use official SDKs: `github.com/google/generative-ai-go`, `github.com/openai/openai-go`, `github.com/anthropics/anthropic-sdk-go`
+- 8 specialized prompt templates (one per agent: incident, blast_radius, cochange, ownership, quality, patterns, synthesizer, validator)
+- Agent prompts: Max tokens 2000, temperature 0.1 (consistent, focused)
+- Support for context passing between agents (sequential chain)
+
+**Current Status:**
+- ✅ `internal/llm/client.go` exists (basic OpenAI/Anthropic support, single completion method)
+- ❌ Multi-agent support not implemented
+- ❌ Gemini Flash 2.0 not implemented
+- ❌ Parallel execution not implemented
 
 **Files to Create:**
-- `internal/llm/client.go` - Interface definition
-- `internal/llm/openai.go` - OpenAI implementation
-- `internal/llm/anthropic.go` - Anthropic implementation
-- `internal/llm/client_test.go` - Unit tests
+- `internal/llm/gemini.go` - Gemini Flash 2.0 primary provider
+- `internal/llm/agent_executor.go` - Parallel and sequential execution coordinator
+
+**Files to Update:**
+- `internal/llm/client.go` - Add multi-agent interface, context passing, token tracking
 
 **Reference:** [../01-architecture/prompt_engineering_design.md](../01-architecture/prompt_engineering_design.md) (future vision, simplified for MVP)
 
 ---
 
-### FR-2: Phase 1 Risk Assessment (Baseline Metrics)
+### FR-2: Tier 0 - Heuristic Filter (Trivial Change Detection)
 
-**Requirement:** Fast heuristic-based risk assessment using graph data (no LLM)
+**Requirement:** Ultra-fast filter to skip analysis for truly trivial changes (no LLM, no graph queries)
 
-**Metrics (5 Core):**
-1. **Coupling**: Number of incoming dependencies (imports, calls)
-   - Formula: `coupling_score = min(incoming_edges / 10, 1.0)`
-   - Threshold: >10 incoming edges = HIGH risk
-
-2. **Co-change Frequency**: How often file changes with other files
-   - Formula: `co_change_score = max(co_change_rate across all pairs)`
-   - Threshold: >0.7 co-change rate = HIGH risk
-
-3. **Test Ratio**: Ratio of test files to implementation files
-   - Formula: `test_ratio = test_files / (implementation_files + 1)`
-   - Threshold: <0.3 test ratio = MEDIUM risk, <0.1 = HIGH risk
-
-4. **Churn**: Frequency of changes to this file
-   - Formula: `churn_score = min(commit_count_last_30_days / 20, 1.0)`
-   - Threshold: >20 commits in 30 days = MEDIUM risk
-
-5. **Incident History**: Past incidents linked to this file
-   - Formula: `incident_score = min(incident_count / 3, 1.0)`
-   - Threshold: >3 incidents = HIGH risk, >1 = MEDIUM risk
-
-**Risk Level Calculation:**
-```
-HIGH risk: coupling >10 OR co_change >0.7 OR incidents >3
-MEDIUM risk: test_ratio <0.3 OR churn >20 OR incidents >1
-LOW risk: All others
+**Trivial Change Detection:**
+```go
+// Only these cases skip ALL analysis (Tier 1 + Tier 2)
+1. Whitespace-only changes (no functional code)
+2. Test-only changes (no production code, no infra tests)
+3. Documentation-only changes (markdown with no code snippets)
+4. Config files that pass schema validation
 ```
 
 **Acceptance Criteria:**
-- Phase 1 completes in <200ms (p50 latency)
-- Returns risk level (LOW/MEDIUM/HIGH) for each changed file
-- Returns evidence: which metrics triggered risk level
-- Cache results for 15 minutes (filesystem cache)
+- Tier 0 completes in <50ms (p50 latency)
+- Returns: TRIVIAL (skip analysis) or NEEDS_ANALYSIS (proceed to Tier 1)
+- No false negatives (never marks risky change as TRIVIAL)
+- Estimates: ~5-10% of changes are TRIVIAL
 
-**Files to Update:**
-- `internal/risk/calculator.go` - Already exists, validate formulas match above
-- `internal/metrics/*.go` - Validate existing implementations
-- `cmd/crisk/check.go` - Integrate Phase 1 into `crisk check` command
+**Files to Create:**
+- `internal/risk/heuristic.go` - Trivial change detection logic
+- `internal/risk/heuristic_test.go` - Unit tests
 
 **Reference:** [../01-architecture/risk_assessment_methodology.md](../01-architecture/risk_assessment_methodology.md)
 
 ---
 
-### FR-3: Phase 2 Risk Assessment (LLM-Guided Due Diligence)
+### FR-3: Sequential Analysis Chain - Data Collection & Specialized Agents
 
-**Requirement:** LLM-based due diligence analysis for HIGH-risk files only (escalation from Phase 1)
+**Requirement:** Deep, reliable risk assessment using sequential chain of 8 specialized LLM agents
 
-**Core Purpose:** Answer the developer's due diligence questions using LLM reasoning over graph context
+**Core Insight:** Multi-agent architecture with validation provides most reliable, comprehensive due diligence. Sequential chain allows agents to build on each other's analysis while validation prevents false positives.
 
-**Escalation Logic:**
-- If Phase 1 returns HIGH risk → Trigger Phase 2
-- If Phase 1 returns MEDIUM/LOW → Skip Phase 2 (fast path)
-
-**Due Diligence Context Fetching:**
-
-1. **Ownership Context:**
-   - Primary owner (developer with most commits)
-   - Last modifier (who touched it recently?)
-   - Recent modifications (what changed and why?)
-   - Commit frequency (is this file actively maintained?)
-
-2. **Blast Radius Analysis:**
-   - Dependent files (what will break if this changes?)
-   - High-impact dependencies (critical systems affected)
-   - Dependency depth (how far does impact propagate?)
-
-3. **Co-change Pattern Detection:**
-   - Files that frequently change together
-   - Co-change rate (how often they change together)
-   - Last time they changed together
-   - Forgotten update risk (did developer miss related files?)
-
-4. **Incident History:**
-   - Past incidents linked to this file
-   - Recent incidents (last 90 days)
-   - Incident patterns (what failed before?)
-   - Similar past changes that caused failures
-
-5. **Test Coverage:**
-   - Current test ratio
-   - Test files associated with this file
-   - Test gaps (untested critical functions)
-
-**LLM Analysis (Due Diligence Questions):**
-
-Send context to LLM with prompt that asks:
-1. **Coordination Question:** Should the developer coordinate with the file owner or recent contributors?
-2. **Blast Radius Question:** What dependent files might break? Should they be checked?
-3. **Forgotten Updates Question:** Based on co-change patterns, what files likely need updating too?
-4. **Incident Prevention Question:** Is this similar to a past incident? What should be done differently?
-5. **Test Coverage Question:** Is test coverage adequate for this change?
-
-**LLM Response Parsing:**
-- Risk level: LOW/MEDIUM/HIGH/CRITICAL
-- Due diligence summary (2-3 sentences)
-- Coordination needed: Who to ping and why
-- Forgotten updates: Files likely missed
-- Incident risk: Similar patterns and prevention
-- Recommendations: Prioritized action items
-
-**Acceptance Criteria:**
-- Phase 2 completes in <5s (p95 latency including LLM call)
-- Only triggers for HIGH-risk files from Phase 1
-- Returns structured due diligence assessment (ownership, blast radius, coordination, incidents)
-- **Output framed as actionable due diligence** (not abstract risk metrics)
-- Graceful degradation if LLM fails (fall back to Phase 1 + basic ownership info)
-- Token usage logged for cost transparency
-
-**Files to Create:**
-- `internal/agent/investigator.go` - Phase 2 orchestration (due diligence questions)
-- `internal/agent/context.go` - Graph context fetching (ownership, blast radius, co-change, incidents)
-- `internal/agent/prompt.go` - Due diligence prompt template management
-- `internal/agent/due_diligence.go` - Structured response parsing
-
-**Reference:** [../01-architecture/agentic_design.md](../01-architecture/agentic_design.md) (simplified - no multi-hop navigation for MVP)
+**Architecture Overview:**
+```
+Phase 1: Data Collection (parallel queries)
+    ↓
+Phase 2: Specialized Analysis (5 agents, parallel)
+    ↓
+Phase 3: Cross-File Patterns (1 agent)
+    ↓
+Phase 4: Master Synthesis (1 agent)
+    ↓
+Phase 5: Validation (1 agent)
+```
 
 ---
 
-### FR-4: End-to-End `crisk check` Flow
+#### Phase 1: Data Collection (~180ms)
 
-**Requirement:** Complete workflow from git diff to risk report
+**7 Core Cypher Queries (Run for ALL changed files):**
+```cypher
+1. Recent Incidents (10-20ms):
+   MATCH (inc:Issue)-[:LINKED_TO]->(f:File {path: $file_path})
+   WHERE inc.created_at > datetime() - duration('P90D')
+   RETURN inc.title, inc.severity, inc.created_at
+   ORDER BY inc.created_at DESC
+   LIMIT 5
+
+2. Dependency Count (10-20ms):
+   MATCH (f:File {path: $file_path})<-[:IMPORTS|CALLS*1..2]-(dependent:File)
+   RETURN count(DISTINCT dependent) as dependent_count,
+          collect(DISTINCT dependent.path)[0..10] as sample_dependents
+
+3. Co-change Partners (30-60ms, computed dynamically):
+   // NOTE: No pre-calculated [:CO_CHANGED_WITH] edges
+   // Compute co-change frequency on-the-fly from commit history
+   MATCH (f:File {path: $file_path})<-[:MODIFIES]-(c1:Commit)
+   WHERE c1.author_date > datetime() - duration('P90D')
+   WITH f, collect(c1) as commits
+   UNWIND commits as c
+   MATCH (c)-[:MODIFIES]->(other:File)
+   WHERE other.path <> $file_path
+   WITH other, count(c) as co_changes, size(commits) as total
+   WITH other, co_changes, toFloat(co_changes)/toFloat(total) as frequency
+   WHERE frequency > 0.7
+   RETURN other.path, frequency, co_changes
+   ORDER BY frequency DESC
+   LIMIT 5
+```
+
+4. Ownership (30ms):
+   MATCH (f:File {path: $file_path})<-[:MODIFIES]-(c:Commit)-[:ON_BRANCH]->(b:Branch {is_default: true})
+   MATCH (c)<-[:AUTHORED]-(d:Developer)
+   WITH d, count(c) as commits, max(c.author_date) as last_modified
+   ORDER BY commits DESC LIMIT 1
+   RETURN d.email, d.name, commits, last_modified
+
+5. Blast Radius (40ms):
+   MATCH (f:File {path: $file_path})<-[:IMPORTS|CALLS*1..3]-(dependent:File)
+   RETURN count(DISTINCT dependent) as dependent_count,
+          collect(DISTINCT dependent.path)[0..20] as sample_dependents
+
+6. Incident History (50ms):
+   MATCH (i:Issue)-[:LINKED_TO]->(f:File {path: $file_path})
+   WHERE i.created_at > datetime() - duration('P180D')
+   RETURN i.number, i.title, i.severity, i.created_at, i.state
+   ORDER BY i.created_at DESC
+
+7. Recent Commits (40ms):
+   MATCH (f:File {path: $file_path})<-[:MODIFIES]-(c:Commit)-[:ON_BRANCH]->(b:Branch {is_default: true})
+   MATCH (c)<-[:AUTHORED]-(d:Developer)
+   RETURN c.sha, c.message, d.email, c.author_date, c.additions, c.deletions
+   ORDER BY c.author_date DESC
+   LIMIT 5
+```
+
+**Total Query Time: ~180ms per file** (all 7 queries, parallelized)
+
+**Output per file: ~1,600 tokens** (metadata + all query results)
+
+**Note:** Test coverage removed - no reliable way to determine this from graph schema. Would require external code coverage tools integration (deferred to post-MVP).
+
+**See:** [../01-architecture/simplified_graph_schema.md](../01-architecture/simplified_graph_schema.md) for full schema
+
+---
+
+#### Phase 2: Specialized Analysis (~500ms, parallel)
+
+**5 Specialized Agents (run simultaneously):**
+
+**Agent 1: Incident Risk Specialist**
+- Input: File diff + incidents + incident_history + recent_commits
+- Task: Analyze past incidents, detect similar patterns, assess incident risk
+- Output: Past incidents, similar changes that caused failures, prevention steps
+- Prompt focus: "Has this file caused incidents before? Is this change similar to incident-causing changes?"
+
+**Agent 2: Blast Radius Specialist**
+- Input: File diff + dependencies + blast_radius + co_change
+- Task: Assess impact scope, identify affected systems
+- Output: Dependent systems, high-impact files, integration test recommendations
+- Prompt focus: "What will break if this changes? What systems are impacted?"
+
+**Agent 3: Co-change & Forgotten Updates Specialist**
+- Input: File diff + co_change + recent_commits + incident_history + all_changed_files
+- Task: Identify temporal coupling, detect forgotten updates
+- Output: Forgotten files, co-change patterns, historical evidence of forgotten updates
+- Prompt focus: "What files should change together? Did developer forget to update related files?"
+
+**Agent 4: Ownership & Coordination Specialist**
+- Input: File diff + ownership + recent_commits + incident_history
+- Task: Determine coordination needs, identify who to contact
+- Output: Primary owner, last modifier, who to ping, suggested reviewers
+- Prompt focus: "Who owns this? Should developer coordinate before committing?"
+
+**Agent 5: Code Quality & Change Scope Specialist**
+- Input: File diff + recent_commits + incident_history
+- Task: Assess change size, complexity, and quality concerns
+- Output: Change risk level, complexity assessment, quality recommendations
+- Prompt focus: "Is this change too large? Are there code quality concerns?"
+
+**Agent Context Strategy: Overlapping Context**
+- Each agent receives full context for assigned files (prevents missing information)
+- Agents can reference adjacent data (e.g., incident agent sees ownership for coordination suggestions)
+
+**Acceptance Criteria:**
+- Phase 2 completes in <500ms (all 5 agents run in parallel)
+- Each agent outputs structured JSON
+- All agents use Gemini Flash 2.0 (~$0.0001 total for 5 agents)
+
+**Files to Create:**
+- `internal/risk/agents/incident.go` - Agent 1 implementation
+- `internal/risk/agents/blast_radius.go` - Agent 2 implementation
+- `internal/risk/agents/cochange.go` - Agent 3 implementation
+- `internal/risk/agents/ownership.go` - Agent 4 implementation
+- `internal/risk/agents/quality.go` - Agent 5 implementation
+
+**Reference:** [../01-architecture/risk_assessment_methodology.md](../01-architecture/risk_assessment_methodology.md)
+
+---
+
+### FR-4: Sequential Analysis Chain - Synthesis & Validation
+
+**Requirement:** Combine agent outputs into final due diligence report with validation to prevent false positives
+
+**Core Purpose:** Transform specialized agent analyses into actionable due diligence checklist (FR-6 format) with fact-checking
+
+---
+
+#### Phase 3: Cross-File Pattern Detection (~800ms)
+
+**Agent 6: Pattern Detector**
+- Input: All files + all 5 agent outputs + raw query data
+- Task: Detect systemic risks across multiple files
+- Output: Cross-file patterns, systemic risks, architectural concerns
+- Prompt focus: "Are there patterns across files? Architectural violations? Cascading risks?"
+
+**Pattern Examples:**
+- "All payment files changed, but fraud_detector.py not updated"
+- "Changes to processor.py may cause timeout cascade to reporting.py"
+- "Core authentication files modified without updating dependent services"
+
+**Acceptance Criteria:**
+- Detects risks no single-file agent would catch
+- Outputs structured JSON with pattern descriptions
+- Completes in <800ms
+
+**Files to Create:**
+- `internal/risk/agents/patterns.go` - Agent 6 implementation
+
+---
+
+#### Phase 4: Master Synthesis (~1,000ms)
+
+**Agent 7: Synthesizer**
+- Input: All 6 agent outputs + pattern detection + raw data
+- Task: Create final due diligence report in FR-6 format
+- Output: Structured report with ownership, blast radius, forgotten updates, incidents, recommendations
+- Prompt focus: "Combine all analyses into due diligence checklist with prioritized recommendations"
+
+**Output Format (FR-6 Standard Mode):**
+```
+👤 OWNERSHIP
+   • Last modified by X, Y owns this file
+   → Consider pinging @X or @Y
+
+🔗 BLAST RADIUS
+   • N files depend on this
+   → Changes may break downstream systems
+
+🔄 FORGOTTEN UPDATES?
+   • file.py changed together in N% of commits
+   → You likely need to update file.py too
+
+⚠️ INCIDENT HISTORY
+   • N past incidents
+   → Similar changes caused failures recently
+
+RECOMMENDATIONS (prioritized):
+  1. CRITICAL: [from agents]
+  2. HIGH: [from agents]
+  3. MEDIUM: [from agents]
+```
+
+**Recommendation Prioritization:**
+1. CRITICAL: Coordination with recent contributors, forgotten updates with incident history
+2. HIGH: Test coverage gaps, blast radius concerns
+3. MEDIUM: Architectural improvements, refactoring suggestions
+
+**Acceptance Criteria:**
+- Output matches FR-6 format exactly (all 4 verbosity levels)
+- Combines all agent insights without losing information
+- Prioritizes recommendations correctly
+- Completes in <1,000ms
+
+**Files to Create:**
+- `internal/risk/agents/synthesizer.go` - Agent 7 implementation
+- `internal/output/fr6_formatter.go` - FR-6 format generator
+
+---
+
+#### Phase 5: Validation & Fact-Checking (~800ms)
+
+**Agent 8: Validator**
+- Input: Final report from Agent 7 + raw query data
+- Task: Verify every claim against raw data, catch hallucinations
+- Output: Validated report or corrections
+- Prompt focus: "Cross-check all facts. Flag any hallucinations, fabrications, or unsupported claims."
+
+**Validation Checks:**
+- All file names exist in raw data
+- All developer names/emails exist in ownership data
+- All incident numbers exist in incident data
+- All co-change percentages match query results
+- All dependency counts match query results
+- All recommendations grounded in actual data
+
+**Error Handling:**
+- If hallucinations found → Correct them, mark severity
+- If fabrications found → Remove them, log warning
+- If unsupported claims → Request clarification from Agent 7 or remove
+
+**Primary False-Positive Prevention:**
+This validation stage is the key mechanism for ensuring reliability and preventing false positives.
+
+**Acceptance Criteria:**
+- Catches all hallucinated file/developer/incident names
+- Corrects wrong statistics automatically
+- Final report is 100% grounded in raw data
+- Completes in <800ms
+
+**Files to Create:**
+- `internal/risk/agents/validator.go` - Agent 8 implementation
+- `internal/risk/validation.go` - Validation utilities
+
+---
+
+**Total Sequential Chain Time: ~3.3 seconds**
+- Phase 1: 180ms (7 queries)
+- Phase 2: 500ms (5 agents parallel)
+- Phase 3: 800ms (patterns)
+- Phase 4: 1,000ms (synthesis)
+- Phase 5: 800ms (validation)
+
+**Total Cost per 5-file PR: ~$0.0016** (8 agents × ~$0.0002 each)
+
+**Reference:** [../01-architecture/agentic_design.md](../01-architecture/agentic_design.md) (simplified sequential chain for MVP)
+
+---
+
+### FR-5: End-to-End `crisk check` Flow (Sequential Analysis Chain)
+
+**Requirement:** Complete workflow from git diff to risk report using 5-phase sequential chain
 
 **Flow:**
 ```
@@ -216,43 +414,67 @@ Send context to LLM with prompt that asks:
    ├─ If no file_path: Analyze all changed files (git diff)
    ├─ If file_path provided: Analyze specific file
 
-2. Phase 1 (Baseline Metrics)
+2. Tier 0: Heuristic Filter (<50ms)
    ├─ For each changed file:
-   │  ├─ Calculate 5 core metrics (coupling, co-change, test ratio, churn, incidents)
-   │  ├─ Determine risk level (LOW/MEDIUM/HIGH)
-   │  └─ Cache result (15-min TTL)
+   │  ├─ Check if trivial (whitespace, test-only, docs-only)
+   │  ├─ If TRIVIAL → Mark as SAFE, skip to output
+   │  └─ If NEEDS_ANALYSIS → Proceed to Phase 1
+   └─ Estimated: 5-10% of files are TRIVIAL
 
-3. Escalation Decision
-   ├─ If ALL files LOW/MEDIUM → Return Phase 1 results (fast path)
-   ├─ If ANY file HIGH → Proceed to Phase 2 for HIGH files only
+3. Phase 1: Data Collection (~180ms per file)
+   ├─ For each non-trivial file:
+   │  ├─ Extract metadata (path, diff, additions, deletions, hunks)
+   │  ├─ Run all 7 Cypher queries in parallel
+   │  └─ Store complete dataset
 
-4. Phase 2 (LLM Analysis) - HIGH-risk files only
-   ├─ Fetch graph context (dependencies, co-changes, incidents)
-   ├─ Call LLM with context + prompt
-   ├─ Parse LLM response (risk level, reasoning, recommendations)
-   └─ If LLM fails → Fall back to Phase 1 result
+4. Phase 2: Specialized Analysis (~500ms, parallel)
+   ├─ Launch 5 agents simultaneously:
+   │  ├─ Agent 1: Incident Risk Specialist
+   │  ├─ Agent 2: Blast Radius Specialist
+   │  ├─ Agent 3: Co-change & Forgotten Updates Specialist
+   │  ├─ Agent 4: Ownership & Coordination Specialist
+   │  └─ Agent 5: Code Quality & Change Scope Specialist
+   └─ Each agent outputs structured JSON
 
-5. Output Generation (see FR-5)
-   ├─ Aggregate results across all files
+5. Phase 3: Cross-File Pattern Detection (~800ms)
+   └─ Agent 6: Pattern Detector analyzes all files for systemic risks
+
+6. Phase 4: Master Synthesis (~1,000ms)
+   └─ Agent 7: Synthesizer creates final report in FR-6 format
+
+7. Phase 5: Validation (~800ms)
+   └─ Agent 8: Validator fact-checks report, prevents false positives
+
+8. Output Generation (see FR-6)
+   ├─ Format validated report based on verbosity level
    ├─ Determine overall risk (highest risk level)
-   ├─ Format output based on verbosity level
-   └─ Exit with appropriate code (0=LOW, 1=MEDIUM, 2=HIGH, 3=CRITICAL)
+   └─ Exit with appropriate code (0=SAFE, 1=REVIEW, 2=HIGH, 3=CRITICAL)
 ```
+
+**Total Time: ~3.3 seconds** (Phase 2 runs in parallel)
 
 **Acceptance Criteria:**
 - `crisk check` works with no arguments (analyzes git diff)
 - `crisk check path/to/file.py` works for specific file
-- Phase 1 always runs (<200ms)
-- Phase 2 only runs for HIGH-risk files (<5s total)
+- Tier 0 always runs (<50ms)
+- Sequential chain completes in <5s (p95)
+- All files get full analysis (no conditional execution except Tier 0)
 - Exit codes match risk levels (for pre-commit hook integration)
-- Progress indicators shown during analysis (Phase 1 → Phase 2)
+- Progress indicators shown during analysis (Phase 1 → 2 → 3 → 4 → 5)
+- Cost transparency: Per-agent token usage shown in --explain mode
+- Validation prevents false positives
+
+**Files to Create:**
+- `internal/risk/collector.go` - Phase 1 data collection
+- `internal/risk/chain_orchestrator.go` - Sequential chain coordination
+- `cmd/crisk/check.go` - Main entry point (updated)
 
 **Files to Update:**
-- `cmd/crisk/check.go` - Main orchestration logic
+- Remove `internal/risk/tier1.go`, `internal/risk/tier2.go` (replaced by agents)
 
 ---
 
-### FR-5: Output Formatting (4 Verbosity Levels)
+### FR-6: Output Formatting (4 Verbosity Levels)
 
 **Requirement:** Adaptive output based on verbosity level
 
@@ -446,53 +668,183 @@ Recommendations (prioritized):
 
 ---
 
-### FR-6: Performance Optimization
+### FR-7: Query Strategy - Fixed Query Library
 
-**Requirement:** Meet latency targets for MVP
+**Requirement:** Safe, predictable Cypher queries for risk assessment
+
+**Design Decision:** Use **fixed query library** with parameterized templates (no dynamic query generation)
+
+**Core Insight:** With a simplified schema (8 nodes, 13 edges), we need only 7 core query patterns to cover all risk signals. Running all queries per file is fast enough (~180ms total) and simpler than dynamic selection.
+
+**Query Library (7 Fixed Templates):**
+
+**Phase 1 Queries (Always run for every changed file):**
+1. Recent Incidents - Issues linked to file in last 90 days
+2. Dependency Count - Files depending on this file (depth 1-2)
+3. Co-change Partners - Files frequently changed together (>70% rate, last 90 days)
+4. Ownership - Primary owner by commit count (last 90 days)
+5. Blast Radius - Full dependency graph with sample dependents (depth 3)
+6. Incident History (Deep) - All incidents in last 180 days with details
+7. Recent Commits - Last 5 commits with diffs and authors
+
+**All 7 queries run in Phase 1 (data collection) before any LLM agents execute**
+
+**All queries:**
+- Parameterized (file path, time window, depth limits)
+- Include `LIMIT` clauses (max 50 rows)
+- Filter by default branch (`is_default: true`) for temporal queries
+- Audited and tested
+- No dynamic query generation (fixed templates only)
+
+**LLM Role:** Agents interpret query results (not generate queries)
+
+**Benefits:**
+- ✅ Predictable performance (~180ms for all 7 queries)
+- ✅ Simple to audit and test
+- ✅ No query injection risk
+- ✅ All data collected upfront (agents don't wait on queries)
+- ✅ All queries aligned with solidified graph schema
+
+**Tradeoffs:**
+- ⚠️ May run queries that return no results (~20ms per unused query)
+- ✅ But total query time still only ~180ms (acceptable)
+
+**Files to Create:**
+- `internal/risk/queries.go` - 7 fixed query template functions
+- `internal/risk/input_normalizer.go` - Git diff → structured ChangeSet parser
+
+**Reference:** [../01-architecture/simplified_graph_schema.md](../01-architecture/simplified_graph_schema.md) - Query examples
+
+---
+
+### FR-9: Graph Schema Simplification
+
+**Requirement:** Use simplified graph schema with minimal edge types and branch support for data integrity
+
+**Core Decisions:**
+1. **Remove [:CO_CHANGED_WITH] pre-calculated edges** - Compute dynamically instead
+2. **Add minimal Branch support** - Prevent feature branch pollution in metrics
+
+**Rationale:**
+- Pre-calculated co-change edges add complexity without meaningful performance benefit
+- Adds ~1,200 edges to graph for typical medium repo
+- Requires complex ingestion step (calculate from commits, store edges)
+- Data becomes stale (only updated on `crisk init`)
+- Can compute co-change frequency dynamically in ~50ms with proper indexes
+- **Branch tracking needed**: Without branches, feature branch commits pollute main branch metrics (ownership, co-change, incidents)
+
+**Simplified Schema:**
+- **8 Node Types**: File, Function, Class, Developer, Commit, Branch, Issue, PR
+- **13 Edge Types**: CONTAINS, CALLS, IMPORTS, AUTHORED, MODIFIES, LINKED_TO, FIXES, ON_BRANCH, FROM_BRANCH, TO_BRANCH, MERGED_AS (removed: CO_CHANGED_WITH)
+- **Total edges**: ~10,000 structure + ~100 branch edges = 10,100 (vs ~11,200 with co-change edges) = -10% complexity
+
+**Branch Support (Minimal Scope):**
+- **Branch Node**: `(:Branch {name, is_default})`
+- **Branch Edges**:
+  - `(Commit)-[:ON_BRANCH]->(Branch)` - Which branch this commit is on
+  - `(PR)-[:FROM_BRANCH]->(Branch)` - Source branch (head_ref)
+  - `(PR)-[:TO_BRANCH]->(Branch)` - Target branch (base_ref)
+  - `(PR)-[:MERGED_AS]->(Commit)` - Link PR to merge commit
+- **Query Filtering**: All temporal queries (co-change, ownership, incidents) filter by `is_default: true`
+- **Data Source**: GitHub API already provides `head_ref`, `base_ref`, `merge_commit_sha` in PR data (PostgreSQL stores this)
+
+**Benefits:**
+- ✅ Simpler schema (easier to understand and maintain)
+- ✅ Faster ingestion (skip co-change calculation step)
+- ✅ Always-fresh data (compute from latest commits)
+- ✅ Flexible thresholds (can adjust frequency filter per query)
+- ✅ Less storage (fewer edges overall)
+- ✅ **Data integrity** (branch filtering prevents feature branch pollution)
+
+**Tradeoffs:**
+- ⚠️ Co-change query takes ~50ms instead of ~10ms
+- ⚠️ Branch filtering adds ~5-10ms to queries
+- ✅ But still meets <600ms Tier 1 target (~100ms queries + 500ms LLM = 600ms)
+- ✅ Cache results at application level (15-min TTL) for repeated queries
+
+**Implementation:**
+- Remove `internal/graph/builder.go:calculateCoChangedEdges()`
+- Add `internal/graph/branches.go` - Branch node creation and linking
+- Update Tier 1 queries to compute co-change dynamically AND filter by default branch
+- Update Tier 2 queries to filter by default branch
+- Add filesystem cache for co-change results
+
+**Files to Create:**
+- `internal/graph/branches.go` - Branch ingestion logic (extract from PR data in PostgreSQL)
+
+**Files to Update:**
+- `internal/graph/builder.go` - Add branch node creation step, remove calculateCoChangedEdges()
+- `internal/risk/tier1.go` - Update queries to include branch filtering
+- `internal/risk/tier2.go` - Update queries to include branch filtering
+
+**Reference:** [../01-architecture/simplified_graph_schema.md](../01-architecture/simplified_graph_schema.md)
+
+---
+
+### FR-10: Performance Optimization
+
+**Requirement:** Meet latency targets for MVP (Sequential Analysis Chain)
 
 **Targets:**
-- Phase 1 (p50): <200ms
-- Phase 2 (p95): <5s
-- Cache hit rate: >30%
+- Tier 0 (p50): <50ms (heuristic filter)
+- Phase 1 (p50): <180ms (all 7 queries)
+- Phase 2 (p50): <500ms (5 agents, parallel)
+- Phases 3-5 (p95): <2.6s (sequential: patterns, synthesis, validation)
+- **Total (p95): <5s** (Tier 0 + all 5 phases)
 
 **Optimizations:**
 
 1. **Neo4j Query Optimization**
    - Add indexes on frequently queried properties:
-     - `File.path`
+     - `File.path` (PRIMARY - used by all queries)
      - `Commit.sha`
-     - `Function.name`
-   - Use `LIMIT` clauses in queries
-   - Batch queries where possible
+     - `Commit.author_date` (for temporal filtering)
+     - `Branch.name` (for branch filtering)
+     - `Issue.created_at` (for recent incident filtering)
+     - `Developer.email`
+   - Use `LIMIT` clauses in all queries (max 50 results)
+   - Phase 1: 7 queries run in parallel (~180ms total with dynamic co-change + branch filtering)
+   - **No [:CO_CHANGED_WITH] edge computation** - simplifies ingestion by 30%
+   - **Branch filtering** - All temporal queries filter by `is_default: true`
 
-2. **Filesystem Caching**
-   - Cache Phase 1 results: 15-min TTL
-   - Cache key: `sha256(file_path + git_sha)`
-   - Cache location: `.coderisk/cache/phase1/`
-   - Max cache size: 100MB (LRU eviction)
+2. **Parallel Agent Execution (Phase 2)**
+   - Run 5 specialized agents simultaneously
+   - Each agent gets independent LLM call (no blocking)
+   - Total Phase 2 time = slowest agent (~500ms), not sum of all agents
+   - Use goroutines for parallel execution
 
 3. **LLM Call Optimization**
-   - Context pruning: Max 10 dependencies, 5 co-change partners
-   - Max tokens: 1000 (input + output)
-   - Timeout: 10s (fail gracefully if exceeded)
+   - All agents: Gemini Flash 2.0 (300-500ms per call)
+   - Max tokens per agent: 2000 input, 500 output
+   - 10s timeout per agent (fail gracefully if exceeded)
+   - Context pruning: Max 20 dependencies, 10 co-change partners, 10 recent commits
 
-4. **Parallel Processing**
-   - Analyze multiple files in parallel (Phase 1)
-   - Max parallelism: 4 workers (avoid Neo4j overload)
+4. **Sequential Optimization (Phases 3-5)**
+   - Phase 3 (patterns): Single agent, focused on cross-file analysis only
+   - Phase 4 (synthesis): Single agent, combines pre-computed agent outputs (minimal LLM work)
+   - Phase 5 (validation): Fact-checking only (deterministic checks + minimal LLM)
+
+5. **No Caching (Simpler for MVP)**
+   - Agent outputs are always fresh (no stale data)
+   - Validation ensures accuracy (no cached false positives)
+   - Total time <5s is acceptable for MVP
+   - Post-MVP: Consider caching Phase 1 query results if needed
 
 **Acceptance Criteria:**
-- Benchmarks show p50 <200ms (Phase 1)
-- Benchmarks show p95 <5s (Phase 2)
-- Cache hit rate >30% on repeated `crisk check`
+- Benchmarks show p50 <50ms (Tier 0)
+- Benchmarks show p50 <180ms (Phase 1 queries)
+- Benchmarks show p50 <500ms (Phase 2 parallel agents)
+- Benchmarks show p95 <5s (total chain)
+- All files get complete analysis (no conditional skipping)
 
 **Files to Update:**
-- `internal/graph/*.go` - Add query optimization
-- `internal/cache/*.go` - Implement Phase 1 caching
-- `cmd/crisk/check.go` - Add parallel processing
+- `internal/graph/*.go` - Add query optimization and indexes
+- `internal/risk/chain_orchestrator.go` - Parallel agent execution
+- `cmd/crisk/check.go` - Sequential phase coordination
 
 ---
 
-### FR-7: False Positive Tracking
+### FR-11: False Positive Tracking
 
 **Requirement:** User feedback mechanism to improve accuracy over time
 
@@ -549,7 +901,7 @@ Recent False Positives:
 
 ---
 
-### FR-8: Configuration Management
+### FR-12: Configuration Management
 
 **Requirement:** User can configure API keys, thresholds, verbosity defaults
 
@@ -565,22 +917,24 @@ Recent False Positives:
 llm:
   provider: "anthropic"  # "openai" or "anthropic"
   api_key: "sk-ant-..."  # Or use env var ANTHROPIC_API_KEY
-  max_tokens: 1000
-  timeout_seconds: 10
+  tier1_model: "haiku"  # "haiku" or "gpt-4o-mini"
+  tier2_model: "sonnet"  # "sonnet" or "gpt-4o"
+  tier1_max_tokens: 500
+  tier2_max_tokens: 1500
+  tier1_timeout_seconds: 5
+  tier2_timeout_seconds: 10
 
 thresholds:
-  coupling: 10
-  co_change: 0.7
-  test_ratio_medium: 0.3
-  test_ratio_high: 0.1
-  churn_days: 30
-  churn_count: 20
-  incidents_medium: 1
-  incidents_high: 3
+  # Thresholds now primarily used in Tier 1 LLM context
+  # (not hard-coded rules like before)
+  dependency_count_high: 20  # Flag for Tier 1 context
+  co_change_rate_high: 0.7   # Flag for Tier 1 context
+  incident_lookback_days: 90  # Recent incidents window
 
 output:
   default_verbosity: "standard"  # "quiet", "standard", "explain", "ai"
   show_progress: true
+  show_cost: true  # Show cost in --explain mode
 
 cache:
   enabled: true
@@ -607,7 +961,7 @@ cache:
 
 ---
 
-### FR-9: Integration Testing
+### FR-13: Integration Testing
 
 **Requirement:** Validate end-to-end flow with real repositories
 
@@ -618,35 +972,43 @@ cache:
 
 **Test Scenarios:**
 
-#### Scenario 1: Phase 1 Only (LOW/MEDIUM risk)
+#### Scenario 1: Tier 0 Only (TRIVIAL changes)
 ```bash
 cd /tmp/commander.js
 crisk init
 git checkout -b test-change
-# Make low-risk change (add comment)
+# Make trivial change (whitespace only)
 crisk check
-# Expected: Phase 1 only, <200ms, LOW risk
+# Expected: Tier 0 only, <50ms, SAFE risk
 ```
 
-#### Scenario 2: Phase 1 → Phase 2 Escalation (HIGH risk)
+#### Scenario 2: Tier 1 Only (SAFE/REVIEW changes)
+```bash
+cd /tmp/commander.js
+# Make low-risk change (add comment, minor refactor)
+crisk check
+# Expected: Tier 0 → Tier 1, <600ms, SAFE or REVIEW_NEEDED
+```
+
+#### Scenario 3: Full Escalation (Tier 0 → Tier 1 → Tier 2)
 ```bash
 cd /tmp/omnara
 crisk init
-# Make high-risk change (modify core file with high coupling)
+# Make high-risk change (modify core file with incidents)
 crisk check
-# Expected: Phase 1 → Phase 2, <5s, HIGH risk, LLM recommendations
+# Expected: Tier 0 → Tier 1 → Tier 2, <5s, ESCALATE + due diligence
 ```
 
-#### Scenario 3: Performance Benchmark
+#### Scenario 4: Performance Benchmark
 ```bash
 cd /tmp/terraform-exec
 crisk init
 # Measure init time (target: <10 min)
 crisk check
-# Measure check time (target: <200ms Phase 1)
+# Measure check time (target: <600ms Tier 1)
 ```
 
-#### Scenario 4: Cache Hit Rate
+#### Scenario 5: Cache Hit Rate
 ```bash
 crisk check  # First run (cold cache)
 crisk check  # Second run (should hit cache)
@@ -665,7 +1027,7 @@ crisk stats  # Verify cache hit rate >30%
 
 ---
 
-### FR-10: Beta-Ready Release
+### FR-14: Beta-Ready Release
 
 **Requirement:** Installable, usable product for 2-3 beta users
 
@@ -720,9 +1082,46 @@ curl -fsSL https://coderisk.dev/install.sh | sh
 
 ---
 
-## Prompt Template
+## Prompt Templates (3-Tier System)
 
-**Phase 2 LLM Prompt (Due Diligence Focus):**
+### Tier 1 Prompt (Fast Triage):
+
+```
+You are a quick risk screener for code changes.
+
+FILE: {file_path}
+DIFF:
+{git_diff}
+
+QUICK CONTEXT:
+- Recent incidents (last 90 days): {incident_count}
+  {incident_list}
+- Files depending on this: {dependent_count}
+  {sample_dependents}
+- Co-change partners (>70% rate):
+  {co_change_partners}
+
+TASK: Determine if this change needs deeper analysis.
+
+Respond with ONE of:
+1. SAFE - Low risk, no coordination needed
+   Example: Minor refactor, logging, comments in low-traffic file
+
+2. REVIEW_NEEDED - Medium risk, developer should double-check
+   Example: Logic changes in moderately-coupled file
+
+3. ESCALATE - High risk, needs detailed due diligence
+   Example: Changes to file with recent incidents or high coupling
+
+Response format (JSON):
+{
+  "decision": "SAFE|REVIEW_NEEDED|ESCALATE",
+  "one_line_reason": "Brief explanation (max 10 words)",
+  "key_concern": "Primary risk factor (if any)"
+}
+```
+
+### Tier 2 Prompt (Deep Due Diligence):
 
 ```
 You are a code risk assessment expert helping developers perform pre-commit due diligence.
@@ -750,15 +1149,28 @@ DUE DILIGENCE CONTEXT:
      {incident_summaries}
    - Pattern: {incident_pattern}
 
-5. TEST COVERAGE
+5. RECENT CODE CHANGES (Last 5 commits)
+   {recent_patches}
+
+   Example format:
+   Commit abc123 (Alice, 2 days ago): "Fix timeout cascade"
+     payment_processor.py: +15 -3
+     @@ -42,7 +42,10 @@ def process_payment():
+     -    result = api.charge()
+     +    try:
+     +        result = api.charge(timeout=5)
+     +    except TimeoutError:
+     +        return rollback()
+
+6. TEST COVERAGE
    - Current coverage: {test_ratio}
    - Test files: {test_files}
 
-GIT DIFF:
+CURRENT CHANGE (Git Diff):
 {git_diff}
 
-PHASE 1 RISK ASSESSMENT: {phase1_risk_level}
-EVIDENCE: {phase1_metrics}
+TIER 1 TRIAGE: {tier1_decision}
+REASON: {tier1_reason}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 YOUR TASK: Provide a pre-commit risk assessment and action plan
@@ -802,9 +1214,11 @@ Respond in JSON format:
 - ✅ **Incident-focused** - Prevents repeating history
 - ✅ **Actionable** - Tells developer exactly what to do
 
-**Token Budget:** Max 1500 tokens (input + output) - increased to include richer context
+**Token Budget:**
+- Tier 1: Max 500 tokens (input + output) - minimal context for triage
+- Tier 2: Max 1500 tokens (input + output) - full context for due diligence
 
-**Fallback:** If LLM fails, return Phase 1 result + basic ownership/dependency info
+**Fallback:** If Tier 2 LLM fails, return Tier 1 result + basic ownership/dependency info
 
 ---
 
@@ -814,23 +1228,27 @@ Respond in JSON format:
 
 **Priority Packages:**
 - `internal/llm/` - LLM client integration (80% coverage target)
-- `internal/risk/` - Risk calculation (70% coverage target)
-- `internal/agent/` - Phase 2 orchestration (60% coverage target)
+- `internal/risk/` - Risk calculation and 3-tier orchestration (70% coverage target)
+- `internal/risk/tier1.go` - Tier 1 triage logic (70% coverage target)
+- `internal/risk/tier2.go` - Tier 2 due diligence orchestration (60% coverage target)
 - `internal/feedback/` - Feedback tracking (70% coverage target)
 
 **Test Cases:**
-- LLM API errors (no key, rate limit, timeout)
-- Risk calculation edge cases (no data, missing metrics)
+- LLM API errors (no key, rate limit, timeout) for both Tier 1 and Tier 2
+- Tier 0 heuristic edge cases (mixed changes, edge formatting)
+- Tier 1 escalation logic (SAFE vs REVIEW_NEEDED vs ESCALATE)
+- Tier 2 context fetching edge cases (no data, missing metrics)
 - Cache hit/miss scenarios
 - Parallel processing edge cases
 
 ### Integration Tests
 
-**Scenarios (see FR-9):**
-1. Phase 1 only (LOW/MEDIUM risk)
-2. Phase 1 → Phase 2 escalation (HIGH risk)
-3. Performance benchmarks
-4. Cache hit rate validation
+**Scenarios (see FR-10):**
+1. Tier 0 only (TRIVIAL changes)
+2. Tier 1 only (SAFE/REVIEW_NEEDED changes)
+3. Full escalation (Tier 0 → Tier 1 → Tier 2)
+4. Performance benchmarks
+5. Cache hit rate validation
 
 **Test Data:**
 - Real repositories (commander.js, omnara, terraform-exec)
@@ -841,10 +1259,12 @@ Respond in JSON format:
 **Metrics:**
 | Metric | Target | How to Measure |
 |--------|--------|----------------|
-| Phase 1 (p50) | <200ms | Benchmark 100 files |
-| Phase 2 (p95) | <5s | Benchmark 20 HIGH-risk files |
+| Tier 0 (p50) | <50ms | Benchmark 100 files with heuristic filter |
+| Tier 1 (p50) | <600ms | Benchmark 100 non-trivial files |
+| Tier 2 (p95) | <5s | Benchmark 20 ESCALATE files |
 | `crisk init` | <10 min | Test with medium repo (omnara) |
-| Cache hit rate | >30% | Run `crisk check` twice, measure hits |
+| Cache hit rate | >30% | Run `crisk check` twice, measure Tier 1 cache hits |
+| Cost per check | <$0.001 | Track LLM costs across mixed workloads |
 
 **Tools:**
 - Go benchmarks (`go test -bench`)
@@ -862,9 +1282,17 @@ Respond in JSON format:
 - ❌ Multi-tenancy / team features
 - ❌ Public repository caching
 - ❌ Branch delta graphs (main branch only)
-- ❌ Complex agent orchestration (just one LLM call)
-- ❌ Advanced metrics (stick to 5 core)
+- ❌ Advanced metrics (stick to 7 core queries)
 - ❌ Perfect test coverage (60% is enough)
+- ❌ Test coverage detection from graph (no reliable schema relationship)
+- ❌ LLM-based query generation (fixed query library instead)
+- ❌ Intent-based query selection (always run all 7 queries)
+- ❌ Query cost estimation and sandboxing
+- ❌ Schema registry with validation
+- ❌ Escalation/triage logic (replaced with Sequential Analysis Chain)
+- ❌ Conditional agent execution (all 8 agents always run)
+- ❌ Caching of agent results (always fresh analysis)
+- ❌ Multi-model switching (Gemini Flash 2.0 only for MVP)
 
 **Deferred to v2 (after customer validation):**
 - Multi-hop graph navigation (see [../01-architecture/agentic_design.md](../01-architecture/agentic_design.md))
@@ -908,11 +1336,12 @@ Respond in JSON format:
 ## Success Criteria (End of Week 4)
 
 ### Functional Requirements ✅
-- ✅ LLM client integration working (OpenAI + Anthropic)
-- ✅ Phase 1 risk assessment <200ms
-- ✅ Phase 2 risk assessment <5s
-- ✅ End-to-end `crisk check` flow complete
-- ✅ All 4 verbosity levels working
+- ✅ LLM client integration working (OpenAI + Anthropic, dual-model support)
+- ✅ Tier 0 heuristic filter <50ms
+- ✅ Tier 1 fast LLM triage <600ms
+- ✅ Tier 2 deep LLM investigation <5s
+- ✅ End-to-end `crisk check` flow complete (3-tier escalation)
+- ✅ All 4 verbosity levels working (human vs AI mode)
 - ✅ False positive tracking implemented
 - ✅ Configuration management complete
 
@@ -933,30 +1362,34 @@ Respond in JSON format:
 
 ## Weekly Milestones
 
-### Week 1: LLM Integration + Phase 2
-- ✅ OpenAI client implemented
-- ✅ Anthropic client implemented
-- ✅ Phase 2 orchestration complete
-- ✅ Prompt template finalized
-- ✅ Error handling (no key, rate limits, timeouts)
+### Week 1: Foundation & Cleanup (Current)
+- 🚧 Update mvp_development_plan.md with current status
+- 🚧 Delete dead code (tier1.go, tier2.go, simple_investigator.go)
+- 🚧 Verify graph schema alignment with simplified_graph_schema.md
+- 🚧 Audit internal/ packages for bloat
+- ⏳ Create internal/risk/collector.go (standardize 7 queries)
+- ⏳ Create internal/risk/heuristic.go (Tier 0 filter)
 
-### Week 2: Integration Testing + Performance
-- ✅ Integration tests passing (3 repos)
-- ✅ Performance targets met (<200ms, <5s)
-- ✅ Cache hit rate >30%
-- ✅ Neo4j query optimization
+### Week 2: Core Agent System
+- ⏳ Create internal/llm/gemini.go + agent_executor.go
+- ⏳ Create 5 specialized agents (incident, blast_radius, cochange, ownership, quality)
+- ⏳ Implement parallel execution (Phase 2 in <500ms)
+- ⏳ Unit tests for agent system
 
-### Week 3: False Positive Tracking + Hardening
-- ✅ Feedback command implemented
-- ✅ Stats calculation working
-- ✅ Edge case handling complete
-- ✅ Error messages improved
+### Week 3: Chain Completion & Output
+- ⏳ Create Agent 6, 7, 8 (patterns, synthesizer, validator)
+- ⏳ Create internal/risk/chain_orchestrator.go
+- ⏳ Create internal/output/fr6_formatter.go (FR-6 format)
+- ⏳ Update cmd/crisk/check.go (full integration)
+- ⏳ Integration tests with real repos
 
-### Week 4: Beta-Ready Release
-- ✅ Test coverage >60%
-- ✅ Homebrew formula working
-- ✅ Documentation complete
-- ✅ 2-3 beta users onboarded
+### Week 4: Production Auth & Polish
+- ⏳ Update cmd/crisk/login.go (device flow OAuth)
+- ⏳ Create frontend API endpoints (coderisk-frontend/app/api/cli/)
+- ⏳ Create internal/feedback/ (false positive tracking)
+- ⏳ Performance optimization (<3.3s target)
+- ⏳ Documentation updates
+- ⏳ Fresh git repo creation (remove dev_docs from history)
 
 ---
 

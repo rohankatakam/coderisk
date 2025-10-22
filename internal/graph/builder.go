@@ -16,9 +16,8 @@ import (
 // Builder orchestrates graph construction from PostgreSQL staging tables
 // Reference: dev_docs/03-implementation/integration_guides/layers_2_3_graph_construction.md
 type Builder struct {
-	stagingDB       *database.StagingClient
-	backend         Backend
-	processedCommits []temporal.Commit // Track commits for co-change calculation
+	stagingDB *database.StagingClient
+	backend   Backend
 }
 
 // NewBuilder creates a graph builder instance
@@ -41,9 +40,6 @@ type BuildStats struct {
 func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string) (*BuildStats, error) {
 	log.Printf("🔨 Building graph for repo %d (path: %s)...", repoID, repoPath)
 	stats := &BuildStats{}
-
-	// Initialize commit tracking for co-change calculation
-	b.processedCommits = make([]temporal.Commit, 0)
 
 	// Process commits (Layer 2: Temporal)
 	commitStats, err := b.processCommits(ctx, repoID, repoPath)
@@ -72,16 +68,34 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string)
 	stats.Edges += prStats.Edges
 	log.Printf("  ✓ Processed PRs: %d nodes, %d edges", prStats.Nodes, prStats.Edges)
 
-	// Calculate CO_CHANGED edges from commit patterns
-	log.Printf("  ℹ️  Calculating co-change patterns from commits...")
-	coChangeStats, err := b.calculateCoChangedEdges(ctx, repoID, repoPath)
+	// Process branches (Layer 2: Temporal)
+	branchStats, err := b.processBranches(ctx, repoID)
 	if err != nil {
-		// Don't fail the entire build if co-change calculation fails
-		log.Printf("  ⚠️  CO_CHANGED edge calculation failed (non-fatal): %v", err)
-	} else {
-		stats.Edges += coChangeStats.Edges
-		log.Printf("  ✓ Created CO_CHANGED edges: %d pairs", coChangeStats.Edges/2) // Bidirectional, so divide by 2
+		return stats, fmt.Errorf("process branches failed: %w", err)
 	}
+	stats.Nodes += branchStats.Nodes
+	log.Printf("  ✓ Processed branches: %d nodes", branchStats.Nodes)
+
+	// Link commits to default branch (MVP simplification: only default branch)
+	// See: dev_docs/01-architecture/simplified_graph_schema.md line 268
+	commitBranchStats, err := b.linkCommitsToDefaultBranch(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("link commits to default branch failed: %w", err)
+	}
+	stats.Edges += commitBranchStats.Edges
+	log.Printf("  ✓ Linked commits to default branch: %d edges", commitBranchStats.Edges)
+
+	// Link PRs to branches
+	prBranchStats, err := b.linkPRsToBranches(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("link PRs to branches failed: %w", err)
+	}
+	stats.Edges += prBranchStats.Edges
+	log.Printf("  ✓ Linked PRs to branches: %d edges", prBranchStats.Edges)
+
+	// Note: CO_CHANGED edges are now computed dynamically in queries, not pre-calculated
+	// This prevents stale data and reduces ingestion time by ~30%
+	// See: dev_docs/01-architecture/simplified_graph_schema.md
 
 	return stats, nil
 }
@@ -211,7 +225,6 @@ func (b *Builder) transformCommit(commit database.CommitData, repoPath string) (
 
 	// 4. Create MODIFIES edges for each file
 	// Convert relative GitHub paths to absolute paths matching File nodes
-	fileChanges := make([]temporal.FileChange, 0, len(fullCommit.Files))
 	for _, file := range fullCommit.Files {
 		// Convert relative path (e.g., "src/main.go") to absolute (e.g., "/path/to/repo/src/main.go")
 		absolutePath := fmt.Sprintf("%s/%s", repoPath, file.Filename)
@@ -228,24 +241,7 @@ func (b *Builder) transformCommit(commit database.CommitData, repoPath string) (
 			},
 		}
 		edges = append(edges, modifiesEdge)
-
-		// Track for co-change calculation
-		fileChanges = append(fileChanges, temporal.FileChange{
-			Path:      absolutePath,
-			Additions: file.Additions,
-			Deletions: file.Deletions,
-		})
 	}
-
-	// Store commit for later co-change calculation
-	b.processedCommits = append(b.processedCommits, temporal.Commit{
-		SHA:          commit.SHA,
-		Author:       commit.AuthorName,
-		Email:        commit.AuthorEmail,
-		Timestamp:    commit.AuthorDate,
-		Message:      commit.Message,
-		FilesChanged: fileChanges,
-	})
 
 	return nodes, edges, nil
 }
@@ -465,67 +461,13 @@ func extractIssueReferences(title, body string) []int {
 	return issueNumbers
 }
 
-// AddLayer2CoChangedEdges creates CO_CHANGED edges from temporal analysis
-// 12-Factor Principle - Factor 8: Concurrency via process model
-// Use batching to avoid overwhelming the database with large transactions
+// AddLayer2CoChangedEdges is DEPRECATED - CO_CHANGED edges are now computed dynamically
+// This method is kept for backwards compatibility but does nothing
+// See: dev_docs/01-architecture/simplified_graph_schema.md
 func (b *Builder) AddLayer2CoChangedEdges(ctx context.Context, coChanges []temporal.CoChangeResult) (*BuildStats, error) {
-	stats := &BuildStats{}
-	var edges []GraphEdge
-
-	// Build all edges (forward + reverse for bidirectional relationship)
-	for _, cc := range coChanges {
-		// Forward edge
-		edge := GraphEdge{
-			Label: "CO_CHANGED",
-			From:  fmt.Sprintf("file:%s", cc.FileA),
-			To:    fmt.Sprintf("file:%s", cc.FileB),
-			Properties: map[string]interface{}{
-				"frequency":   cc.Frequency,
-				"co_changes":  cc.CoChanges,
-				"window_days": cc.WindowDays,
-			},
-		}
-		edges = append(edges, edge)
-
-		// Reverse edge (CO_CHANGED is bidirectional)
-		reverseEdge := GraphEdge{
-			Label: "CO_CHANGED",
-			From:  fmt.Sprintf("file:%s", cc.FileB),
-			To:    fmt.Sprintf("file:%s", cc.FileA),
-			Properties: map[string]interface{}{
-				"frequency":   cc.Frequency,
-				"co_changes":  cc.CoChanges,
-				"window_days": cc.WindowDays,
-			},
-		}
-		edges = append(edges, reverseEdge)
-	}
-
-	// Batch create edges to avoid large transactions
-	if len(edges) > 0 {
-		log.Printf("Creating %d CO_CHANGED edges in batches...", len(edges))
-
-		// Create in batches of 100 to avoid large transactions
-		batchSize := 100
-		for i := 0; i < len(edges); i += batchSize {
-			end := i + batchSize
-			if end > len(edges) {
-				end = len(edges)
-			}
-
-			batch := edges[i:end]
-			if err := b.backend.CreateEdges(ctx, batch); err != nil {
-				return stats, fmt.Errorf("failed to create CO_CHANGED edges (batch %d-%d): %w", i, end, err)
-			}
-
-			log.Printf("  ✓ Created batch %d-%d (%d edges)", i, end, len(batch))
-		}
-
-		stats.Edges = len(edges)
-		log.Printf("  ✓ Created %d CO_CHANGED edges total", len(edges))
-	}
-
-	return stats, nil
+	log.Printf("⚠️  AddLayer2CoChangedEdges called but CO_CHANGED edges are now computed dynamically")
+	log.Printf("    See: dev_docs/01-architecture/simplified_graph_schema.md")
+	return &BuildStats{}, nil
 }
 
 // AddLayer3IncidentNodes creates Incident nodes in the graph
@@ -564,19 +506,185 @@ func (b *Builder) AddLayer3CausedByEdges(ctx context.Context, edges []GraphEdge)
 	return stats, nil
 }
 
-// calculateCoChangedEdges calculates co-change patterns from processed commits
-func (b *Builder) calculateCoChangedEdges(ctx context.Context, repoID int64, repoPath string) (*BuildStats, error) {
-	if len(b.processedCommits) == 0 {
-		log.Printf("    No commits to analyze for co-change patterns")
-		return &BuildStats{}, nil
+// processBranches transforms branches from PostgreSQL to graph nodes
+func (b *Builder) processBranches(ctx context.Context, repoID int64) (*BuildStats, error) {
+	batchSize := 100
+	stats := &BuildStats{}
+
+	// Get default branch name
+	defaultBranchName, err := b.stagingDB.GetDefaultBranchName(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("failed to get default branch name: %w", err)
 	}
 
-	log.Printf("    Analyzing %d commits for co-change patterns...", len(b.processedCommits))
+	for {
+		// Fetch unprocessed branches
+		branches, err := b.stagingDB.FetchUnprocessedBranches(ctx, repoID, batchSize)
+		if err != nil {
+			return stats, err
+		}
 
-	// Calculate co-changes with 30% frequency threshold
-	coChanges := temporal.CalculateCoChanges(b.processedCommits, 0.3)
-	log.Printf("    Found %d co-change pairs (frequency >= 30%%)", len(coChanges))
+		if len(branches) == 0 {
+			break
+		}
 
-	// Create CO_CHANGED edges
-	return b.AddLayer2CoChangedEdges(ctx, coChanges)
+		// Transform to graph entities
+		var allNodes []GraphNode
+		var branchIDs []int64
+
+		for _, branch := range branches {
+			node := b.transformBranch(branch, defaultBranchName)
+			allNodes = append(allNodes, node)
+			branchIDs = append(branchIDs, branch.ID)
+		}
+
+		// Create nodes
+		if len(allNodes) > 0 {
+			if _, err := b.backend.CreateNodes(ctx, allNodes); err != nil {
+				return stats, fmt.Errorf("failed to create branch nodes: %w", err)
+			}
+			stats.Nodes += len(allNodes)
+		}
+
+		// Mark as processed
+		if len(branchIDs) > 0 {
+			if err := b.stagingDB.MarkBranchesProcessed(ctx, branchIDs); err != nil {
+				return stats, fmt.Errorf("failed to mark branches as processed: %w", err)
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// transformBranch converts a branch into a graph node
+func (b *Builder) transformBranch(branch database.BranchData, defaultBranchName string) GraphNode {
+	isDefault := branch.Name == defaultBranchName
+
+	node := GraphNode{
+		Label: "Branch",
+		ID:    fmt.Sprintf("branch:%s", branch.Name),
+		Properties: map[string]interface{}{
+			"name":       branch.Name,
+			"is_default": isDefault,
+		},
+	}
+
+	return node
+}
+
+// linkCommitsToDefaultBranch creates [:ON_BRANCH] edges from all commits to the default branch
+// MVP simplification: only link to default branch (see simplified_graph_schema.md line 268)
+func (b *Builder) linkCommitsToDefaultBranch(ctx context.Context, repoID int64) (*BuildStats, error) {
+	stats := &BuildStats{}
+
+	// Get default branch name
+	defaultBranchName, err := b.stagingDB.GetDefaultBranchName(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("failed to get default branch name: %w", err)
+	}
+
+	// Get all processed commit SHAs
+	shas, err := b.stagingDB.GetProcessedCommitSHAs(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("failed to get commit SHAs: %w", err)
+	}
+
+	// Build ON_BRANCH edges
+	var edges []GraphEdge
+	for _, sha := range shas {
+		edge := GraphEdge{
+			Label:      "ON_BRANCH",
+			From:       fmt.Sprintf("commit:%s", sha),
+			To:         fmt.Sprintf("branch:%s", defaultBranchName),
+			Properties: map[string]interface{}{},
+		}
+		edges = append(edges, edge)
+	}
+
+	// Create edges in batches
+	if len(edges) > 0 {
+		batchSize := 100
+		for i := 0; i < len(edges); i += batchSize {
+			end := i + batchSize
+			if end > len(edges) {
+				end = len(edges)
+			}
+
+			batch := edges[i:end]
+			if err := b.backend.CreateEdges(ctx, batch); err != nil {
+				return stats, fmt.Errorf("failed to create ON_BRANCH edges (batch %d-%d): %w", i, end, err)
+			}
+		}
+
+		stats.Edges = len(edges)
+	}
+
+	return stats, nil
+}
+
+// linkPRsToBranches creates [:FROM_BRANCH], [:TO_BRANCH], [:MERGED_AS] edges for PRs
+func (b *Builder) linkPRsToBranches(ctx context.Context, repoID int64) (*BuildStats, error) {
+	stats := &BuildStats{}
+
+	// Get all processed PRs with branch data
+	prs, err := b.stagingDB.GetProcessedPRBranchData(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("failed to get PR branch data: %w", err)
+	}
+
+	// Build PR-branch edges
+	var edges []GraphEdge
+	for _, pr := range prs {
+		prID := fmt.Sprintf("pr:%d", pr.Number)
+
+		// Create FROM_BRANCH edge (source branch)
+		fromBranchEdge := GraphEdge{
+			Label:      "FROM_BRANCH",
+			From:       prID,
+			To:         fmt.Sprintf("branch:%s", pr.HeadRef),
+			Properties: map[string]interface{}{},
+		}
+		edges = append(edges, fromBranchEdge)
+
+		// Create TO_BRANCH edge (target branch)
+		toBranchEdge := GraphEdge{
+			Label:      "TO_BRANCH",
+			From:       prID,
+			To:         fmt.Sprintf("branch:%s", pr.BaseRef),
+			Properties: map[string]interface{}{},
+		}
+		edges = append(edges, toBranchEdge)
+
+		// Create MERGED_AS edge if PR was merged
+		if pr.Merged && pr.MergeCommitSHA != nil {
+			mergedAsEdge := GraphEdge{
+				Label:      "MERGED_AS",
+				From:       prID,
+				To:         fmt.Sprintf("commit:%s", *pr.MergeCommitSHA),
+				Properties: map[string]interface{}{},
+			}
+			edges = append(edges, mergedAsEdge)
+		}
+	}
+
+	// Create edges in batches
+	if len(edges) > 0 {
+		batchSize := 100
+		for i := 0; i < len(edges); i += batchSize {
+			end := i + batchSize
+			if end > len(edges) {
+				end = len(edges)
+			}
+
+			batch := edges[i:end]
+			if err := b.backend.CreateEdges(ctx, batch); err != nil {
+				return stats, fmt.Errorf("failed to create PR-branch edges (batch %d-%d): %w", i, end, err)
+			}
+		}
+
+		stats.Edges = len(edges)
+	}
+
+	return stats, nil
 }

@@ -147,12 +147,21 @@ func (c *Client) QueryCoupling(ctx context.Context, filePath string) (int, error
 // Reference: risk_assessment_methodology.md §2.2 - Co-change metric
 // Returns: count of files that changed together in last 90 days
 // Uses modern ExecuteQuery API (Neo4j v5.8+) - NEO4J_MODERNIZATION_GUIDE.md §Phase 3
+// NOTE: Computes co-change dynamically, filters to default branch (see simplified_graph_schema.md)
 func (c *Client) QueryCoChange(ctx context.Context, filePath string) (int, error) {
-	// Query CO_CHANGED edges (created during graph construction)
-	// Reference: graph_ontology.md §3.2.4 - CO_CHANGED relationship
+	// Compute co-change dynamically from commits (default branch only)
+	// Reference: simplified_graph_schema.md - Co-change computed at query time
 	query := `
-		MATCH (f:File {file_path: $file_path})-[r:CO_CHANGED]-(other)
-		WHERE r.window_days = 90
+		MATCH (f:File {file_path: $file_path})<-[:MODIFIES]-(c1:Commit)
+		MATCH (c1)-[:ON_BRANCH]->(b:Branch {is_default: true})
+		WHERE c1.author_date > timestamp() - duration({days: 90}) * 1000
+		WITH f, collect(c1) as commits
+		UNWIND commits as c
+		MATCH (c)-[:MODIFIES]->(other:File)
+		WHERE other.file_path <> $file_path
+		WITH other, count(c) as co_changes, size(commits) as total
+		WITH other, co_changes, toFloat(co_changes)/toFloat(total) as frequency
+		WHERE frequency > 0.3
 		RETURN count(DISTINCT other) as count
 	`
 

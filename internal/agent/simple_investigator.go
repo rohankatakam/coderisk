@@ -10,6 +10,22 @@ import (
 	"github.com/google/uuid"
 )
 
+// DEPRECATED: SimpleInvestigator will be replaced by the Sequential Analysis Chain (8 agents)
+//
+// Current status: IN USE by cmd/crisk/check.go (line 297)
+//
+// Replacement plan:
+//   - Target: Week 3 of MVP development
+//   - New implementation: internal/risk/chain_orchestrator.go + internal/risk/agents/*
+//   - Migration path: See dev_docs/00-product/mvp_development_plan.md FR-3 to FR-5
+//
+// What's changing:
+//   - FROM: Single LLM call with all evidence
+//   - TO: Sequential 8-agent chain (Ownership → Churn → Co-change → ... → Synthesis)
+//   - Benefits: Better accuracy, explainability, and control over reasoning process
+//
+// DO NOT ENHANCE this file - all new features go into the agent chain implementation
+//
 // SimpleInvestigator performs Phase 2 risk assessment with a single LLM call
 // This is the MVP-aligned implementation that replaces the complex multi-hop navigator
 type SimpleInvestigator struct {

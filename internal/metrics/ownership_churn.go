@@ -92,10 +92,12 @@ func CalculateOwnershipChurn(ctx context.Context, neo4j *graph.Client, repoID, f
 // queryModifiesEdges queries Neo4j for all developers who modified the file
 // Uses lazy loading to handle large result sets efficiently
 // Reference: NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md Phase 3
+// NOTE: Filters to default branch only (see simplified_graph_schema.md)
 func queryModifiesEdges(ctx context.Context, neo4jClient *graph.Client, filePath string, windowDays int) ([]DeveloperCommitCount, error) {
-	// Cypher query to get all MODIFIES edges for the file
+	// Cypher query to get all MODIFIES edges for the file (default branch only)
 	query := `
 		MATCH (c:Commit)-[:MODIFIES]->(f:File {file_path: $file_path})
+		MATCH (c)-[:ON_BRANCH]->(b:Branch {is_default: true})
 		WHERE c.author_date > timestamp() - duration({days: $window_days}) * 1000
 		MATCH (c)<-[:AUTHORED]-(d:Developer)
 		RETURN d.email as email, count(c) as commit_count
@@ -153,9 +155,10 @@ func queryModifiesEdges(ctx context.Context, neo4jClient *graph.Client, filePath
 // Current owner: most commits in last 30 days
 // Previous owner: most commits in days 31-90
 func identifyOwners(ctx context.Context, neo4j *graph.Client, filePath string, allDevelopers []DeveloperCommitCount) (string, string) {
-	// Query for last 30 days (current owner)
+	// Query for last 30 days (current owner) - default branch only
 	currentQuery := `
 		MATCH (c:Commit)-[:MODIFIES]->(f:File {file_path: $file_path})
+		MATCH (c)-[:ON_BRANCH]->(b:Branch {is_default: true})
 		WHERE c.author_date > timestamp() - duration({days: 30}) * 1000
 		MATCH (c)<-[:AUTHORED]-(d:Developer)
 		RETURN d.email as email, count(c) as commit_count
@@ -173,9 +176,10 @@ func identifyOwners(ctx context.Context, neo4j *graph.Client, filePath string, a
 		currentOwner, _ = currentRecords[0]["email"].(string)
 	}
 
-	// Query for days 31-90 (previous owner)
+	// Query for days 31-90 (previous owner) - default branch only
 	previousQuery := `
 		MATCH (c:Commit)-[:MODIFIES]->(f:File {file_path: $file_path})
+		MATCH (c)-[:ON_BRANCH]->(b:Branch {is_default: true})
 		WHERE c.author_date > timestamp() - duration({days: 90}) * 1000
 		  AND c.author_date <= timestamp() - duration({days: 30}) * 1000
 		MATCH (c)<-[:AUTHORED]-(d:Developer)
@@ -213,9 +217,10 @@ func calculateDaysSinceTransition(ctx context.Context, neo4j *graph.Client, file
 		return -1 // Unknown
 	}
 
-	// Find the most recent commit by the current owner
+	// Find the most recent commit by the current owner - default branch only
 	query := `
 		MATCH (c:Commit)-[:MODIFIES]->(f:File {file_path: $file_path})
+		MATCH (c)-[:ON_BRANCH]->(b:Branch {is_default: true})
 		MATCH (c)<-[:AUTHORED]-(d:Developer {email: $current_owner})
 		RETURN c.author_date as latest_commit
 		ORDER BY c.author_date DESC

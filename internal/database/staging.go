@@ -465,3 +465,134 @@ func (c *StagingClient) MarkPRsProcessed(ctx context.Context, prIDs []int64) err
 
 	return nil
 }
+
+// BranchData represents data from github_branches table
+type BranchData struct {
+	ID        int64
+	RepoID    int64
+	Name      string
+	CommitSHA string
+	Protected bool
+	RawData   json.RawMessage
+}
+
+// FetchUnprocessedBranches retrieves branches ready for graph construction
+func (c *StagingClient) FetchUnprocessedBranches(ctx context.Context, repoID int64, limit int) ([]BranchData, error) {
+	query := `
+		SELECT id, repo_id, name, commit_sha, protected, raw_data
+		FROM github_branches
+		WHERE repo_id = $1 AND processed_at IS NULL
+		LIMIT $2
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, repoID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch unprocessed branches: %w", err)
+	}
+	defer rows.Close()
+
+	var branches []BranchData
+	for rows.Next() {
+		var b BranchData
+		if err := rows.Scan(&b.ID, &b.RepoID, &b.Name, &b.CommitSHA, &b.Protected, &b.RawData); err != nil {
+			return nil, fmt.Errorf("failed to scan branch: %w", err)
+		}
+		branches = append(branches, b)
+	}
+
+	return branches, rows.Err()
+}
+
+// MarkBranchesProcessed updates processed_at timestamp for branches
+func (c *StagingClient) MarkBranchesProcessed(ctx context.Context, branchIDs []int64) error {
+	query := `
+		UPDATE github_branches
+		SET processed_at = NOW()
+		WHERE id = ANY($1)
+	`
+
+	_, err := c.db.ExecContext(ctx, query, pq.Array(branchIDs))
+	if err != nil {
+		return fmt.Errorf("failed to mark branches as processed: %w", err)
+	}
+
+	return nil
+}
+
+// GetDefaultBranchName retrieves the default branch name for a repository
+func (c *StagingClient) GetDefaultBranchName(ctx context.Context, repoID int64) (string, error) {
+	query := `
+		SELECT raw_data->>'default_branch' as default_branch
+		FROM github_repositories
+		WHERE id = $1
+	`
+
+	var defaultBranch string
+	err := c.db.QueryRowContext(ctx, query, repoID).Scan(&defaultBranch)
+	if err != nil {
+		return "", fmt.Errorf("failed to get default branch: %w", err)
+	}
+
+	return defaultBranch, nil
+}
+
+// GetProcessedCommitSHAs retrieves all commit SHAs that have been processed into the graph
+func (c *StagingClient) GetProcessedCommitSHAs(ctx context.Context, repoID int64) ([]string, error) {
+	query := `
+		SELECT sha
+		FROM github_commits
+		WHERE repo_id = $1 AND processed_at IS NOT NULL
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query commits: %w", err)
+	}
+	defer rows.Close()
+
+	var shas []string
+	for rows.Next() {
+		var sha string
+		if err := rows.Scan(&sha); err != nil {
+			return nil, fmt.Errorf("failed to scan commit SHA: %w", err)
+		}
+		shas = append(shas, sha)
+	}
+
+	return shas, rows.Err()
+}
+
+// PRBranchData represents PR branch information for graph linking
+type PRBranchData struct {
+	Number         int
+	HeadRef        string
+	BaseRef        string
+	Merged         bool
+	MergeCommitSHA *string
+}
+
+// GetProcessedPRBranchData retrieves PR branch information for all processed PRs
+func (c *StagingClient) GetProcessedPRBranchData(ctx context.Context, repoID int64) ([]PRBranchData, error) {
+	query := `
+		SELECT number, head_ref, base_ref, merged, merge_commit_sha
+		FROM github_pull_requests
+		WHERE repo_id = $1 AND processed_at IS NOT NULL
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query PRs: %w", err)
+	}
+	defer rows.Close()
+
+	var prs []PRBranchData
+	for rows.Next() {
+		var pr PRBranchData
+		if err := rows.Scan(&pr.Number, &pr.HeadRef, &pr.BaseRef, &pr.Merged, &pr.MergeCommitSHA); err != nil {
+			return nil, fmt.Errorf("failed to scan PR: %w", err)
+		}
+		prs = append(prs, pr)
+	}
+
+	return prs, rows.Err()
+}
