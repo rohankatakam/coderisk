@@ -240,14 +240,14 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		matches := resolvedFilesMap[file]
 		slog.Info("processing file", "file", file, "matches", len(matches))
 
-		// Determine which path(s) to use for queries
-		var queryPath string
+		// Collect ALL historical paths for this file (current + renames)
+		var queryPaths []string
 		var resolutionMethod string
 		var resolutionConfidence float64
 
 		if len(matches) == 0 {
 			// New file - no historical data in graph
-			queryPath = file
+			queryPaths = []string{file}
 			resolutionMethod = "new-file"
 			resolutionConfidence = 0.0
 
@@ -255,26 +255,33 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				fmt.Printf("\nℹ️  %s: New file (no historical data)\n", file)
 			}
 		} else {
-			// Use highest confidence match
-			queryPath = matches[0].HistoricalPath
+			// Use ALL matched paths to capture full historical data
+			for _, match := range matches {
+				queryPaths = append(queryPaths, match.HistoricalPath)
+			}
+
+			// Report highest confidence match for logging
 			resolutionMethod = matches[0].Method
 			resolutionConfidence = matches[0].Confidence
 
-			if !quiet && !preCommit && resolutionMethod == "git-follow" {
-				fmt.Printf("\n🔍 %s: Resolved via git history\n", file)
-				fmt.Printf("   Historical path: %s (confidence: %.0f%%)\n", queryPath, resolutionConfidence*100)
+			if !quiet && !preCommit && len(matches) > 1 {
+				fmt.Printf("\n🔍 %s: Found %d historical paths (merging data)\n", file, len(matches))
+				for _, match := range matches {
+					fmt.Printf("   - %s (%s, %.0f%% confidence)\n", match.HistoricalPath, match.Method, match.Confidence*100)
+				}
 			}
 		}
 
 		// Phase 1: Baseline Assessment with Adaptive Config
+		// CRITICAL: Pass ALL historical paths to capture full history across renames
 		slog.Info("=== PHASE 1 METRICS STAGE ===",
 			"file", file,
-			"query_path", queryPath,
+			"query_paths", queryPaths,
 			"resolution_method", resolutionMethod,
 			"resolution_confidence", resolutionConfidence)
 
 		phase1Start := time.Now()
-		adaptiveResult, err := metrics.CalculatePhase1WithConfig(ctx, neo4jClient, repoID, queryPath, riskConfig)
+		adaptiveResult, err := metrics.CalculatePhase1WithMultiplePaths(ctx, neo4jClient, repoID, queryPaths, riskConfig)
 		phase1Duration := time.Since(phase1Start)
 
 		if err != nil {

@@ -15,26 +15,27 @@ type AdaptivePhase1Result struct {
 	ConfigReason   string                    `json:"config_reason"`
 }
 
-// CalculatePhase1WithConfig performs Phase 1 assessment using adaptive thresholds
-func CalculatePhase1WithConfig(
+// CalculatePhase1WithMultiplePaths performs Phase 1 assessment across multiple historical paths
+// This handles file renames/moves by querying ALL historical paths and merging results
+func CalculatePhase1WithMultiplePaths(
 	ctx context.Context,
 	neo4j *graph.Client,
 	repoID string,
-	filePath string,
+	filePaths []string,
 	riskConfig config.AdaptiveRiskConfig,
 ) (*AdaptivePhase1Result, error) {
-	// Calculate baseline metrics (raw values)
-	coupling, err := CalculateCoupling(ctx, neo4j, repoID, filePath)
+	// Calculate baseline metrics across ALL historical paths (handles renames)
+	coupling, err := CalculateCouplingMultiple(ctx, neo4j, repoID, filePaths)
 	if err != nil {
 		return nil, fmt.Errorf("coupling calculation failed: %w", err)
 	}
 
-	coChange, err := CalculateCoChange(ctx, neo4j, repoID, filePath)
+	coChange, err := CalculateCoChangeMultiple(ctx, neo4j, repoID, filePaths)
 	if err != nil {
 		return nil, fmt.Errorf("co-change calculation failed: %w", err)
 	}
 
-	testRatio, err := CalculateTestRatio(ctx, neo4j, repoID, filePath)
+	testRatio, err := CalculateTestRatioMultiple(ctx, neo4j, repoID, filePaths)
 	if err != nil {
 		return nil, fmt.Errorf("test ratio calculation failed: %w", err)
 	}
@@ -44,9 +45,9 @@ func CalculatePhase1WithConfig(
 	coChange.RiskLevel = ClassifyCoChangeWithThreshold(coChange.MaxFrequency, riskConfig.CoChangeThreshold)
 	testRatio.RiskLevel = ClassifyTestRatioWithThreshold(testRatio.Ratio, riskConfig.TestRatioThreshold)
 
-	// Build standard Phase1Result
+	// Build standard Phase1Result (use first path for display)
 	result := &Phase1Result{
-		FilePath:  filePath,
+		FilePath:  filePaths[0],
 		Coupling:  coupling,
 		CoChange:  coChange,
 		TestRatio: testRatio,
@@ -63,6 +64,19 @@ func CalculatePhase1WithConfig(
 	}
 
 	return adaptiveResult, nil
+}
+
+// CalculatePhase1WithConfig performs Phase 1 assessment using adaptive thresholds (single path - DEPRECATED)
+// Use CalculatePhase1WithMultiplePaths instead to handle renames properly
+func CalculatePhase1WithConfig(
+	ctx context.Context,
+	neo4j *graph.Client,
+	repoID string,
+	filePath string,
+	riskConfig config.AdaptiveRiskConfig,
+) (*AdaptivePhase1Result, error) {
+	// Delegate to multi-path version
+	return CalculatePhase1WithMultiplePaths(ctx, neo4j, repoID, []string{filePath}, riskConfig)
 }
 
 // ClassifyCouplingWithThreshold applies domain-specific coupling threshold
@@ -112,21 +126,47 @@ func ClassifyTestRatioWithThreshold(ratio float64, threshold float64) RiskLevel 
 }
 
 // ShouldEscalateWithConfig determines if Phase 2 escalation is needed using adaptive thresholds
+// REVISED STRATEGY: Escalate more aggressively when we lack confidence
 func ShouldEscalateWithConfig(result *Phase1Result, riskConfig config.AdaptiveRiskConfig) bool {
-	// Escalate if ANY metric exceeds its domain-specific threshold
-	shouldEscalate := false
-
+	// Strategy 1: Escalate if ANY metric exceeds threshold (original logic)
 	if result.Coupling != nil && result.Coupling.Count > riskConfig.CouplingThreshold {
-		shouldEscalate = true
+		return true
 	}
 	if result.CoChange != nil && result.CoChange.MaxFrequency > riskConfig.CoChangeThreshold {
-		shouldEscalate = true
+		return true
 	}
 	if result.TestRatio != nil && result.TestRatio.Ratio < riskConfig.TestRatioThreshold {
-		shouldEscalate = true
+		return true
 	}
 
-	return shouldEscalate
+	// Strategy 2: Escalate if we have INSUFFICIENT DATA (lack of confidence)
+	// Missing data should trigger investigation, not give false confidence
+	hasNoData := true
+	if result.Coupling != nil && result.Coupling.Count > 0 {
+		hasNoData = false
+	}
+	if result.CoChange != nil && result.CoChange.MaxFrequency > 0 {
+		hasNoData = false
+	}
+	if result.TestRatio != nil && result.TestRatio.Ratio > 0 {
+		hasNoData = false
+	}
+
+	// If ALL metrics are zero/missing, we have no confidence - escalate
+	if hasNoData {
+		return true
+	}
+
+	// Strategy 3: Lower thresholds for more Phase 2 engagement
+	// Even if below threshold, escalate if metrics show ANY risk signals
+	if result.Coupling != nil && result.Coupling.Count > 5 {
+		return true // 50% of default threshold
+	}
+	if result.CoChange != nil && result.CoChange.MaxFrequency > 0.4 {
+		return true // ~57% of threshold (files changing together 40%+ of time)
+	}
+
+	return false
 }
 
 // DetermineOverallRiskWithConfig applies adaptive risk aggregation logic

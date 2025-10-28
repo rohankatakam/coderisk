@@ -92,3 +92,14 @@ func (c *CoChangeResult) FormatEvidence() string {
 func (c *CoChangeResult) ShouldEscalate() bool {
 	return c.MaxFrequency > 0.7 // frequency > 0.7 → escalate
 }
+
+// CalculateCoChangeMultiple computes co-change across multiple file paths
+func CalculateCoChangeMultiple(ctx context.Context, neo4j *graph.Client, repoID string, filePaths []string) (*CoChangeResult, error) {
+	if len(filePaths) == 0 {
+		return &CoChangeResult{}, nil
+	}
+	// TODO: Implement proper multi-path query
+	// For now, use first path as proxy
+	return CalculateCoChange(ctx, neo4j, repoID, filePaths[0])
+}
+

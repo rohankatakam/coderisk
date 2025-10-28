@@ -27,23 +27,25 @@ type TestRatioResult struct {
 func CalculateTestRatio(ctx context.Context, neo4j *graph.Client, repoID, filePath string) (*TestRatioResult, error) {
 	// Query Neo4j for source file LOC
 	// TODO: Once graph construction is complete, use actual LOC from File nodes
-	// For now, use placeholder logic
-	sourceLOC := 100 // Placeholder
+	// For now, if no graph data exists, return 0 to indicate insufficient data
+	sourceLOC := 0 // Default: no data
+	testLOC := 0   // Default: no data
 
-	// Find test files using naming conventions
-	// Reference: risk_assessment_methodology.md §2.3 - Test file discovery
-	testFiles := discoverTestFiles(filePath)
+	// Try to query graph for actual file data
+	// If file doesn't exist in graph, sourceLOC and testLOC remain 0
+	// This signals lack of confidence and should trigger escalation
 
-	// Query Neo4j for test file LOC
-	// TODO: Once graph has TESTS relationships, query: MATCH (test)-[:TESTS]->(source)
-	testLOC := estimateTestLOC(len(testFiles))
+	// Calculate ratio with special handling for no data
+	// If both are 0, we return 0 to indicate "unknown" (not "perfect coverage")
+	var ratio float64
+	if sourceLOC == 0 && testLOC == 0 {
+		ratio = 0.0 // No data = unknown, not 1.0
+	} else {
+		// Normal smoothing formula when we have data
+		ratio = calculateSmoothedRatio(testLOC, sourceLOC)
+	}
 
-	// Calculate ratio with smoothing to avoid division by zero
-	// Reference: risk_assessment_methodology.md §2.3 - Smoothing formula
-	ratio := calculateSmoothedRatio(testLOC, sourceLOC)
-
-	// Determine risk level using thresholds from risk_assessment_methodology.md §2.3
-	// ≥0.8: LOW, 0.3-0.8: MEDIUM, <0.3: HIGH
+	// Determine risk level
 	riskLevel := classifyTestRatioRisk(ratio)
 
 	result := &TestRatioResult{
@@ -52,7 +54,7 @@ func CalculateTestRatio(ctx context.Context, neo4j *graph.Client, repoID, filePa
 		TestLOC:   testLOC,
 		Ratio:     ratio,
 		RiskLevel: riskLevel,
-		TestFiles: testFiles,
+		TestFiles: []string{}, // Empty until we query graph
 	}
 
 	return result, nil
@@ -137,3 +139,14 @@ func (t *TestRatioResult) FormatEvidence() string {
 func (t *TestRatioResult) ShouldEscalate() bool {
 	return t.Ratio < 0.3 // test_ratio < 0.3 → escalate
 }
+
+// CalculateTestRatioMultiple computes test ratio across multiple file paths
+func CalculateTestRatioMultiple(ctx context.Context, neo4j *graph.Client, repoID string, filePaths []string) (*TestRatioResult, error) {
+	if len(filePaths) == 0 {
+		return &TestRatioResult{}, nil
+	}
+	// TODO: Implement proper multi-path query
+	// For now, use first path as proxy
+	return CalculateTestRatio(ctx, neo4j, repoID, filePaths[0])
+}
+

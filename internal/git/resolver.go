@@ -39,21 +39,37 @@ func NewFileResolver(repoPath string, graphClient GraphQueryer) *FileResolver {
 
 // Resolve finds historical paths for a current file path
 // Returns array of matches sorted by confidence (highest first)
+// CRITICAL FIX: Always check BOTH exact AND git-follow to capture rename history
 func (r *FileResolver) Resolve(ctx context.Context, currentPath string) ([]FileMatch, error) {
+	var allMatches []FileMatch
+
 	// Level 1: Exact match
 	exactMatches, err := r.exactMatch(ctx, currentPath)
 	if err == nil && len(exactMatches) > 0 {
-		return exactMatches, nil
+		allMatches = append(allMatches, exactMatches...)
 	}
 
-	// Level 2: Git log --follow
+	// Level 2: Git log --follow (ALWAYS check, even if exact match found)
+	// This captures historical paths before renames/moves
 	gitFollowMatches, err := r.gitFollowMatch(ctx, currentPath)
-	if err != nil {
-		// If git follow fails, return empty result (file may be new)
-		return []FileMatch{}, nil
+	if err == nil && len(gitFollowMatches) > 0 {
+		// Deduplicate: only add paths not already in allMatches
+		for _, gitMatch := range gitFollowMatches {
+			isDuplicate := false
+			for _, existing := range allMatches {
+				if existing.HistoricalPath == gitMatch.HistoricalPath {
+					isDuplicate = true
+					break
+				}
+			}
+			if !isDuplicate {
+				allMatches = append(allMatches, gitMatch)
+			}
+		}
 	}
 
-	return gitFollowMatches, nil
+	// Return all unique historical paths (current + renamed)
+	return allMatches, nil
 }
 
 // BatchResolve resolves multiple files in parallel

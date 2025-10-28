@@ -16,15 +16,13 @@ type CouplingResult struct {
 	Dependencies []string  `json:"dependencies"` // List of dependent files (optional)
 }
 
-// CalculateCoupling computes structural coupling for a file
-// Reference: risk_assessment_methodology.md §2.1
-// Formula: coupling_score(file) = COUNT(DISTINCT neighbor) WHERE (file)-[:IMPORTS|CALLS]-(neighbor)
-func CalculateCoupling(ctx context.Context, neo4j *graph.Client, repoID, filePath string) (*CouplingResult, error) {
-	// Query Neo4j for coupling count
-	// Reference: risk_assessment_methodology.md §2.1 - Graph query
-	count, err := neo4j.QueryCoupling(ctx, filePath)
+// CalculateCouplingMultiple computes structural coupling across multiple file paths
+// This handles file renames by querying ALL historical paths and merging results
+func CalculateCouplingMultiple(ctx context.Context, neo4j *graph.Client, repoID string, filePaths []string) (*CouplingResult, error) {
+	// Query Neo4j for coupling count across ALL paths
+	count, err := neo4j.QueryCouplingMultiple(ctx, filePaths)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query coupling for %s: %w", filePath, err)
+		return nil, fmt.Errorf("failed to query coupling for %v: %w", filePaths, err)
 	}
 
 	// Determine risk level using thresholds from risk_assessment_methodology.md §2.1
@@ -32,13 +30,21 @@ func CalculateCoupling(ctx context.Context, neo4j *graph.Client, repoID, filePat
 	riskLevel := classifyCouplingRisk(count)
 
 	result := &CouplingResult{
-		FilePath:  filePath,
+		FilePath:  filePaths[0], // Use first path for display
 		Count:     count,
 		RiskLevel: riskLevel,
 		// Dependencies list omitted for performance (can add with separate query)
 	}
 
 	return result, nil
+}
+
+// CalculateCoupling computes structural coupling for a file (single path)
+// Reference: risk_assessment_methodology.md §2.1
+// Formula: coupling_score(file) = COUNT(DISTINCT neighbor) WHERE (file)-[:IMPORTS|CALLS]-(neighbor)
+func CalculateCoupling(ctx context.Context, neo4j *graph.Client, repoID, filePath string) (*CouplingResult, error) {
+	// Delegate to multi-path version
+	return CalculateCouplingMultiple(ctx, neo4j, repoID, []string{filePath})
 }
 
 // classifyCouplingRisk applies threshold logic from risk_assessment_methodology.md §2.1

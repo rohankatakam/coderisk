@@ -253,3 +253,52 @@ func (c *Client) Driver() neo4j.DriverWithContext {
 func (c *Client) Database() string {
 	return c.database
 }
+
+// QueryCouplingMultiple queries coupling across multiple file paths (handles renames)
+func (c *Client) QueryCouplingMultiple(ctx context.Context, filePaths []string) (int, error) {
+	if len(filePaths) == 0 {
+		return 0, nil
+	}
+
+	// Cypher query with IN clause to match ANY of the historical paths
+	query := `
+		MATCH (f:File)-[:IMPORTS|CALLS]-(dep)
+		WHERE f.path IN $paths
+		RETURN count(DISTINCT dep) as count
+	`
+
+	queryCtx := ctx
+	txConfig := GetConfigForOperation("metric_query")
+	if txConfig.Timeout > 0 {
+		var cancel context.CancelFunc
+		queryCtx, cancel = context.WithTimeout(ctx, txConfig.Timeout)
+		defer cancel()
+	}
+
+	result, err := neo4j.ExecuteQuery(queryCtx, c.driver, query,
+		map[string]any{"paths": filePaths},
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithReadersRouting())
+
+	if err != nil {
+		return 0, fmt.Errorf("coupling query failed for %v: %w", filePaths, err)
+	}
+
+	if len(result.Records) == 0 {
+		c.logger.Debug("files not found in graph", "paths", filePaths)
+		return 0, nil
+	}
+
+	count, ok := result.Records[0].Get("count")
+	if !ok {
+		return 0, fmt.Errorf("coupling query returned no count for %v", filePaths)
+	}
+
+	countInt, ok := count.(int64)
+	if !ok {
+		return 0, fmt.Errorf("unexpected count type: %T", count)
+	}
+
+	c.logger.Debug("coupling calculated", "files", filePaths, "count", int(countInt))
+	return int(countInt), nil
+}
