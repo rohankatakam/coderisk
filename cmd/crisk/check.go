@@ -151,7 +151,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	defer sqlxDB.Close()
 
 	// Create incidents database for Phase 2
-	incidentsDB := incidents.NewDatabase(sqlxDB)
+	_ = incidents.NewDatabase(sqlxDB) // Not used in new agent system
 
 	// Note: No longer using metrics.Registry - using adaptive config directly
 	// registry := metrics.NewRegistry(neo4jClient, redisClient, pgClient)
@@ -221,16 +221,24 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Create file resolver to bridge current paths to historical graph data
 	// Uses 2-level strategy: exact match (100% confidence) -> git log --follow (95% confidence)
+	slog.Info("=== FILE RESOLUTION STAGE ===", "file_count", len(files))
 	resolver := git.NewFileResolver(repoRoot, neo4jClient)
 
 	// Batch resolve all files in parallel
+	resolveStart := time.Now()
 	resolvedFilesMap, err := resolver.BatchResolve(ctx, files)
+	resolveDuration := time.Since(resolveStart)
 	if err != nil {
+		slog.Error("file resolution failed", "error", err, "duration", resolveDuration)
 		return fmt.Errorf("file resolution failed: %w", err)
 	}
+	slog.Info("file resolution complete",
+		"duration", resolveDuration,
+		"files_resolved", len(resolvedFilesMap))
 
 	for _, file := range files {
 		matches := resolvedFilesMap[file]
+		slog.Info("processing file", "file", file, "matches", len(matches))
 
 		// Determine which path(s) to use for queries
 		var queryPath string
@@ -259,11 +267,28 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		}
 
 		// Phase 1: Baseline Assessment with Adaptive Config
+		slog.Info("=== PHASE 1 METRICS STAGE ===",
+			"file", file,
+			"query_path", queryPath,
+			"resolution_method", resolutionMethod,
+			"resolution_confidence", resolutionConfidence)
+
+		phase1Start := time.Now()
 		adaptiveResult, err := metrics.CalculatePhase1WithConfig(ctx, neo4jClient, repoID, queryPath, riskConfig)
+		phase1Duration := time.Since(phase1Start)
+
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
+			slog.Error("phase 1 failed", "error", err, "duration", phase1Duration)
 			continue
 		}
+
+		slog.Info("phase 1 complete",
+			"duration", phase1Duration,
+			"overall_risk", adaptiveResult.OverallRisk,
+			"should_escalate", adaptiveResult.ShouldEscalate,
+			"coupling_count", adaptiveResult.Phase1Result.Coupling.Count,
+			"cochange_max_freq", adaptiveResult.Phase1Result.CoChange.MaxFrequency)
 
 		// Phase 0 escalation removed - rely solely on Phase 1 metrics
 
@@ -297,83 +322,112 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			// Phase 2: LLM Investigation
+			// Phase 2: Agent-Based Investigation with Complete Pipeline
 			// 12-factor: Factor 8 - Own your control flow (selective investigation)
 			if !preCommit {
-				fmt.Println("\n🔍 Escalating to Phase 2 (LLM investigation)...")
+				fmt.Println("\n🔍 Escalating to Phase 2 (Agent-based investigation)...")
 			}
 
-			// Get repository path for temporal analysis
-			repoPath := getRepoPath()
+			slog.Info("=== PHASE 2 PIPELINE START ===",
+				"file", file,
+				"phase1_risk", adaptiveResult.OverallRisk)
 
-			// Create real clients for evidence collection
-			temporalClient, err := agent.NewRealTemporalClient(repoPath)
-			if err != nil {
-				slog.Warn("temporal client creation failed", "error", err)
-				temporalClient = nil // Continue without temporal data
+			// STEP 1: Get git information
+			slog.Info("STEP 1: Extracting git information")
+			diff, diffErr := git.GetFileDiff(file)
+			if diffErr != nil {
+				slog.Warn("failed to get diff", "error", diffErr)
+				diff = ""
 			}
-
-			// Create incidents client
-			var incidentsClient *agent.RealIncidentsClient
-			if incidentsDB != nil {
-				incidentsClient = agent.NewRealIncidentsClient(incidentsDB)
+			linesAdded, linesDeleted := git.CountDiffLines(diff)
+			changeStatus, statusErr := git.DetectChangeStatus(file)
+			if statusErr != nil {
+				slog.Warn("failed to detect change status", "error", statusErr)
+				changeStatus = "MODIFIED"
 			}
+			slog.Info("STEP 1 complete",
+				"lines_added", linesAdded,
+				"lines_deleted", linesDeleted,
+				"change_status", changeStatus,
+				"diff_size", len(diff))
 
-			// Create LLM client
+			// STEP 2: Build FileChangeContext
+			slog.Info("STEP 2: Building file change context")
+			fileContext := agent.FromPhase1Result(
+				file,
+				changeStatus,
+				linesAdded,
+				linesDeleted,
+				matches,
+				git.TruncateDiffForPrompt(diff, 500),
+				adaptiveResult.Phase1Result,
+			)
+			slog.Info("STEP 2 complete",
+				"resolution_matches", len(fileContext.ResolutionMatches),
+				"coupling_score", fileContext.CouplingScore,
+				"cochange_freq", fileContext.CoChangeFrequency)
+
+			// STEP 3: Build kickoff prompt
+			slog.Info("STEP 3: Building kickoff prompt")
+			promptBuilder := agent.NewKickoffPromptBuilder([]agent.FileChangeContext{fileContext})
+			kickoffPrompt := promptBuilder.BuildKickoffPrompt()
+			slog.Info("STEP 3 complete",
+				"prompt_length", len(kickoffPrompt),
+				"estimated_tokens", len(kickoffPrompt)/4)
+
+			// STEP 4: Create LLM client and investigator
+			slog.Info("STEP 4: Creating investigator")
 			llmClient, err := agent.NewLLMClient(openaiAPIKey)
 			if err != nil {
 				fmt.Printf("❌ LLM client error: %v\n", err)
+				slog.Error("failed to create LLM client", "error", err)
 				continue
 			}
 
-			// Create simple investigator (MVP-aligned single LLM call)
-			// 12-factor: Factor 10 - Small, focused agents (investigator is specialized)
-			// Note: Passing nil for graph client as GetNeighbors not yet implemented in graph.Client
-			investigator := agent.NewSimpleInvestigator(llmClient, temporalClient, incidentsClient, nil)
+			// Create Postgres adapter
+			pgAdapter := agent.NewPostgresAdapter(pgClient)
 
-			// Build investigation request from Phase 1 result
-			// Timeout increased to 60s to accommodate complex file analysis and API latency
+			// Create RiskInvestigator with graph and postgres clients
+			investigator := agent.NewRiskInvestigator(llmClient, neo4jClient, pgAdapter)
+			slog.Info("STEP 4 complete", "investigator_created", true)
+
+			// STEP 5: Run agent investigation
+			slog.Info("STEP 5: Running agent investigation")
 			invCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
 
-			slog.Info("phase 2 escalation",
-				"file", file,
-				"phase1_risk", adaptiveResult.OverallRisk,
-				"api_key_present", true)
+			investigationStart := time.Now()
+			assessment, err := investigator.Investigate(invCtx, kickoffPrompt)
+			investigationDuration := time.Since(investigationStart)
 
-			// Create investigation request
-			invReq := agent.InvestigationRequest{
-				FilePath:   file,
-				ChangeType: "modify", // TODO: detect from git diff
-				Baseline: agent.BaselineMetrics{
-					CouplingScore:     getCouplingScore(adaptiveResult.Phase1Result),
-					CoChangeFrequency: getCoChangeScore(adaptiveResult.Phase1Result),
-					IncidentCount:     0, // TODO: extract from Phase 1
-				},
-			}
-
-			// Run Phase 2 investigation
-			assessment, err := investigator.Investigate(invCtx, invReq)
 			if err != nil {
 				fmt.Printf("⚠️  Investigation failed: %v\n", err)
+				slog.Error("investigation failed", "error", err, "duration", investigationDuration)
 				continue
 			}
 
-			slog.Info("phase 2 complete",
-				"file", file,
+			slog.Info("STEP 5 complete",
+				"duration", investigationDuration,
 				"final_risk", assessment.RiskLevel,
-				"confidence", assessment.Confidence)
+				"confidence", assessment.Confidence,
+				"hops", len(assessment.Investigation.Hops),
+				"total_tokens", assessment.Investigation.TotalTokens)
+
+			slog.Info("=== PHASE 2 PIPELINE COMPLETE ===",
+				"file", file,
+				"risk", assessment.RiskLevel,
+				"total_duration", investigationDuration)
 
 			// Display results based on verbosity mode
 			if aiMode {
 				// AI Mode: Include investigation trace in JSON
-				output.DisplayPhase2JSON(assessment)
+				output.DisplayPhase2JSON(*assessment)
 			} else if explain {
 				// Explain Mode: Show full hop-by-hop trace
-				output.DisplayPhase2Trace(assessment)
+				output.DisplayPhase2Trace(*assessment)
 			} else {
 				// Standard Mode: Show summary with recommendations
-				output.DisplayPhase2Summary(assessment)
+				output.DisplayPhase2Summary(*assessment)
 			}
 		}
 	}

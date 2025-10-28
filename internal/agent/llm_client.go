@@ -3,8 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 
-	openai "github.com/sashabaranov/go-openai"
+	"github.com/openai/openai-go/v3"
 )
 
 // LLMClientInterface defines the interface for LLM clients
@@ -15,8 +16,8 @@ type LLMClientInterface interface {
 
 // LLMClient wraps OpenAI SDK for GPT-4o access
 type LLMClient struct {
-	openaiClient *openai.Client
-	model        string
+	openaiClient openai.Client
+	model        openai.ChatModel
 }
 
 // NewLLMClient creates a new OpenAI LLM client
@@ -25,31 +26,30 @@ func NewLLMClient(apiKey string) (*LLMClient, error) {
 		return nil, fmt.Errorf("OpenAI API key is required")
 	}
 
-	client := openai.NewClient(apiKey)
+	// Set API key in environment for the official SDK
+	os.Setenv("OPENAI_API_KEY", apiKey)
+
 	return &LLMClient{
-		openaiClient: client,
-		model:        "gpt-4o", // Default to GPT-4o
+		openaiClient: openai.NewClient(),
+		model:        openai.ChatModelGPT4o, // Default to GPT-4o
 	}, nil
 }
 
 // SetModel allows overriding the default model
 func (c *LLMClient) SetModel(model string) {
-	c.model = model
+	c.model = openai.ChatModel(model)
 }
 
 // Query sends a prompt to OpenAI and returns the response
 func (c *LLMClient) Query(ctx context.Context, prompt string) (string, int, error) {
-	req := openai.ChatCompletionRequest{
-		Model: c.model,
-		Messages: []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleUser,
-				Content: prompt,
-			},
+	params := openai.ChatCompletionNewParams{
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage(prompt),
 		},
+		Model: c.model,
 	}
 
-	completion, err := c.openaiClient.CreateChatCompletion(ctx, req)
+	completion, err := c.openaiClient.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return "", 0, fmt.Errorf("OpenAI API error: %w", err)
 	}
@@ -59,7 +59,7 @@ func (c *LLMClient) Query(ctx context.Context, prompt string) (string, int, erro
 	}
 
 	response := completion.Choices[0].Message.Content
-	tokens := completion.Usage.TotalTokens
+	tokens := int(completion.Usage.TotalTokens)
 
 	return response, tokens, nil
 }
