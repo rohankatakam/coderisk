@@ -6,37 +6,40 @@ import (
 	"log"
 
 	"github.com/rohankatakam/coderisk/internal/database"
+	"github.com/rohankatakam/coderisk/internal/github"
 )
 
-// IssueLinker creates Issue nodes and FIXED_BY edges in the graph
+// IssueLinker creates Issue nodes and FIXED_BY/ASSOCIATED_WITH edges in the graph
 // Reference: REVISED_MVP_STRATEGY.md - Phase 3: Merge and Create Edges
 type IssueLinker struct {
-	stagingDB *database.StagingClient
-	backend   Backend
+	stagingDB      *database.StagingClient
+	backend        Backend
+	entityResolver *github.EntityResolver
 }
 
 // NewIssueLinker creates an issue linker
 func NewIssueLinker(stagingDB *database.StagingClient, backend Backend) *IssueLinker {
 	return &IssueLinker{
-		stagingDB: stagingDB,
-		backend:   backend,
+		stagingDB:      stagingDB,
+		backend:        backend,
+		entityResolver: github.NewEntityResolver(stagingDB),
 	}
 }
 
-// LinkIssues creates FIXED_BY edges based on extracted references
+// LinkIssues creates FIXED_BY and ASSOCIATED_WITH edges based on extracted references
 // Note: Issue nodes are already created by processIssues in builder.go
 // Reference: REVISED_MVP_STRATEGY.md - Bidirectional confidence boost
 func (l *IssueLinker) LinkIssues(ctx context.Context, repoID int64) (*BuildStats, error) {
 	log.Printf("🔗 Linking issues to commits and PRs...")
 	stats := &BuildStats{}
 
-	// Create FIXED_BY edges from extracted references
-	edgeStats, err := l.createFixedByEdges(ctx, repoID)
+	// Create edges from extracted references (FIXED_BY + ASSOCIATED_WITH)
+	edgeStats, err := l.createIncidentEdges(ctx, repoID)
 	if err != nil {
-		return stats, fmt.Errorf("failed to create FIXED_BY edges: %w", err)
+		return stats, fmt.Errorf("failed to create incident edges: %w", err)
 	}
 	stats.Edges += edgeStats.Edges
-	log.Printf("  ✓ Created %d FIXED_BY edges", edgeStats.Edges)
+	log.Printf("  ✓ Created %d incident edges", edgeStats.Edges)
 
 	return stats, nil
 }
@@ -93,8 +96,8 @@ func (l *IssueLinker) createIssueNodes(ctx context.Context, repoID int64) (*Buil
 	return stats, nil
 }
 
-// createFixedByEdges creates FIXED_BY edges based on extracted references
-func (l *IssueLinker) createFixedByEdges(ctx context.Context, repoID int64) (*BuildStats, error) {
+// createIncidentEdges creates FIXED_BY and ASSOCIATED_WITH edges with entity resolution
+func (l *IssueLinker) createIncidentEdges(ctx context.Context, repoID int64) (*BuildStats, error) {
 	stats := &BuildStats{}
 
 	// Get all extracted references
@@ -110,33 +113,64 @@ func (l *IssueLinker) createFixedByEdges(ctx context.Context, repoID int64) (*Bu
 	// Merge bidirectional references and boost confidence
 	mergedRefs := l.mergeReferences(refs)
 
-	// Create edges
+	// Create edges with entity resolution
 	var edges []GraphEdge
+	skippedLowConf := 0
+	skippedNotFound := 0
+
 	for _, ref := range mergedRefs {
-		// Only create edges for "fixes" action (not "mentions")
-		if ref.Action != "fixes" {
+		// Skip low-confidence references
+		if ref.Confidence < 0.4 {
+			skippedLowConf++
 			continue
 		}
 
-		// Only create edges with sufficient confidence
-		if ref.Confidence < 0.75 {
+		// Resolve entity type: is ref.IssueNumber actually an Issue or PR?
+		entityType, _, err := l.entityResolver.ResolveEntity(ctx, repoID, ref.IssueNumber)
+		if err != nil {
+			// Entity not found (likely outside 90-day window)
+			fmt.Printf("  ⚠️  Entity #%d not found in database: %v\n", ref.IssueNumber, err)
+			skippedNotFound++
 			continue
 		}
 
-		issueID := fmt.Sprintf("issue:%d", ref.IssueNumber)
+		fmt.Printf("  ✓ Entity #%d resolved as %s (action: %s, confidence: %.2f)\n",
+			ref.IssueNumber, entityType, ref.Action, ref.Confidence)
+
+		// Determine edge label and source node
+		var edgeLabel string
+		var sourceID string
+
+		if entityType == github.EntityTypeIssue && ref.Action == "fixes" {
+			// Issue resolved by commit/PR → use specific FIXED_BY edge
+			edgeLabel = "FIXED_BY"
+			sourceID = fmt.Sprintf("issue:%d", ref.IssueNumber)
+			fmt.Printf("    → Creating FIXED_BY edge from %s\n", sourceID)
+		} else {
+			// PR/other entity or non-fix action → use generic ASSOCIATED_WITH edge
+			edgeLabel = "ASSOCIATED_WITH"
+			if entityType == github.EntityTypePR {
+				sourceID = fmt.Sprintf("pr:%d", ref.IssueNumber)
+				fmt.Printf("    → Creating ASSOCIATED_WITH edge from PR#%d\n", ref.IssueNumber)
+			} else {
+				sourceID = fmt.Sprintf("issue:%d", ref.IssueNumber)
+				fmt.Printf("    → Creating ASSOCIATED_WITH edge from Issue#%d\n", ref.IssueNumber)
+			}
+		}
 
 		// Create edge to commit if available
 		if ref.CommitSHA != nil {
 			commitID := fmt.Sprintf("commit:%s", *ref.CommitSHA)
 
 			edge := GraphEdge{
-				Label: "FIXED_BY",
-				From:  issueID,
+				Label: edgeLabel,
+				From:  sourceID,
 				To:    commitID,
 				Properties: map[string]interface{}{
-					"confidence":       ref.Confidence,
-					"detection_method": ref.DetectionMethod,
-					"extracted_from":   ref.ExtractedFrom,
+					"relationship_type": ref.Action,
+					"confidence":        ref.Confidence,
+					"detected_via":      ref.DetectionMethod,
+					"rationale":         fmt.Sprintf("Extracted from %s", ref.ExtractedFrom),
 				},
 			}
 
@@ -148,13 +182,14 @@ func (l *IssueLinker) createFixedByEdges(ctx context.Context, repoID int64) (*Bu
 			prID := fmt.Sprintf("pr:%d", *ref.PRNumber)
 
 			edge := GraphEdge{
-				Label: "FIXED_BY",
-				From:  issueID,
+				Label: edgeLabel,
+				From:  sourceID,
 				To:    prID,
 				Properties: map[string]interface{}{
-					"confidence":       ref.Confidence,
-					"detection_method": ref.DetectionMethod,
-					"extracted_from":   ref.ExtractedFrom,
+					"relationship_type": ref.Action,
+					"confidence":        ref.Confidence,
+					"detected_via":      ref.DetectionMethod,
+					"rationale":         fmt.Sprintf("Extracted from %s", ref.ExtractedFrom),
 				},
 			}
 
@@ -163,6 +198,11 @@ func (l *IssueLinker) createFixedByEdges(ctx context.Context, repoID int64) (*Bu
 	}
 
 	// Create all edges
+	fmt.Printf("\n  📊 Summary: %d references processed\n", len(mergedRefs))
+	fmt.Printf("    • Skipped (low confidence): %d\n", skippedLowConf)
+	fmt.Printf("    • Skipped (not found): %d\n", skippedNotFound)
+	fmt.Printf("    • Edges to create: %d\n\n", len(edges))
+
 	if len(edges) > 0 {
 		if err := l.backend.CreateEdges(ctx, edges); err != nil {
 			return stats, fmt.Errorf("failed to create edges: %w", err)

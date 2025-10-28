@@ -25,11 +25,11 @@ func NewCommitExtractor(llmClient *llm.Client, stagingDB *database.StagingClient
 	}
 }
 
-// CommitReference represents a reference from a commit/PR to an issue
+// CommitReference represents a reference from a commit/PR to an issue/PR
 type CommitReference struct {
-	IssueNumber int     `json:"issue_number"`
-	Action      string  `json:"action"`     // "fixes", "closes", "resolves", "mentions"
-	Confidence  float64 `json:"confidence"` // 0.0 to 1.0
+	TargetID   int     `json:"target_id"`  // Issue or PR number (resolved later)
+	Action     string  `json:"action"`     // "fixes", "closes", "resolves", "mentions"
+	Confidence float64 `json:"confidence"` // 0.0 to 1.0
 }
 
 // ExtractCommitReferences processes all commits and extracts issue references
@@ -113,7 +113,7 @@ func (e *CommitExtractor) ExtractPRReferences(ctx context.Context, repoID int64)
 // processCommitBatch processes a batch of commits
 func (e *CommitExtractor) processCommitBatch(ctx context.Context, repoID int64, commits []database.CommitData) (int, error) {
 	// Build prompt
-	systemPrompt := `You are a Git commit analyzer. Extract issue references from commit messages.
+	systemPrompt := `You are a Git commit analyzer. Extract issue/PR references from commit messages.
 
 Output JSON format:
 {
@@ -121,19 +121,21 @@ Output JSON format:
     {
       "id": "abc123",
       "references": [
-        {"issue_number": 123, "action": "fixes", "confidence": 0.95},
-        {"issue_number": 456, "action": "mentions", "confidence": 0.75}
+        {"target_id": 123, "action": "fixes", "confidence": 0.95},
+        {"target_id": 456, "action": "mentions", "confidence": 0.75}
       ]
     }
   ]
 }
 
 Rules:
-- Look for patterns: "Fixes #123", "Closes #456", "Resolves #789", "Related to #123"
-- Ignore negations: "Don't fix #123", "Not fixing #456"
-- action: "fixes" for closes/resolves/fixes keywords, "mentions" for related/see
-- confidence: 0.9-1.0 for "Fixes #123", 0.7-0.9 for "fix #123", 0.5-0.7 for "related to #123"
-- Extract all issue numbers (digits only, no #)`
+- Extract ONLY the number from patterns like "Fixes #123", "#42", "PR#42"
+- target_id: just the digits (e.g., 123, not "#123" or "PR#123")
+- action: "fixes" for closes/resolves/fixes/fix keywords, "mentions" for related/see/ref
+- confidence: 0.9-1.0 for "Fixes #123", 0.7-0.9 for "fix #123", 0.5-0.7 for "related #123"
+- IGNORE negations: "Don't fix #123", "Not fixing #456"
+- IGNORE discussions: "Similar to #123 but different"
+- IGNORE future plans: "Will fix #123 later", "TODO: fix #123"`
 
 	userPrompt := "Analyze these commits:\n\n"
 	for _, commit := range commits {
@@ -167,7 +169,7 @@ Rules:
 			commitSHA := commit.SHA
 			dbRef := database.IssueCommitRef{
 				RepoID:          repoID,
-				IssueNumber:     ref.IssueNumber,
+				IssueNumber:     ref.TargetID, // Will be resolved to Issue or PR later
 				CommitSHA:       &commitSHA,
 				Action:          ref.Action,
 				Confidence:      ref.Confidence,
@@ -192,7 +194,7 @@ Rules:
 // processPRBatch processes a batch of PRs
 func (e *CommitExtractor) processPRBatch(ctx context.Context, repoID int64, prs []database.PRData) (int, error) {
 	// Build prompt
-	systemPrompt := `You are a GitHub PR analyzer. Extract issue references from PR titles and bodies.
+	systemPrompt := `You are a GitHub PR analyzer. Extract issue/PR references from PR titles and bodies.
 
 Output JSON format:
 {
@@ -200,20 +202,22 @@ Output JSON format:
     {
       "id": "123",
       "references": [
-        {"issue_number": 456, "action": "fixes", "confidence": 0.95},
-        {"issue_number": 789, "action": "mentions", "confidence": 0.75}
+        {"target_id": 456, "action": "fixes", "confidence": 0.95},
+        {"target_id": 789, "action": "mentions", "confidence": 0.75}
       ]
     }
   ]
 }
 
 Rules:
-- Look for patterns: "Fixes #123", "Closes #456", "Resolves #789", "Related to #123"
+- Extract ONLY the number from patterns like "Fixes #123", "#42", "PR#42"
+- target_id: just the digits (e.g., 123, not "#123" or "PR#123")
 - Check both title and body
-- Ignore negations and mentions in code blocks
-- action: "fixes" for closes/resolves/fixes keywords, "mentions" for related/see
-- confidence: 0.9-1.0 for "Fixes #123", 0.7-0.9 for "fix #123", 0.5-0.7 for "related to #123"
-- Extract all issue numbers (digits only, no #)`
+- action: "fixes" for closes/resolves/fixes/fix keywords, "mentions" for related/see/ref
+- confidence: 0.9-1.0 for "Fixes #123", 0.7-0.9 for "fix #123", 0.5-0.7 for "related #123"
+- IGNORE negations and mentions in code blocks
+- IGNORE discussions: "Similar to #123 but different"
+- IGNORE future plans: "Will fix #123 later"`
 
 	userPrompt := "Analyze these PRs:\n\n"
 	for _, pr := range prs {
@@ -251,7 +255,7 @@ Rules:
 			prNumber := pr.Number
 			dbRef := database.IssueCommitRef{
 				RepoID:          repoID,
-				IssueNumber:     ref.IssueNumber,
+				IssueNumber:     ref.TargetID, // Will be resolved to Issue or PR later
 				PRNumber:        &prNumber,
 				Action:          ref.Action,
 				Confidence:      ref.Confidence,

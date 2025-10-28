@@ -48,7 +48,8 @@ type FetchStats struct {
 // This is Priority 6A: GitHub API → PostgreSQL staging
 // Smart checkpointing: skips fetching if data already exists
 // repoPath is the absolute path to the local repository clone (for relative path conversion)
-func (f *Fetcher) FetchAll(ctx context.Context, owner, repo, repoPath string) (int64, *FetchStats, error) {
+// days: number of days to fetch (0 = all history)
+func (f *Fetcher) FetchAll(ctx context.Context, owner, repo, repoPath string, days int) (int64, *FetchStats, error) {
 	log.Printf("🔍 Fetching GitHub data for %s/%s...", owner, repo)
 	stats := &FetchStats{}
 
@@ -66,12 +67,12 @@ func (f *Fetcher) FetchAll(ctx context.Context, owner, repo, repoPath string) (i
 		existingStats = &FetchStats{} // Start fresh if we can't check
 	}
 
-	// 2. Fetch commits (90-day window) - only if missing
+	// 2. Fetch commits (time window based on days parameter) - only if missing
 	if existingStats.Commits > 0 {
 		log.Printf("  ℹ️  Commits already exist (%d), skipping fetch", existingStats.Commits)
 		stats.Commits = existingStats.Commits
 	} else {
-		commitCount, err := f.FetchCommits(ctx, repoID, owner, repo)
+		commitCount, err := f.FetchCommits(ctx, repoID, owner, repo, days)
 		if err != nil {
 			return repoID, stats, fmt.Errorf("fetch commits failed: %w", err)
 		}
@@ -79,12 +80,12 @@ func (f *Fetcher) FetchAll(ctx context.Context, owner, repo, repoPath string) (i
 		log.Printf("  ✓ Fetched %d commits", commitCount)
 	}
 
-	// 3. Fetch issues (90-day filtered) - only if missing
+	// 3. Fetch issues (filtered by days parameter) - only if missing
 	if existingStats.Issues > 0 {
 		log.Printf("  ℹ️  Issues already exist (%d), skipping fetch", existingStats.Issues)
 		stats.Issues = existingStats.Issues
 	} else {
-		issueCount, err := f.FetchIssues(ctx, repoID, owner, repo)
+		issueCount, err := f.FetchIssues(ctx, repoID, owner, repo, days)
 		if err != nil {
 			return repoID, stats, fmt.Errorf("fetch issues failed: %w", err)
 		}
@@ -92,12 +93,12 @@ func (f *Fetcher) FetchAll(ctx context.Context, owner, repo, repoPath string) (i
 		log.Printf("  ✓ Fetched %d issues", issueCount)
 	}
 
-	// 4. Fetch pull requests (90-day filtered) - only if missing
+	// 4. Fetch pull requests (filtered by days parameter) - only if missing
 	if existingStats.PRs > 0 {
 		log.Printf("  ℹ️  Pull requests already exist (%d), skipping fetch", existingStats.PRs)
 		stats.PRs = existingStats.PRs
 	} else {
-		prCount, err := f.FetchPullRequests(ctx, repoID, owner, repo)
+		prCount, err := f.FetchPullRequests(ctx, repoID, owner, repo, days)
 		if err != nil {
 			return repoID, stats, fmt.Errorf("fetch PRs failed: %w", err)
 		}
@@ -178,17 +179,21 @@ func (f *Fetcher) FetchRepository(ctx context.Context, owner, repo, repoPath str
 	return repoID, nil
 }
 
-// FetchCommits fetches commits from the last 90 days
-func (f *Fetcher) FetchCommits(ctx context.Context, repoID int64, owner, repo string) (int, error) {
-	// 90-day window for temporal analysis
-	since := time.Now().AddDate(0, 0, -90)
-
+// FetchCommits fetches commits from the specified time window
+// days: number of days to fetch (0 = all history)
+func (f *Fetcher) FetchCommits(ctx context.Context, repoID int64, owner, repo string, days int) (int, error) {
 	opts := &github.CommitsListOptions{
-		Since: since,
 		ListOptions: github.ListOptions{
 			PerPage: 100,
 		},
 	}
+
+	// If days > 0, apply time window filter
+	if days > 0 {
+		since := time.Now().AddDate(0, 0, -days)
+		opts.Since = since
+	}
+	// If days == 0, no time filter (fetch all history)
 
 	count := 0
 	for {
@@ -267,8 +272,9 @@ func (f *Fetcher) fetchFullCommit(ctx context.Context, repoID int64, owner, repo
 	)
 }
 
-// FetchIssues fetches issues with 90-day filtering
-func (f *Fetcher) FetchIssues(ctx context.Context, repoID int64, owner, repo string) (int, error) {
+// FetchIssues fetches issues with time filtering
+// days: number of days to fetch (0 = all history)
+func (f *Fetcher) FetchIssues(ctx context.Context, repoID int64, owner, repo string, days int) (int, error) {
 	opts := &github.IssueListByRepoOptions{
 		State: "all",
 		ListOptions: github.ListOptions{
@@ -277,7 +283,11 @@ func (f *Fetcher) FetchIssues(ctx context.Context, repoID int64, owner, repo str
 	}
 
 	count := 0
-	cutoff := time.Now().AddDate(0, 0, -90)
+	var cutoff time.Time
+	if days > 0 {
+		cutoff = time.Now().AddDate(0, 0, -days)
+	}
+	// If days == 0, cutoff will be zero value (fetch all)
 
 	for {
 		if err := f.rateLimiter.Wait(ctx); err != nil {
@@ -295,9 +305,18 @@ func (f *Fetcher) FetchIssues(ctx context.Context, repoID int64, owner, repo str
 				continue
 			}
 
-			// Apply 90-day filter: open OR closed within 90 days
-			if issue.GetState() == "open" ||
-				(issue.ClosedAt != nil && issue.GetClosedAt().Time.After(cutoff)) {
+			// Apply time filter if days > 0
+			shouldInclude := false
+			if days == 0 {
+				// Fetch all issues (no time filter)
+				shouldInclude = true
+			} else {
+				// Apply time filter: open OR closed within specified days
+				shouldInclude = issue.GetState() == "open" ||
+					(issue.ClosedAt != nil && issue.GetClosedAt().Time.After(cutoff))
+			}
+
+			if shouldInclude {
 				if err := f.storeIssue(ctx, repoID, issue); err != nil {
 					log.Printf("  ⚠️  Failed to store issue #%d: %v", issue.GetNumber(), err)
 					continue
@@ -355,8 +374,9 @@ func (f *Fetcher) storeIssue(ctx context.Context, repoID int64, issue *github.Is
 	)
 }
 
-// FetchPullRequests fetches PRs with 90-day filtering
-func (f *Fetcher) FetchPullRequests(ctx context.Context, repoID int64, owner, repo string) (int, error) {
+// FetchPullRequests fetches PRs with time filtering
+// days: number of days to fetch (0 = all history)
+func (f *Fetcher) FetchPullRequests(ctx context.Context, repoID int64, owner, repo string, days int) (int, error) {
 	opts := &github.PullRequestListOptions{
 		State: "all",
 		ListOptions: github.ListOptions{
@@ -365,7 +385,11 @@ func (f *Fetcher) FetchPullRequests(ctx context.Context, repoID int64, owner, re
 	}
 
 	count := 0
-	cutoff := time.Now().AddDate(0, 0, -90)
+	var cutoff time.Time
+	if days > 0 {
+		cutoff = time.Now().AddDate(0, 0, -days)
+	}
+	// If days == 0, cutoff will be zero value (fetch all)
 
 	for {
 		if err := f.rateLimiter.Wait(ctx); err != nil {
@@ -378,10 +402,19 @@ func (f *Fetcher) FetchPullRequests(ctx context.Context, repoID int64, owner, re
 		}
 
 		for _, pr := range prs {
-			// Apply 90-day filter: open OR merged/closed within 90 days
-			if pr.GetState() == "open" ||
-				(pr.MergedAt != nil && pr.GetMergedAt().Time.After(cutoff)) ||
-				(pr.ClosedAt != nil && pr.GetClosedAt().Time.After(cutoff)) {
+			// Apply time filter if days > 0
+			shouldInclude := false
+			if days == 0 {
+				// Fetch all PRs (no time filter)
+				shouldInclude = true
+			} else {
+				// Apply time filter: open OR merged/closed within specified days
+				shouldInclude = pr.GetState() == "open" ||
+					(pr.MergedAt != nil && pr.GetMergedAt().Time.After(cutoff)) ||
+					(pr.ClosedAt != nil && pr.GetClosedAt().Time.After(cutoff))
+			}
+
+			if shouldInclude {
 				if err := f.storePR(ctx, repoID, pr); err != nil {
 					log.Printf("  ⚠️  Failed to store PR #%d: %v", pr.GetNumber(), err)
 					continue

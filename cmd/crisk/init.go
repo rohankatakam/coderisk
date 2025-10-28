@@ -16,6 +16,7 @@ import (
 	"github.com/rohankatakam/coderisk/internal/github"
 	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/ingestion"
+	"github.com/rohankatakam/coderisk/internal/llm"
 	"github.com/spf13/cobra"
 )
 
@@ -296,8 +297,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n[1/4] Fetching GitHub API data (Layer 2 & 3: Temporal & Incidents)...\n")
 	fetchStart := time.Now()
 
+	// Get time window flags
+	days, _ := cmd.Flags().GetInt("days")
+	allHistory, _ := cmd.Flags().GetBool("all")
+
+	// If --all flag is set, use 0 days (meaning no time limit)
+	if allHistory {
+		days = 0
+		fmt.Printf("  ℹ️  Fetching entire repository history (no time limit)\n")
+	} else {
+		fmt.Printf("  ℹ️  Fetching last %d days of history\n", days)
+	}
+
 	fetcher := github.NewFetcher(config.MustGetString("GITHUB_TOKEN"), stagingDB)
-	repoID, stats, err := fetcher.FetchAll(ctx, owner, repo, repoPath)
+	repoID, stats, err := fetcher.FetchAll(ctx, owner, repo, repoPath, days)
 	if err != nil {
 		return fmt.Errorf("fetch failed: %w", err)
 	}
@@ -306,6 +319,52 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Fetched in %v\n", fetchDuration)
 	fmt.Printf("    Commits: %d | Issues: %d | PRs: %d | Branches: %d\n",
 		stats.Commits, stats.Issues, stats.PRs, stats.Branches)
+
+	// Stage 1.5: Extract issue-commit-PR relationships using LLM
+	fmt.Printf("\n[1.5/4] Extracting issue-commit-PR relationships (LLM analysis)...\n")
+	extractStart := time.Now()
+
+	// Create LLM client
+	llmClient, err := llm.NewClient(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create LLM client: %w", err)
+	}
+
+	if llmClient.IsEnabled() {
+		// Create extractors
+		issueExtractor := github.NewIssueExtractor(llmClient, stagingDB)
+		commitExtractor := github.NewCommitExtractor(llmClient, stagingDB)
+
+		// Extract from Issues
+		issueRefs, err := issueExtractor.ExtractReferences(ctx, repoID)
+		if err != nil {
+			fmt.Printf("  ⚠️  Issue extraction failed: %v\n", err)
+		} else {
+			fmt.Printf("  ✓ Extracted %d references from issues\n", issueRefs)
+		}
+
+		// Extract from Commits
+		commitRefs, err := commitExtractor.ExtractCommitReferences(ctx, repoID)
+		if err != nil {
+			fmt.Printf("  ⚠️  Commit extraction failed: %v\n", err)
+		} else {
+			fmt.Printf("  ✓ Extracted %d references from commits\n", commitRefs)
+		}
+
+		// Extract from PRs
+		prRefs, err := commitExtractor.ExtractPRReferences(ctx, repoID)
+		if err != nil {
+			fmt.Printf("  ⚠️  PR extraction failed: %v\n", err)
+		} else {
+			fmt.Printf("  ✓ Extracted %d references from PRs\n", prRefs)
+		}
+
+		extractDuration := time.Since(extractStart)
+		totalRefs := issueRefs + commitRefs + prRefs
+		fmt.Printf("  ✓ Extracted %d total references in %v\n", totalRefs, extractDuration)
+	} else {
+		fmt.Printf("  ⚠️  LLM extraction skipped (OPENAI_API_KEY not configured)\n")
+	}
 
 	// Stage 2: Build graph from PostgreSQL → Neo4j/Neptune (Layer 2 & 3 graph construction)
 	fmt.Printf("\n[2/4] Building temporal & incident graph (Layer 2 & 3)...\n")

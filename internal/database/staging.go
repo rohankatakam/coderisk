@@ -785,3 +785,12 @@ func (c *StagingClient) GetIssueCommitRefs(ctx context.Context, repoID int64) ([
 
 	return refs, rows.Err()
 }
+
+// ===================================
+// Helper Methods for Entity Resolution
+// ===================================
+
+// QueryRow executes a query that returns a single row
+func (c *StagingClient) QueryRow(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	return c.db.QueryRowContext(ctx, query, args...)
+}
