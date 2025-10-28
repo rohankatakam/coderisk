@@ -83,7 +83,7 @@ func (bc BatchConfig) GetBatchSizeForLabel(label string) int {
 		return bc.IncidentBatchSize
 	case "Issue":
 		return bc.IncidentBatchSize // Same as incidents
-	case "PullRequest":
+	case "PR":
 		return bc.CommitBatchSize // Same as commits
 	default:
 		return 500 // Default for unknown types

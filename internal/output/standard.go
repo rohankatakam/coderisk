@@ -13,7 +13,7 @@ import (
 // StandardFormatter outputs issues + recommendations (default)
 type StandardFormatter struct{}
 
-func (f *StandardFormatter) Format(result *models.RiskResult, w io.Writer) error {
+func (f *StandardFormatter) Format(result *types.RiskResult, w io.Writer) error {
 	// Header
 	fmt.Fprintf(w, "🔍 CodeRisk Analysis\n")
 	if result.Branch != "" {

@@ -1,16 +1,19 @@
 package ingestion
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/rohankatakam/coderisk/internal/graph"
-	"github.com/rohankatakam/coderisk/internal/temporal"
 	"github.com/rohankatakam/coderisk/internal/treesitter"
 )
 
@@ -143,130 +146,24 @@ func (p *Processor) ProcessRepositoryFromPath(ctx context.Context, repoPath stri
 		"imports", result.Imports,
 	)
 
-	// Step 5: Build graph
+	// Step 5: Build graph (File nodes + DEPENDS_ON edges only)
+	// Schema: PRE_COMMIT_GRAPH_SPEC.md - only File nodes from treesitter parsing
 	if p.graphClient != nil {
-		if err := p.buildGraph(ctx, allEntities); err != nil {
+		if err := p.buildGraph(ctx, repoPath, allEntities); err != nil {
 			return nil, fmt.Errorf("failed to build graph: %w", err)
 		}
 		slog.Info("graph construction complete")
 
-		// Step 6: Add Layer 2 (Temporal Analysis) - only if enabled
-		// For `crisk init`, this is disabled because Layer 2 & 3 come from GitHub API
-		// For `crisk init-local`, this is enabled for basic temporal analysis
-		if !p.config.EnableTemporal {
-			slog.Info("temporal analysis disabled (Layer 2 will come from GitHub API)")
-		} else {
-			// 12-Factor Principle - Factor 8: Concurrency via process model
-			// Use timeout to prevent blocking the entire init-local operation
-			slog.Info("starting temporal analysis", "window_days", 90)
-
-		// Add timeout for git history parsing
-		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		defer cancel()
-
-		// Parse git history with timeout
-		type parseResult struct {
-			commits []temporal.Commit
-			err     error
+		// NOTE: Layer 2 (Temporal Analysis) removed - now comes from GitHub API
+		// Per IMPLEMENTATION_GAP_ANALYSIS.md:
+		// "CO_CHANGED edges are now computed dynamically via queries"
+		// The old local git history parsing for co-changes has been removed
+		// All temporal data (commits, developers, ownership, co-changes) now comes from GitHub API
+		if p.config.EnableTemporal {
+			slog.Warn("temporal analysis via local git is deprecated",
+				"reason", "Layer 2 & 3 now come from GitHub API",
+				"recommendation", "use 'crisk init' instead of 'crisk init-local'")
 		}
-
-		resultChan := make(chan parseResult, 1)
-		go func() {
-			commits, err := temporal.ParseGitHistory(repoPath, 90)
-			resultChan <- parseResult{commits: commits, err: err}
-		}()
-
-		var commits []temporal.Commit
-		var err error
-
-		select {
-		case <-timeoutCtx.Done():
-			slog.Warn("temporal analysis timeout",
-				"timeout", "3 minutes",
-				"recommendation", "reduce window_days or optimize git parsing")
-			// Don't fail entire init-local, continue without Layer 2
-		case res := <-resultChan:
-			commits = res.commits
-			err = res.err
-		}
-
-		if err != nil {
-			slog.Error("temporal analysis failed", "error", err)
-			// Continue without Layer 2
-		} else if len(commits) == 0 {
-			slog.Warn("no commits found in git history", "window_days", 90)
-		} else {
-			slog.Info("git history parsed",
-				"commits", len(commits),
-				"window_days", 90)
-
-			// Calculate co-changes and ownership
-			developers := temporal.ExtractDevelopers(commits)
-			coChanges := temporal.CalculateCoChanges(commits, 0.3) // 30% frequency threshold
-
-			slog.Info("co-changes calculated",
-				"total_pairs", len(coChanges),
-				"min_frequency", 0.3)
-
-			// Convert relative git paths to absolute paths for graph matching
-			// Git history returns paths like "apps/web/src/page.tsx"
-			// But File nodes have absolute paths like "/Users/.../apps/web/src/page.tsx"
-			slog.Info("converting co-change paths",
-				"before_conversion", len(coChanges),
-				"repo_path", repoPath)
-
-			// Log sample paths before conversion (debug)
-			if len(coChanges) > 0 {
-				slog.Debug("sample co-change before conversion",
-					"fileA", coChanges[0].FileA,
-					"fileB", coChanges[0].FileB)
-			}
-
-			coChanges = p.convertCoChangePaths(coChanges, repoPath)
-
-			// Log sample paths after conversion (debug)
-			if len(coChanges) > 0 {
-				slog.Info("sample co-change after conversion",
-					"fileA", coChanges[0].FileA,
-					"fileB", coChanges[0].FileB,
-					"total_pairs", len(coChanges))
-			}
-
-			// Store in Neo4j
-			if p.graphBuilder != nil && len(coChanges) > 0 {
-				slog.Info("storing CO_CHANGED edges", "count", len(coChanges))
-
-				stats, err := p.graphBuilder.AddLayer2CoChangedEdges(ctx, coChanges)
-				if err != nil {
-					slog.Error("failed to store CO_CHANGED edges", "error", err, "count", len(coChanges))
-					// Continue - don't fail entire init-local
-				} else {
-					slog.Info("temporal analysis complete",
-						"commits", len(commits),
-						"developers", len(developers),
-						"co_change_edges", stats.Edges)
-
-					// Verify edges were actually created
-					verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 10*time.Second)
-					defer verifyCancel()
-
-					verifyCount, verifyErr := p.verifyCoChangedEdges(verifyCtx)
-					if verifyErr != nil {
-						slog.Error("edge verification failed", "error", verifyErr)
-					} else if verifyCount != stats.Edges {
-						slog.Warn("edge count mismatch",
-							"expected", stats.Edges,
-							"actual", verifyCount,
-							"possible_transaction_issue", true)
-					} else {
-						slog.Info("edge verification passed", "count", verifyCount)
-					}
-				}
-			} else if len(coChanges) == 0 {
-				slog.Warn("no co-changes found", "min_frequency", 0.3)
-			}
-		}
-		} // End of EnableTemporal check
 	}
 
 	result.Duration = time.Since(startTime)
@@ -281,55 +178,9 @@ func (p *Processor) ProcessRepositoryFromPath(ctx context.Context, repoPath stri
 	return result, nil
 }
 
-// convertCoChangePaths converts relative git paths to absolute file paths
-// Git history returns paths like "apps/web/src/page.tsx"
-// File nodes use absolute paths like "/Users/.../apps/web/src/page.tsx"
-func (p *Processor) convertCoChangePaths(coChanges []temporal.CoChangeResult, repoPath string) []temporal.CoChangeResult {
-	converted := make([]temporal.CoChangeResult, 0, len(coChanges))
-
-	for _, cc := range coChanges {
-		// Convert relative paths to absolute by joining with repo path
-		absoluteA := fmt.Sprintf("%s/%s", repoPath, cc.FileA)
-		absoluteB := fmt.Sprintf("%s/%s", repoPath, cc.FileB)
-
-		converted = append(converted, temporal.CoChangeResult{
-			FileA:      absoluteA,
-			FileB:      absoluteB,
-			Frequency:  cc.Frequency,
-			CoChanges:  cc.CoChanges,
-			WindowDays: cc.WindowDays,
-		})
-	}
-
-	return converted
-}
-
-// verifyCoChangedEdges queries Neo4j to confirm edges were created
-// 12-Factor Principle - Factor 10: Dev/prod parity
-// Verification ensures data consistency across environments
-func (p *Processor) verifyCoChangedEdges(ctx context.Context) (int, error) {
-	if p.graphClient == nil {
-		return 0, fmt.Errorf("graph backend not available")
-	}
-
-	// Query Neo4j directly to count CO_CHANGED edges
-	query := "MATCH ()-[r:CO_CHANGED]->() RETURN count(r) as count"
-
-	result, err := p.graphClient.Query(ctx, query)
-	if err != nil {
-		return 0, fmt.Errorf("verification query failed: %w", err)
-	}
-
-	// Extract count from result
-	// Neo4j returns results as []map[string]interface{}
-	if resultSlice, ok := result.([]map[string]interface{}); ok && len(resultSlice) > 0 {
-		if count, ok := resultSlice[0]["count"].(int64); ok {
-			return int(count), nil
-		}
-	}
-
-	return 0, fmt.Errorf("unexpected query result format")
-}
+// REMOVED: convertCoChangePaths and verifyCoChangedEdges
+// These functions supported the deprecated CO_CHANGED edge creation
+// CO_CHANGED is now computed dynamically via queries (see internal/risk/queries.go)
 
 // parseFilesParallel parses files using worker pool pattern
 func (p *Processor) parseFilesParallel(ctx context.Context, files <-chan string) ([]*treesitter.ParseResult, []error) {
@@ -412,10 +263,13 @@ func (p *Processor) parseFileWithTimeout(ctx context.Context, filePath string) *
 }
 
 // buildGraph creates graph nodes and edges from entities
-func (p *Processor) buildGraph(ctx context.Context, entities []treesitter.CodeEntity) error {
+// Schema: PRE_COMMIT_GRAPH_SPEC.md - File nodes + DEPENDS_ON edges only
+// repoPath is the absolute path to the repository root (for converting absolute -> relative paths)
+func (p *Processor) buildGraph(ctx context.Context, repoPath string, entities []treesitter.CodeEntity) error {
 	// Batch entities for efficient graph writes
 	batchSize := p.config.GraphBatch
 
+	// Only create File nodes (no Function, Class nodes in new schema)
 	for i := 0; i < len(entities); i += batchSize {
 		end := i + batchSize
 		if end > len(entities) {
@@ -424,9 +278,13 @@ func (p *Processor) buildGraph(ctx context.Context, entities []treesitter.CodeEn
 
 		batch := entities[i:end]
 
-		// Create nodes
+		// Create nodes - only File nodes
 		for _, entity := range batch {
-			node := entityToGraphNode(entity)
+			node := entityToGraphNode(entity, repoPath)
+			// Skip empty nodes and non-File nodes
+			if node.Label == "" || node.ID == "" || node.Label != "File" {
+				continue
+			}
 			if _, err := p.graphClient.CreateNode(ctx, node); err != nil {
 				slog.Warn("failed to create node",
 					"entity", entity.Name,
@@ -442,19 +300,13 @@ func (p *Processor) buildGraph(ctx context.Context, entities []treesitter.CodeEn
 		)
 	}
 
-	// Step 2: Create edges (CONTAINS, IMPORTS)
-	slog.Info("creating graph edges", "total_entities", len(entities))
-	if err := p.createEdges(ctx, entities); err != nil {
-		return fmt.Errorf("failed to create edges: %w", err)
+	// Step 2: Create DEPENDS_ON edges (File → File imports)
+	slog.Info("creating DEPENDS_ON edges", "total_entities", len(entities))
+	if err := p.createDependencyEdges(ctx, repoPath, entities); err != nil {
+		return fmt.Errorf("failed to create dependency edges: %w", err)
 	}
 
-	// Step 3: Create TESTS relationships (Task 5: Test coverage support)
-	// Reference: PHASE2_INVESTIGATION_ROADMAP.md Task 5
-	slog.Info("creating TESTS relationships")
-	if err := p.createTestRelationships(ctx, entities); err != nil {
-		// Don't fail entire ingestion if TESTS creation fails
-		slog.Warn("failed to create TESTS relationships (non-fatal)", "error", err)
-	}
+	// NOTE: CONTAINS, TESTS edges removed - not in PRE_COMMIT_GRAPH_SPEC.md
 
 	return nil
 }
@@ -633,84 +485,113 @@ func inferSourceFileFromTest(testPath string, availableFiles map[string]bool) st
 	return ""
 }
 
-// createEdges creates relationships between entities
-func (p *Processor) createEdges(ctx context.Context, entities []treesitter.CodeEntity) error {
+// createDependencyEdges creates DEPENDS_ON edges between files
+// Schema: PRE_COMMIT_GRAPH_SPEC.md - DEPENDS_ON edge with import_type property
+func (p *Processor) createDependencyEdges(ctx context.Context, repoPath string, entities []treesitter.CodeEntity) error {
 	var edges []graph.GraphEdge
 
-	// Group entities by file for efficient edge creation
-	fileToFunctions := make(map[string][]treesitter.CodeEntity)
-	fileToClasses := make(map[string][]treesitter.CodeEntity)
+	// Group imports by file
 	fileToImports := make(map[string][]treesitter.CodeEntity)
 
+	// Build map of available files for import resolution
+	// Store RELATIVE paths for matching
+	availableFiles := make(map[string]bool)
 	for _, entity := range entities {
-		switch entity.Type {
-		case "function":
-			fileToFunctions[entity.FilePath] = append(fileToFunctions[entity.FilePath], entity)
-		case "class":
-			fileToClasses[entity.FilePath] = append(fileToClasses[entity.FilePath], entity)
-		case "import":
+		if entity.Type == "file" {
+			relativePath := makeRelativePath(entity.FilePath, repoPath)
+			availableFiles[relativePath] = true
+		}
+	}
+
+	for _, entity := range entities {
+		if entity.Type == "import" {
 			fileToImports[entity.FilePath] = append(fileToImports[entity.FilePath], entity)
 		}
 	}
 
-	// Create CONTAINS edges: File -> Function, File -> Class
-	for filePath, functions := range fileToFunctions {
-		for _, fn := range functions {
-			edges = append(edges, graph.GraphEdge{
-				From:  fmt.Sprintf("file:%s", filePath),
-				To:    fmt.Sprintf("function:%s:%s:%d", fn.FilePath, fn.Name, fn.StartLine),
-				Label: "CONTAINS",
-				Properties: map[string]interface{}{
-					"entity_type": "function",
-				},
-			})
-		}
-	}
-
-	for filePath, classes := range fileToClasses {
-		for _, cls := range classes {
-			edges = append(edges, graph.GraphEdge{
-				From:  fmt.Sprintf("file:%s", filePath),
-				To:    fmt.Sprintf("class:%s:%s:%d", cls.FilePath, cls.Name, cls.StartLine),
-				Label: "CONTAINS",
-				Properties: map[string]interface{}{
-					"entity_type": "class",
-				},
-			})
-		}
-	}
-
-	// Create IMPORTS edges: File -> Import
+	// Create DEPENDS_ON edges: File → File (imports)
+	// Schema: PRE_COMMIT_GRAPH_SPEC.md - (File)-[:DEPENDS_ON {import_type: STRING}]->(File)
 	for filePath, imports := range fileToImports {
 		for _, imp := range imports {
-			edges = append(edges, graph.GraphEdge{
-				From:  fmt.Sprintf("file:%s", filePath),
-				To:    fmt.Sprintf("import:%s:%s:%d", imp.FilePath, imp.Name, imp.StartLine),
-				Label: "IMPORTS",
-				Properties: map[string]interface{}{
-					"import_path": imp.ImportPath,
-				},
-			})
+			// Resolve import path to actual File node
+			targetFile := resolveImportPath(imp.ImportPath, filePath, availableFiles)
+
+			if targetFile != "" {
+				// Convert paths to relative for edge creation
+				fromPath := makeRelativePath(filePath, repoPath)
+				toPath := targetFile // Already relative from resolveImportPath
+
+				// Create File → File edge (only for imports within the repository)
+				edges = append(edges, graph.GraphEdge{
+					From:  fmt.Sprintf("file:%s", fromPath),
+					To:    fmt.Sprintf("file:%s", toPath),
+					Label: "DEPENDS_ON",
+					Properties: map[string]interface{}{
+						"import_type": detectImportType(imp.ImportPath, filePath),
+					},
+				})
+			}
+			// Skip external imports (npm packages, stdlib, etc.)
+			// Per schema: only link to files in repository
 		}
 	}
 
 	// Batch create edges
 	if len(edges) > 0 {
-		slog.Info("creating edges", "count", len(edges))
+		slog.Info("creating DEPENDS_ON edges", "count", len(edges))
 		if err := p.graphClient.CreateEdges(ctx, edges); err != nil {
-			return fmt.Errorf("failed to create edges: %w", err)
+			return fmt.Errorf("failed to create DEPENDS_ON edges: %w", err)
 		}
 	}
 
 	return nil
 }
 
+// detectImportType determines the import type based on file extension and import syntax
+func detectImportType(importPath, sourceFile string) string {
+	// Determine import type: "import", "require", "include", etc.
+	ext := filepath.Ext(sourceFile)
+
+	switch ext {
+	case ".js", ".jsx", ".ts", ".tsx":
+		// JavaScript/TypeScript uses "import" or "require"
+		return "import"
+	case ".py":
+		// Python uses "import"
+		return "import"
+	case ".go":
+		// Go uses "import"
+		return "import"
+	default:
+		return "import"
+	}
+}
+
+// makeRelativePath converts an absolute file path to a relative path from the repository root
+// Example: "/Users/.../omnara/src/main.py" → "src/main.py"
+func makeRelativePath(absolutePath, repoRoot string) string {
+	// Ensure repoRoot doesn't have trailing slash
+	repoRoot = strings.TrimSuffix(repoRoot, "/")
+
+	// Strip the repo root prefix
+	relativePath := strings.TrimPrefix(absolutePath, repoRoot+"/")
+
+	// If the path didn't change, it means it wasn't under the repo root
+	// In that case, return the absolute path as-is (shouldn't happen in normal usage)
+	if relativePath == absolutePath {
+		return absolutePath
+	}
+
+	return relativePath
+}
+
 // entityToGraphNode converts CodeEntity to graph node
-func entityToGraphNode(entity treesitter.CodeEntity) graph.GraphNode {
+// entityToGraphNode converts a TreeSitter entity to a graph node
+// repoPath is the absolute path to the repository root for converting absolute -> relative paths
+func entityToGraphNode(entity treesitter.CodeEntity, repoPath string) graph.GraphNode {
 	properties := make(map[string]interface{})
 
 	properties["name"] = entity.Name
-	properties["file_path"] = entity.FilePath
 	properties["language"] = entity.Language
 
 	// Determine label first to properly set unique_id
@@ -721,17 +602,47 @@ func entityToGraphNode(entity treesitter.CodeEntity) graph.GraphNode {
 	case "class":
 		label = "Class"
 	case "import":
-		label = "Import"
+		// Import is NOT a node type per schema spec (simplified_graph_schema.md)
+		// Imports are only EDGES between File nodes
+		// Skip creating import nodes - they'll be handled as edges only
+		return graph.GraphNode{} // Return empty node, will be filtered out
 	}
 
 	// Generate unique_id based on entity type
 	var uniqueID string
 	if label == "File" {
-		// For Files: unique_id is the file path (no name/line needed)
-		uniqueID = entity.FilePath
+		// For Files: use 'path' property per PRE_COMMIT_GRAPH_SPEC.md
+		// Schema: File node with path (PRIMARY KEY), language, loc, last_modified
+		// Convert absolute path to relative (matching GitHub API paths)
+		relativePath := makeRelativePath(entity.FilePath, repoPath)
+		properties["path"] = relativePath
+		uniqueID = relativePath
+
+		// Mark as current file (from TreeSitter, represents current codebase structure)
+		// Reference: issue_ingestion_implementation_plan.md Phase 1
+		properties["current"] = true
+
+		// Add language
+		properties["language"] = entity.Language
+
+		// Add LOC (lines of code) by calculating from file
+		if loc, err := countLinesInFile(entity.FilePath); err == nil {
+			properties["loc"] = loc
+		} else {
+			properties["loc"] = 0 // Default if we can't read the file
+		}
+
+		// Add last_modified timestamp from git history
+		// Schema uses last_modified (DATETIME) not last_updated
+		if lastModified, err := getFileLastModified(entity.FilePath); err == nil {
+			properties["last_modified"] = lastModified
+		} else {
+			// Fallback to current time if not in git
+			properties["last_modified"] = time.Now().Unix()
+		}
 	} else {
-		// For Functions/Classes/Imports: use composite key "filepath:name:line"
-		// This handles multiple same-named functions in a file
+		// For Functions/Classes (deprecated in new schema but keep for backwards compat)
+		properties["file_path"] = entity.FilePath
 		uniqueID = fmt.Sprintf("%s:%s:%d", entity.FilePath, entity.Name, entity.StartLine)
 	}
 	properties["unique_id"] = uniqueID
@@ -754,4 +665,110 @@ func entityToGraphNode(entity treesitter.CodeEntity) graph.GraphNode {
 		Label:      label,
 		Properties: properties,
 	}
+}
+
+// countLinesInFile counts the number of lines in a file
+// Returns the line count or error if file cannot be read
+func countLinesInFile(filePath string) (int, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lineCount := 0
+	for scanner.Scan() {
+		lineCount++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("error reading file: %w", err)
+	}
+
+	return lineCount, nil
+}
+
+// getFileLastModified gets the last modified timestamp from git history
+// Returns Unix timestamp of the most recent commit that touched this file
+func getFileLastModified(filePath string) (int64, error) {
+	// Use git log to get the last commit timestamp for this file
+	// git log -1 --format=%ct <file> returns Unix timestamp
+	cmd := exec.Command("git", "log", "-1", "--format=%ct", filePath)
+	output, err := cmd.Output()
+	if err != nil {
+		// File might not be in git yet, return current time
+		return time.Now().Unix(), nil
+	}
+
+	timestampStr := strings.TrimSpace(string(output))
+	if timestampStr == "" {
+		// No commits for this file, return current time
+		return time.Now().Unix(), nil
+	}
+
+	timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
+	if err != nil {
+		return time.Now().Unix(), nil
+	}
+
+	return timestamp, nil
+}
+
+// resolveImportPath attempts to resolve an import path to an actual file in the repository
+// Returns empty string if the import is external (npm package, stdlib, etc.)
+// Only resolves imports to files within the repository (MVP scope)
+func resolveImportPath(importPath string, sourceFile string, availableFiles map[string]bool) string {
+	// Skip external imports (npm packages, stdlib, etc.)
+	// External imports don't start with './' or '../' or '/'
+	if !strings.HasPrefix(importPath, "./") &&
+	   !strings.HasPrefix(importPath, "../") &&
+	   !strings.HasPrefix(importPath, "/") {
+		// This is an external import (e.g., "react", "lodash", "@/components")
+		// Skip per MVP scope - only link to files in repository
+		return ""
+	}
+
+	// For relative imports, resolve to absolute path
+	sourceDir := filepath.Dir(sourceFile)
+	var candidatePath string
+
+	if strings.HasPrefix(importPath, "/") {
+		// Absolute path
+		candidatePath = importPath
+	} else {
+		// Relative path (./ or ../)
+		candidatePath = filepath.Join(sourceDir, importPath)
+		candidatePath = filepath.Clean(candidatePath)
+	}
+
+	// Try exact match first
+	if availableFiles[candidatePath] {
+		return candidatePath
+	}
+
+	// Try with common extensions (TypeScript/JavaScript often omit extensions)
+	extensions := []string{".ts", ".tsx", ".js", ".jsx", ".py", ".go"}
+	for _, ext := range extensions {
+		withExt := candidatePath + ext
+		if availableFiles[withExt] {
+			return withExt
+		}
+	}
+
+	// Try as directory with index file (common in JS/TS)
+	indexFiles := []string{
+		filepath.Join(candidatePath, "index.ts"),
+		filepath.Join(candidatePath, "index.tsx"),
+		filepath.Join(candidatePath, "index.js"),
+		filepath.Join(candidatePath, "index.jsx"),
+	}
+	for _, indexFile := range indexFiles {
+		if availableFiles[indexFile] {
+			return indexFile
+		}
+	}
+
+	// If no match found, this is likely an external import or unresolvable
+	return ""
 }

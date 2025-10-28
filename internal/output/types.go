@@ -157,14 +157,14 @@ type MetricResult struct {
 // === Merged from converter.go ===
 
 // ConvertPhase1ToRiskResult converts Phase1Result to RiskResult for formatting
-func ConvertPhase1ToRiskResult(phase1 *metrics.Phase1Result) *models.RiskResult {
+func ConvertPhase1ToRiskResult(phase1 *metrics.Phase1Result) *types.RiskResult {
 	// Get current branch dynamically
 	branch, err := git.GetCurrentBranch()
 	if err != nil {
 		branch = "main" // Fallback if not in git repo
 	}
 
-	result := &models.RiskResult{
+	result := &types.RiskResult{
 		Branch:       branch,
 		FilesChanged: 1,
 		RiskLevel:    string(phase1.OverallRisk),
@@ -180,7 +180,7 @@ func ConvertPhase1ToRiskResult(phase1 *metrics.Phase1Result) *models.RiskResult 
 	language := git.DetectLanguage(phase1.FilePath)
 
 	// Convert to FileRisk
-	result.Files = []models.FileRisk{
+	result.Files = []types.FileRisk{
 		{
 			Path:         phase1.FilePath,
 			Language:     language,
@@ -212,8 +212,8 @@ func calculateRiskScore(phase1 *metrics.Phase1Result) float64 {
 	}
 }
 
-func convertMetrics(phase1 *metrics.Phase1Result) map[string]models.Metric {
-	metrics := make(map[string]models.Metric)
+func convertMetrics(phase1 *metrics.Phase1Result) map[string]types.Metric {
+	metrics := make(map[string]types.Metric)
 
 	if phase1.Coupling != nil {
 		threshold := 10.0
@@ -245,8 +245,8 @@ func convertMetrics(phase1 *metrics.Phase1Result) map[string]models.Metric {
 	return metrics
 }
 
-func convertToIssues(phase1 *metrics.Phase1Result) []models.RiskIssue {
-	var issues []models.RiskIssue
+func convertToIssues(phase1 *metrics.Phase1Result) []types.RiskIssue {
+	var issues []types.RiskIssue
 
 	if phase1.Coupling != nil && phase1.Coupling.ShouldEscalate() {
 		issues = append(issues, types.RiskIssue{

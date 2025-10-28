@@ -47,12 +47,13 @@ type FetchStats struct {
 // FetchAll fetches all GitHub data for a repository and stores in PostgreSQL
 // This is Priority 6A: GitHub API → PostgreSQL staging
 // Smart checkpointing: skips fetching if data already exists
-func (f *Fetcher) FetchAll(ctx context.Context, owner, repo string) (int64, *FetchStats, error) {
+// repoPath is the absolute path to the local repository clone (for relative path conversion)
+func (f *Fetcher) FetchAll(ctx context.Context, owner, repo, repoPath string) (int64, *FetchStats, error) {
 	log.Printf("🔍 Fetching GitHub data for %s/%s...", owner, repo)
 	stats := &FetchStats{}
 
 	// 1. Fetch repository metadata (always needed to get repoID)
-	repoID, err := f.FetchRepository(ctx, owner, repo)
+	repoID, err := f.FetchRepository(ctx, owner, repo, repoPath)
 	if err != nil {
 		return 0, stats, fmt.Errorf("fetch repository failed: %w", err)
 	}
@@ -135,7 +136,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, owner, repo string) (int64, *Fet
 }
 
 // FetchRepository fetches repository metadata and stores in PostgreSQL
-func (f *Fetcher) FetchRepository(ctx context.Context, owner, repo string) (int64, error) {
+func (f *Fetcher) FetchRepository(ctx context.Context, owner, repo, repoPath string) (int64, error) {
 	if err := f.rateLimiter.Wait(ctx); err != nil {
 		return 0, err
 	}
@@ -151,13 +152,14 @@ func (f *Fetcher) FetchRepository(ctx context.Context, owner, repo string) (int6
 		return 0, fmt.Errorf("failed to marshal repository: %w", err)
 	}
 
-	// Store in PostgreSQL
+	// Store in PostgreSQL with absolute path for relative path conversions
 	repoID, err := f.stagingDB.StoreRepository(
 		ctx,
 		repository.GetID(),
 		owner,
 		repo,
 		repository.GetFullName(),
+		repoPath, // Store absolute path to local clone
 		rawData,
 	)
 	if err != nil {

@@ -14,7 +14,7 @@ func NewFR6Formatter() *FR6Formatter {
 }
 
 // Format formats the risk result according to FR-6 specification
-func (f *FR6Formatter) Format(result *models.RiskResult) (string, error) {
+func (f *FR6Formatter) Format(result *types.RiskResult) (string, error) {
 	// TODO: Implement FR-6 standard format
 	// Format spec from mvp_development_plan.md FR-6:
 	// - Risk level badge

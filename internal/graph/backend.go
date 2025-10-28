@@ -22,8 +22,11 @@ type Backend interface {
 	// ExecuteBatch executes multiple commands in a single transaction
 	ExecuteBatch(ctx context.Context, commands []string) error
 
-	// Query executes a query and returns results
+	// Query executes a query and returns results (simple, no parameters)
 	Query(ctx context.Context, query string) (interface{}, error)
+
+	// QueryWithParams executes a parameterized query and returns results
+	QueryWithParams(ctx context.Context, query string, params map[string]interface{}) ([]map[string]interface{}, error)
 
 	// Close closes the backend connection
 	Close(ctx context.Context) error

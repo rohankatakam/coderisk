@@ -84,18 +84,18 @@ func (c *StagingClient) GetDataCounts(ctx context.Context, repoID int64) (*DataC
 // Repository Operations
 // ===================================
 
-// StoreRepository stores repository metadata with raw JSON
-func (c *StagingClient) StoreRepository(ctx context.Context, githubID int64, owner, name, fullName string, rawData json.RawMessage) (int64, error) {
+// StoreRepository stores repository metadata with raw JSON and absolute path
+func (c *StagingClient) StoreRepository(ctx context.Context, githubID int64, owner, name, fullName, absolutePath string, rawData json.RawMessage) (int64, error) {
 	query := `
-		INSERT INTO github_repositories (github_id, owner, name, full_name, raw_data, fetched_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
+		INSERT INTO github_repositories (github_id, owner, name, full_name, absolute_path, raw_data, fetched_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW())
 		ON CONFLICT (full_name)
-		DO UPDATE SET raw_data = EXCLUDED.raw_data, fetched_at = NOW(), updated_at = NOW()
+		DO UPDATE SET raw_data = EXCLUDED.raw_data, absolute_path = EXCLUDED.absolute_path, fetched_at = NOW(), updated_at = NOW()
 		RETURNING id
 	`
 
 	var repoID int64
-	err := c.db.QueryRowContext(ctx, query, githubID, owner, name, fullName, rawData).Scan(&repoID)
+	err := c.db.QueryRowContext(ctx, query, githubID, owner, name, fullName, absolutePath, rawData).Scan(&repoID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to store repository: %w", err)
 	}

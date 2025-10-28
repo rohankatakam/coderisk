@@ -63,42 +63,53 @@
 
 ### FR-1: LLM Client Integration (Multi-Agent Support)
 
-**Requirement:** Support Gemini Flash 2.0 (primary) with OpenAI/Anthropic fallback for 8 specialized agents via user-provided API keys (BYOK model)
+**Requirement:** Support OpenAI models only for 8 specialized agents via user-provided API keys (BYOK model)
+
+**SCOPE DECISION (2025-10-22):** MVP limited to OpenAI only to match coderisk-frontend implementation. The frontend only supports OpenAI API key validation and storage. Post-MVP can add Gemini/Anthropic support.
 
 **Model Selection:**
-- **Primary**: Gemini Flash 2.0 (~300-500ms per agent, ~$0.00002/agent call)
-- **Fallback 1**: GPT-4o-mini (~500ms, ~$0.0001/call)
-- **Fallback 2**: Claude Haiku (~500ms, ~$0.0001/call)
+- **Fast Model**: GPT-4o-mini (~300-500ms per agent, ~$0.0001/call) - For quick analysis agents
+- **Deep Model**: GPT-4o (~1-2s per agent, ~$0.003/call) - For synthesis and validation agents
 
 **Acceptance Criteria:**
-- User can configure API key via environment variable (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`)
+- User can configure API key via environment variable (`OPENAI_API_KEY`)
 - User can configure API key via config file (`~/.coderisk/config.yaml`)
-- Client auto-detects provider: prefer Gemini → OpenAI → Anthropic
+- User can configure API key via coderisk-frontend web interface
 - Support for parallel agent execution (8 agents can run simultaneously)
 - Support for sequential chaining (agents can use prior agent outputs)
+- Support for model switching (GPT-4o-mini for fast agents, GPT-4o for deep reasoning)
 - Error handling: No API key → graceful degradation (Tier 0 only, warn user)
 - Error handling: Rate limit → retry with exponential backoff (3 attempts)
 - Error handling: Timeout → fail gracefully, log error
 - Token usage logging per agent for cost transparency
 
 **Implementation Notes:**
-- Use official SDKs: `github.com/google/generative-ai-go`, `github.com/openai/openai-go`, `github.com/anthropics/anthropic-sdk-go`
+- Use official SDK: `github.com/sashabaranov/go-openai`
 - 8 specialized prompt templates (one per agent: incident, blast_radius, cochange, ownership, quality, patterns, synthesizer, validator)
 - Agent prompts: Max tokens 2000, temperature 0.1 (consistent, focused)
 - Support for context passing between agents (sequential chain)
+- Model selection per agent:
+  - Agents 1-5 (Phase 2 specialists): GPT-4o-mini (fast, cheap)
+  - Agent 6 (patterns): GPT-4o-mini (pattern matching is straightforward)
+  - Agent 7 (synthesizer): GPT-4o (deep reasoning needed for synthesis)
+  - Agent 8 (validator): GPT-4o (deep reasoning needed for fact-checking)
 
 **Current Status:**
-- ✅ `internal/llm/client.go` exists (basic OpenAI/Anthropic support, single completion method)
-- ❌ Multi-agent support not implemented
-- ❌ Gemini Flash 2.0 not implemented
+- ✅ `internal/llm/client.go` exists (OpenAI support with GPT-4o-mini)
+- ✅ `internal/agent/llm_client.go` exists (legacy OpenAI client with GPT-4o)
+- 🟡 Multi-agent support partially implemented (agent_executor.go skeleton exists)
 - ❌ Parallel execution not implemented
+- ✅ Frontend support confirmed (OpenAI-only)
 
 **Files to Create:**
-- `internal/llm/gemini.go` - Gemini Flash 2.0 primary provider
-- `internal/llm/agent_executor.go` - Parallel and sequential execution coordinator
+- None (skeleton files already exist)
 
 **Files to Update:**
-- `internal/llm/client.go` - Add multi-agent interface, context passing, token tracking
+- `internal/llm/client.go` - Add multi-agent interface, model switching, context passing, token tracking
+- `internal/llm/agent_executor.go` - Implement parallel and sequential execution
+
+**Files to Remove:**
+- `internal/llm/gemini.go` - Remove Gemini skeleton (out of scope for MVP)
 
 **Reference:** [../01-architecture/prompt_engineering_design.md](../01-architecture/prompt_engineering_design.md) (future vision, simplified for MVP)
 
@@ -156,11 +167,14 @@ Phase 5: Validation (1 agent)
 
 **7 Core Cypher Queries (Run for ALL changed files):**
 ```cypher
-1. Recent Incidents (10-20ms):
-   MATCH (inc:Issue)-[:LINKED_TO]->(f:File {path: $file_path})
-   WHERE inc.created_at > datetime() - duration('P90D')
-   RETURN inc.title, inc.severity, inc.created_at
-   ORDER BY inc.created_at DESC
+1. Recent Bug Fixes (15-25ms):
+   // Find PRs that fixed bugs/incidents affecting this file
+   MATCH (pr:PR)-[:FIXES]->(i:Issue)
+   MATCH (pr)-[:MODIFIES]->(f:File {path: $file_path})
+   WHERE pr.merged_at > datetime() - duration('P90D')
+     AND (i.labels CONTAINS 'bug' OR i.labels CONTAINS 'incident' OR i.labels CONTAINS 'critical')
+   RETURN i.number, i.title, i.labels, pr.number as fix_pr, pr.merged_at
+   ORDER BY pr.merged_at DESC
    LIMIT 5
 
 2. Dependency Count (10-20ms):
@@ -171,7 +185,7 @@ Phase 5: Validation (1 agent)
 3. Co-change Partners (30-60ms, computed dynamically):
    // NOTE: No pre-calculated [:CO_CHANGED_WITH] edges
    // Compute co-change frequency on-the-fly from commit history
-   MATCH (f:File {path: $file_path})<-[:MODIFIES]-(c1:Commit)
+   MATCH (f:File {path: $file_path})<-[:MODIFIES]-(c1:Commit)-[:ON_BRANCH]->(b:Branch {is_default: true})
    WHERE c1.author_date > datetime() - duration('P90D')
    WITH f, collect(c1) as commits
    UNWIND commits as c
@@ -183,7 +197,6 @@ Phase 5: Validation (1 agent)
    RETURN other.path, frequency, co_changes
    ORDER BY frequency DESC
    LIMIT 5
-```
 
 4. Ownership (30ms):
    MATCH (f:File {path: $file_path})<-[:MODIFIES]-(c:Commit)-[:ON_BRANCH]->(b:Branch {is_default: true})
@@ -197,11 +210,15 @@ Phase 5: Validation (1 agent)
    RETURN count(DISTINCT dependent) as dependent_count,
           collect(DISTINCT dependent.path)[0..20] as sample_dependents
 
-6. Incident History (50ms):
-   MATCH (i:Issue)-[:LINKED_TO]->(f:File {path: $file_path})
-   WHERE i.created_at > datetime() - duration('P180D')
-   RETURN i.number, i.title, i.severity, i.created_at, i.state
-   ORDER BY i.created_at DESC
+6. Bug Fix History (Deep) (60ms):
+   // Comprehensive bug fix context for this file
+   MATCH (pr:PR)-[:FIXES]->(i:Issue)
+   MATCH (pr)-[:MODIFIES]->(f:File {path: $file_path})
+   WHERE pr.merged_at > datetime() - duration('P180D')
+   RETURN i.number, i.title, i.labels, i.state,
+          pr.number as fix_pr, pr.title as fix_title, pr.merged_at
+   ORDER BY pr.merged_at DESC
+   LIMIT 10
 
 7. Recent Commits (40ms):
    MATCH (f:File {path: $file_path})<-[:MODIFIES]-(c:Commit)-[:ON_BRANCH]->(b:Branch {is_default: true})
@@ -225,11 +242,11 @@ Phase 5: Validation (1 agent)
 
 **5 Specialized Agents (run simultaneously):**
 
-**Agent 1: Incident Risk Specialist**
-- Input: File diff + incidents + incident_history + recent_commits
-- Task: Analyze past incidents, detect similar patterns, assess incident risk
-- Output: Past incidents, similar changes that caused failures, prevention steps
-- Prompt focus: "Has this file caused incidents before? Is this change similar to incident-causing changes?"
+**Agent 1: Bug Fix History Specialist**
+- Input: File diff + bug_fix_prs + bug_fix_history + recent_commits
+- Task: Analyze past bug fixes affecting this file, detect regression patterns
+- Output: Recent bugs, fix patterns, regression risks, similar past fixes
+- Prompt focus: "Has this file been part of recent bug fixes? Is this change similar to past fixes or potentially reintroducing similar bugs?"
 
 **Agent 2: Blast Radius Specialist**
 - Input: File diff + dependencies + blast_radius + co_change
@@ -238,26 +255,26 @@ Phase 5: Validation (1 agent)
 - Prompt focus: "What will break if this changes? What systems are impacted?"
 
 **Agent 3: Co-change & Forgotten Updates Specialist**
-- Input: File diff + co_change + recent_commits + incident_history + all_changed_files
+- Input: File diff + co_change + recent_commits + bug_fix_history + all_changed_files
 - Task: Identify temporal coupling, detect forgotten updates
 - Output: Forgotten files, co-change patterns, historical evidence of forgotten updates
 - Prompt focus: "What files should change together? Did developer forget to update related files?"
 
 **Agent 4: Ownership & Coordination Specialist**
-- Input: File diff + ownership + recent_commits + incident_history
+- Input: File diff + ownership + recent_commits + bug_fix_history
 - Task: Determine coordination needs, identify who to contact
 - Output: Primary owner, last modifier, who to ping, suggested reviewers
 - Prompt focus: "Who owns this? Should developer coordinate before committing?"
 
 **Agent 5: Code Quality & Change Scope Specialist**
-- Input: File diff + recent_commits + incident_history
+- Input: File diff + recent_commits + bug_fix_history
 - Task: Assess change size, complexity, and quality concerns
 - Output: Change risk level, complexity assessment, quality recommendations
 - Prompt focus: "Is this change too large? Are there code quality concerns?"
 
 **Agent Context Strategy: Overlapping Context**
 - Each agent receives full context for assigned files (prevents missing information)
-- Agents can reference adjacent data (e.g., incident agent sees ownership for coordination suggestions)
+- Agents can reference adjacent data (e.g., bug fix agent sees ownership for coordination suggestions)
 
 **Acceptance Criteria:**
 - Phase 2 completes in <500ms (all 5 agents run in parallel)
@@ -679,12 +696,12 @@ Recommendations (prioritized):
 **Query Library (7 Fixed Templates):**
 
 **Phase 1 Queries (Always run for every changed file):**
-1. Recent Incidents - Issues linked to file in last 90 days
+1. Recent Bug Fixes - PRs that fixed bugs/incidents affecting this file (last 90 days)
 2. Dependency Count - Files depending on this file (depth 1-2)
 3. Co-change Partners - Files frequently changed together (>70% rate, last 90 days)
 4. Ownership - Primary owner by commit count (last 90 days)
 5. Blast Radius - Full dependency graph with sample dependents (depth 3)
-6. Incident History (Deep) - All incidents in last 180 days with details
+6. Bug Fix History (Deep) - All bug fix PRs in last 180 days with issue details
 7. Recent Commits - Last 5 commits with diffs and authors
 
 **All 7 queries run in Phase 1 (data collection) before any LLM agents execute**
@@ -915,14 +932,13 @@ Recent False Positives:
 ```yaml
 # ~/.coderisk/config.yaml
 llm:
-  provider: "anthropic"  # "openai" or "anthropic"
-  api_key: "sk-ant-..."  # Or use env var ANTHROPIC_API_KEY
-  tier1_model: "haiku"  # "haiku" or "gpt-4o-mini"
-  tier2_model: "sonnet"  # "sonnet" or "gpt-4o"
-  tier1_max_tokens: 500
-  tier2_max_tokens: 1500
-  tier1_timeout_seconds: 5
-  tier2_timeout_seconds: 10
+  provider: "openai"  # OpenAI only for MVP
+  api_key: "sk-..."  # Or use env var OPENAI_API_KEY
+  fast_model: "gpt-4o-mini"  # For Agents 1-6 (fast analysis)
+  deep_model: "gpt-4o"  # For Agents 7-8 (synthesis, validation)
+  max_tokens_fast: 2000
+  max_tokens_deep: 4000
+  timeout_seconds: 30
 
 thresholds:
   # Thresholds now primarily used in Tier 1 LLM context
@@ -943,17 +959,17 @@ cache:
 ```
 
 **Environment Variables:**
-- `OPENAI_API_KEY` - OpenAI API key
-- `ANTHROPIC_API_KEY` - Anthropic API key
+- `OPENAI_API_KEY` - OpenAI API key (required for MVP)
 - `CODERISK_VERBOSITY` - Default verbosity level
 - `CODERISK_CONFIG` - Path to config file
 
 **Acceptance Criteria:**
 - User can configure via file, env vars, or flags
 - Priority order respected
-- `crisk config get llm.provider` shows current value
-- `crisk config set llm.provider openai` updates config file
+- `crisk config get llm.fast_model` shows current value
+- `crisk config set llm.fast_model gpt-4o-mini` updates config file
 - Validation: Invalid values rejected with helpful error
+- OpenAI API key validation via coderisk-frontend
 
 **Files to Update:**
 - `internal/config/*.go` - Already exists, add LLM/threshold config
@@ -1292,7 +1308,7 @@ Respond in JSON format:
 - ❌ Escalation/triage logic (replaced with Sequential Analysis Chain)
 - ❌ Conditional agent execution (all 8 agents always run)
 - ❌ Caching of agent results (always fresh analysis)
-- ❌ Multi-model switching (Gemini Flash 2.0 only for MVP)
+- ❌ Multi-provider support (OpenAI only for MVP, Gemini/Anthropic deferred to v2)
 
 **Deferred to v2 (after customer validation):**
 - Multi-hop graph navigation (see [../01-architecture/agentic_design.md](../01-architecture/agentic_design.md))

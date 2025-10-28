@@ -34,11 +34,14 @@ What it does:
 Usage:
   git clone https://github.com/owner/repo
   cd repo
-  crisk init
+  crisk init [--days N]
 
 Examples:
   cd ~/projects/my-repo
-  crisk init
+  crisk init                  # Default: last 90 days
+  crisk init --days 30        # Last 30 days
+  crisk init --days 180       # Last 180 days
+  crisk init --all            # Full repository history
 
 Requirements:
   • Must be run inside a cloned GitHub repository
@@ -51,6 +54,12 @@ Configuration:
   Production: Run 'crisk login' for cloud authentication`,
 	Args: cobra.NoArgs,
 	RunE: runInit,
+}
+
+func init() {
+	// Add time window flags per IMPLEMENTATION_GAP_ANALYSIS.md
+	initCmd.Flags().Int("days", 90, "Ingest PRs merged in last N days (default: 90)")
+	initCmd.Flags().Bool("all", false, "Ingest entire repository history")
 }
 
 // detectCurrentRepo detects the git repository in the current directory
@@ -288,7 +297,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fetchStart := time.Now()
 
 	fetcher := github.NewFetcher(config.MustGetString("GITHUB_TOKEN"), stagingDB)
-	repoID, stats, err := fetcher.FetchAll(ctx, owner, repo)
+	repoID, stats, err := fetcher.FetchAll(ctx, owner, repo, repoPath)
 	if err != nil {
 		return fmt.Errorf("fetch failed: %w", err)
 	}
@@ -334,13 +343,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Summary
 	totalDuration := time.Since(startTime)
+
+	// Query Neo4j for actual Developer count (not rough estimate)
+	developerCount := int64(0)
+	if result, err := graphBackend.Query(ctx, "MATCH (d:Developer) RETURN count(d) as count"); err == nil {
+		developerCount = result.(int64)
+	}
+
 	fmt.Printf("\n✅ CodeRisk initialized for %s/%s (All 3 Layers)\n", owner, repo)
 	fmt.Printf("\n📊 Summary:\n")
 	fmt.Printf("   Total time: %v\n", totalDuration)
 	fmt.Printf("   Layer 1 (Structure): %d files, %d functions, %d classes\n",
 		parseResult.FilesParsed, parseResult.Functions, parseResult.Classes)
 	fmt.Printf("   Layer 2 (Temporal): %d commits, %d developers\n",
-		stats.Commits, buildStats.Nodes/3) // Rough estimate
+		stats.Commits, developerCount)
 	fmt.Printf("   Layer 3 (Incidents): %d issues, %d PRs\n",
 		stats.Issues, stats.PRs)
 	fmt.Printf("\n🚀 Next steps:\n")

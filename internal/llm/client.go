@@ -6,35 +6,36 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/sashabaranov/go-openai"
 )
 
-// Provider represents the LLM provider (OpenAI or Anthropic)
+// Provider represents the LLM provider (OpenAI only for MVP)
 type Provider string
 
 const (
-	ProviderOpenAI    Provider = "openai"
-	ProviderAnthropic Provider = "anthropic"
-	ProviderNone      Provider = "none" // Phase 2 disabled
+	ProviderOpenAI Provider = "openai"
+	ProviderNone   Provider = "none" // Phase 2 disabled
 )
 
-// Client provides unified interface for OpenAI and Anthropic
+// Client provides interface for OpenAI LLM
 // Reference: agentic_design.md §2.2 - LLM investigation flow
 // Reference: spec.md §1.3 - BYOK (Bring Your Own Key) model
+// MVP: OpenAI only (matches coderisk-frontend implementation)
 type Client struct {
-	provider        Provider
-	openaiClient    *openai.Client
-	anthropicClient *anthropic.Client
-	logger          *slog.Logger
-	enabled         bool
+	provider     Provider
+	openaiClient *openai.Client
+	logger       *slog.Logger
+	enabled      bool
+	fastModel    string // GPT-4o-mini for Agents 1-6
+	deepModel    string // GPT-4o for Agents 7-8
 }
 
-// NewClient creates an LLM client based on available API keys
+// NewClient creates an OpenAI LLM client
 // Security: NEVER hardcode API keys (DEVELOPMENT_WORKFLOW.md §3.3)
 // Reference: local_deployment.md - LLM configuration
 // Now uses config system with OS keychain support
+// MVP: OpenAI only (matches coderisk-frontend implementation)
 func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
 	logger := slog.Default().With("component", "llm")
 
@@ -43,47 +44,40 @@ func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
 	if !phase2Enabled {
 		logger.Info("phase 2 disabled, LLM client not initialized")
 		return &Client{
-			provider: ProviderNone,
-			logger:   logger,
-			enabled:  false,
+			provider:  ProviderNone,
+			logger:    logger,
+			enabled:   false,
+			fastModel: "gpt-4o-mini",
+			deepModel: "gpt-4o",
 		}, nil
 	}
 
 	// Get OpenAI API key from config (which already checked env var and keychain)
 	openaiKey := cfg.API.OpenAIKey
-	if openaiKey != "" {
-		client := openai.NewClient(openaiKey)
-		keySource := getKeySource(cfg)
-		logger.Info("openai client initialized", "key_source", keySource)
+	if openaiKey == "" {
+		// No API key configured but Phase 2 enabled - helpful message
+		logger.Warn("phase 2 enabled but no OpenAI API key configured")
+		logger.Info("run 'crisk configure' to set up your OpenAI API key securely")
+		logger.Info("or configure via coderisk-frontend web interface")
 		return &Client{
-			provider:     ProviderOpenAI,
-			openaiClient: client,
-			logger:       logger,
-			enabled:      true,
+			provider:  ProviderNone,
+			logger:    logger,
+			enabled:   false,
+			fastModel: "gpt-4o-mini",
+			deepModel: "gpt-4o",
 		}, nil
 	}
 
-	// Check for Anthropic API key (still from env var for now)
-	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
-	if anthropicKey != "" {
-		// NewClient reads ANTHROPIC_API_KEY from environment automatically
-		client := anthropic.NewClient()
-		logger.Info("anthropic client initialized", "key_source", "environment")
-		return &Client{
-			provider:        ProviderAnthropic,
-			anthropicClient: &client,
-			logger:          logger,
-			enabled:         true,
-		}, nil
-	}
-
-	// No API keys configured but Phase 2 enabled - helpful message
-	logger.Warn("phase 2 enabled but no LLM API key configured")
-	logger.Info("run 'crisk configure' to set up your API key securely")
+	client := openai.NewClient(openaiKey)
+	keySource := getKeySource(cfg)
+	logger.Info("openai client initialized", "key_source", keySource, "fast_model", "gpt-4o-mini", "deep_model", "gpt-4o")
 	return &Client{
-		provider: ProviderNone,
-		logger:   logger,
-		enabled:  false,
+		provider:     ProviderOpenAI,
+		openaiClient: client,
+		logger:       logger,
+		enabled:      true,
+		fastModel:    "gpt-4o-mini", // Agents 1-6: fast analysis
+		deepModel:    "gpt-4o",      // Agents 7-8: synthesis, validation
 	}, nil
 }
 
@@ -110,25 +104,37 @@ func (c *Client) GetProvider() Provider {
 
 // Complete sends a prompt to the LLM and returns the response
 // Reference: agentic_design.md §2.2 - Investigation decisions
+// Uses fastModel (GPT-4o-mini) by default
 func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	if !c.enabled {
-		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and API keys)")
+		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and OPENAI_API_KEY)")
 	}
 
-	switch c.provider {
-	case ProviderOpenAI:
-		return c.completeOpenAI(ctx, systemPrompt, userPrompt)
-	case ProviderAnthropic:
-		return c.completeAnthropic(ctx, systemPrompt, userPrompt)
-	default:
-		return "", fmt.Errorf("no llm provider configured")
+	if c.provider != ProviderOpenAI {
+		return "", fmt.Errorf("no openai provider configured")
 	}
+
+	return c.completeOpenAI(ctx, systemPrompt, userPrompt, c.fastModel)
 }
 
-// completeOpenAI handles OpenAI chat completion
-func (c *Client) completeOpenAI(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+// CompleteWithDeepModel sends a prompt using the deep model (GPT-4o)
+// Use for complex synthesis and validation tasks (Agents 7-8)
+func (c *Client) CompleteWithDeepModel(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	if !c.enabled {
+		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and OPENAI_API_KEY)")
+	}
+
+	if c.provider != ProviderOpenAI {
+		return "", fmt.Errorf("no openai provider configured")
+	}
+
+	return c.completeOpenAI(ctx, systemPrompt, userPrompt, c.deepModel)
+}
+
+// completeOpenAI handles OpenAI chat completion with configurable model
+func (c *Client) completeOpenAI(ctx context.Context, systemPrompt, userPrompt, model string) (string, error) {
 	resp, err := c.openaiClient.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model: openai.GPT4oMini, // Cost-efficient model (spec.md §5.2)
+		Model: model, // Either gpt-4o-mini (fast) or gpt-4o (deep)
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    openai.ChatMessageRoleSystem,
@@ -139,8 +145,8 @@ func (c *Client) completeOpenAI(ctx context.Context, systemPrompt, userPrompt st
 				Content: userPrompt,
 			},
 		},
-		Temperature: 0.0, // Deterministic responses
-		MaxTokens:   500, // Limit token usage
+		Temperature: 0.1, // Low temperature for consistent, focused responses (MVP spec)
+		MaxTokens:   2000, // MVP spec: Max tokens per agent
 	})
 
 	if err != nil {
@@ -153,22 +159,13 @@ func (c *Client) completeOpenAI(ctx context.Context, systemPrompt, userPrompt st
 
 	response := resp.Choices[0].Message.Content
 	c.logger.Debug("openai completion",
+		"model", model,
 		"prompt_length", len(userPrompt),
 		"response_length", len(response),
 		"tokens_used", resp.Usage.TotalTokens,
 	)
 
 	return response, nil
-}
-
-// completeAnthropic handles Anthropic message completion
-// Note: Simplified implementation - Anthropic SDK not fully used yet
-// TODO: Implement full Anthropic SDK integration in Phase 2
-func (c *Client) completeAnthropic(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	// Placeholder - Anthropic SDK v1.13.0 has a different API than expected
-	// Will implement properly when we build Phase 2 investigation
-	c.logger.Warn("anthropic completion not yet implemented - falling back to error")
-	return "", fmt.Errorf("anthropic completion not yet implemented")
 }
 
 // ShouldEscalateToPhase2 determines if a file should trigger Phase 2 investigation

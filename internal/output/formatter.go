@@ -9,7 +9,7 @@ import (
 
 // Formatter defines output formatting interface
 type Formatter interface {
-	Format(result *models.RiskResult, w io.Writer) error
+	Format(result *types.RiskResult, w io.Writer) error
 }
 
 // VerbosityLevel determines output detail

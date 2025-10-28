@@ -54,7 +54,7 @@ func (f *AIFormatter) SetGraphClient(client *graph.Client) {
 
 // Format outputs structured JSON following AI Mode schema v1.0
 // 12-factor: Factor 4 - Tools are structured outputs
-func (f *AIFormatter) Format(result *models.RiskResult, w io.Writer) error {
+func (f *AIFormatter) Format(result *types.RiskResult, w io.Writer) error {
 	var output interface{}
 
 	// Use new ToAIMode converter if Phase1 result is available
@@ -72,7 +72,7 @@ func (f *AIFormatter) Format(result *models.RiskResult, w io.Writer) error {
 	return encoder.Encode(output)
 }
 
-func (f *AIFormatter) buildAIModeOutput(result *models.RiskResult) map[string]interface{} {
+func (f *AIFormatter) buildAIModeOutput(result *types.RiskResult) map[string]interface{} {
 	return map[string]interface{}{
 		"meta":                            f.buildMeta(result),
 		"risk":                            f.buildRisk(result),
@@ -91,7 +91,7 @@ func (f *AIFormatter) buildAIModeOutput(result *models.RiskResult) map[string]in
 }
 
 // buildMeta creates the meta section (request context)
-func (f *AIFormatter) buildMeta(result *models.RiskResult) map[string]interface{} {
+func (f *AIFormatter) buildMeta(result *types.RiskResult) map[string]interface{} {
 	meta := map[string]interface{}{
 		"version":        f.Version,
 		"timestamp":      time.Now().Format(time.RFC3339),
@@ -106,7 +106,7 @@ func (f *AIFormatter) buildMeta(result *models.RiskResult) map[string]interface{
 }
 
 // buildRisk creates the risk section (summary assessment)
-func (f *AIFormatter) buildRisk(result *models.RiskResult) map[string]interface{} {
+func (f *AIFormatter) buildRisk(result *types.RiskResult) map[string]interface{} {
 	return map[string]interface{}{
 		"level":      result.RiskLevel,
 		"score":      result.RiskScore,
@@ -115,7 +115,7 @@ func (f *AIFormatter) buildRisk(result *models.RiskResult) map[string]interface{
 }
 
 // buildFiles creates the files section (per-file details)
-func (f *AIFormatter) buildFiles(result *models.RiskResult) []map[string]interface{} {
+func (f *AIFormatter) buildFiles(result *types.RiskResult) []map[string]interface{} {
 	files := []map[string]interface{}{}
 
 	for _, file := range result.Files {
@@ -126,7 +126,7 @@ func (f *AIFormatter) buildFiles(result *models.RiskResult) []map[string]interfa
 		}
 
 		// Filter issues for this file
-		fileIssues := []models.RiskIssue{}
+		fileIssues := []types.RiskIssue{}
 		for _, issue := range result.Issues {
 			if issue.File == file.Path {
 				fileIssues = append(fileIssues, issue)
@@ -148,7 +148,7 @@ func (f *AIFormatter) buildFiles(result *models.RiskResult) []map[string]interfa
 }
 
 // transformIssues converts issues to AI mode format
-func (f *AIFormatter) transformIssues(issues []models.RiskIssue) []map[string]interface{} {
+func (f *AIFormatter) transformIssues(issues []types.RiskIssue) []map[string]interface{} {
 	transformed := []map[string]interface{}{}
 
 	for _, issue := range issues {
@@ -173,7 +173,7 @@ func (f *AIFormatter) transformIssues(issues []models.RiskIssue) []map[string]in
 }
 
 // buildGraphAnalysis creates the graph_analysis section
-func (f *AIFormatter) buildGraphAnalysis(result *models.RiskResult) map[string]interface{} {
+func (f *AIFormatter) buildGraphAnalysis(result *types.RiskResult) map[string]interface{} {
 	// Build blast radius info
 	blastRadius := map[string]interface{}{
 		"total_affected_files": result.BlastRadius,
@@ -214,7 +214,7 @@ func (f *AIFormatter) buildGraphAnalysis(result *models.RiskResult) map[string]i
 }
 
 // buildTrace creates the investigation_trace section
-func (f *AIFormatter) buildTrace(result *models.RiskResult) []map[string]interface{} {
+func (f *AIFormatter) buildTrace(result *types.RiskResult) []map[string]interface{} {
 	trace := []map[string]interface{}{}
 
 	for i, hop := range result.InvestigationTrace {
@@ -248,7 +248,7 @@ func (f *AIFormatter) buildTrace(result *models.RiskResult) []map[string]interfa
 }
 
 // buildRecommendations creates the recommendations section
-func (f *AIFormatter) buildRecommendations(result *models.RiskResult) map[string]interface{} {
+func (f *AIFormatter) buildRecommendations(result *types.RiskResult) map[string]interface{} {
 	// For now, group recommendations by priority based on severity
 	critical := []map[string]interface{}{}
 	high := []map[string]interface{}{}
@@ -280,7 +280,7 @@ func (f *AIFormatter) buildRecommendations(result *models.RiskResult) map[string
 }
 
 // buildAIActions creates the ai_assistant_actions section
-func (f *AIFormatter) buildAIActions(result *models.RiskResult) []map[string]interface{} {
+func (f *AIFormatter) buildAIActions(result *types.RiskResult) []map[string]interface{} {
 	actions := []map[string]interface{}{}
 
 	for _, issue := range result.Issues {
@@ -306,7 +306,7 @@ func (f *AIFormatter) buildAIActions(result *models.RiskResult) []map[string]int
 }
 
 // buildInsights creates the contextual_insights section
-func (f *AIFormatter) buildInsights(result *models.RiskResult) map[string]interface{} {
+func (f *AIFormatter) buildInsights(result *types.RiskResult) map[string]interface{} {
 	// Build similar past changes
 	similarChanges := []map[string]interface{}{}
 	for _, change := range result.SimilarPastChanges {
@@ -352,7 +352,7 @@ func (f *AIFormatter) buildInsights(result *models.RiskResult) map[string]interf
 }
 
 // buildPerformance creates the performance section
-func (f *AIFormatter) buildPerformance(result *models.RiskResult) map[string]interface{} {
+func (f *AIFormatter) buildPerformance(result *types.RiskResult) map[string]interface{} {
 	return map[string]interface{}{
 		"total_duration_ms": result.Performance.TotalDurationMS,
 		"breakdown":         result.Performance.Breakdown,
@@ -380,7 +380,7 @@ func containsMiddle(s, substr string) bool {
 
 // ToAIMode converts risk assessment to AI-consumable JSON
 // 12-factor: Factor 4 - Tools are structured outputs
-func ToAIMode(ctx context.Context, phase1 *metrics.Phase1Result, riskResult *models.RiskResult, graphClient *graph.Client) *AIJSONOutput {
+func ToAIMode(ctx context.Context, phase1 *metrics.Phase1Result, riskResult *types.RiskResult, graphClient *graph.Client) *AIJSONOutput {
 	// Get repository ID dynamically
 	repoID, err := git.GetRepoID()
 	if err != nil {
@@ -441,7 +441,7 @@ func ToAIMode(ctx context.Context, phase1 *metrics.Phase1Result, riskResult *mod
 	return output
 }
 
-func convertToFileAnalysis(phase1 *metrics.Phase1Result, result *models.RiskResult) FileAnalysis {
+func convertToFileAnalysis(phase1 *metrics.Phase1Result, result *types.RiskResult) FileAnalysis {
 	// Find the file in the result
 	var fileRisk types.FileRisk
 	for _, f := range result.Files {
@@ -482,7 +482,7 @@ func convertToFileAnalysis(phase1 *metrics.Phase1Result, result *models.RiskResu
 	}
 }
 
-func calculateFileReputation(phase1 *metrics.Phase1Result, result *models.RiskResult) float64 {
+func calculateFileReputation(phase1 *metrics.Phase1Result, result *types.RiskResult) float64 {
 	// Reputation = 1.0 - (normalized risk factors)
 	reputation := 1.0
 
@@ -505,7 +505,7 @@ func calculateFileReputation(phase1 *metrics.Phase1Result, result *models.RiskRe
 	return maxFloat64(reputation, 0.0)
 }
 
-func convertInvestigationTrace(result *models.RiskResult) []InvestigationHop {
+func convertInvestigationTrace(result *types.RiskResult) []InvestigationHop {
 	trace := make([]InvestigationHop, len(result.InvestigationTrace))
 	for i, hop := range result.InvestigationTrace {
 		// Convert metrics to MetricResult
@@ -532,7 +532,7 @@ func convertInvestigationTrace(result *models.RiskResult) []InvestigationHop {
 	return trace
 }
 
-func generateRecommendationsFromActions(result *models.RiskResult, actions []AIAssistantAction) Recommendations {
+func generateRecommendationsFromActions(result *types.RiskResult, actions []AIAssistantAction) Recommendations {
 	recs := Recommendations{
 		Critical: []Recommendation{},
 		High:     []Recommendation{},
@@ -595,7 +595,7 @@ func determinePriority(confidence, riskReduction float64) string {
 	return "low"
 }
 
-func determineBlockReason(phase1 *metrics.Phase1Result, result *models.RiskResult) string {
+func determineBlockReason(phase1 *metrics.Phase1Result, result *types.RiskResult) string {
 	reasons := []string{}
 
 	if phase1.Coupling != nil && phase1.Coupling.ShouldEscalate() {

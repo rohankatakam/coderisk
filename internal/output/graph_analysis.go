@@ -116,7 +116,7 @@ func GetTemporalCoupling(ctx context.Context, filePath string, graphClient *grap
 
 // IdentifyHotspots finds risky areas in the codebase
 // 12-factor: Factor 4 - Tools are structured outputs
-func IdentifyHotspots(ctx context.Context, phase1 *metrics.Phase1Result, riskResult *models.RiskResult, graphClient *graph.Client) []Hotspot {
+func IdentifyHotspots(ctx context.Context, phase1 *metrics.Phase1Result, riskResult *types.RiskResult, graphClient *graph.Client) []Hotspot {
 	var hotspots []Hotspot
 
 	// Hotspot criteria:
@@ -165,7 +165,7 @@ func IdentifyHotspots(ctx context.Context, phase1 *metrics.Phase1Result, riskRes
 	return hotspots
 }
 
-func shouldBeHotspot(phase1 *metrics.Phase1Result, result *models.RiskResult) bool {
+func shouldBeHotspot(phase1 *metrics.Phase1Result, result *types.RiskResult) bool {
 	// Check for high risk factors
 	hasCouplingIssue := phase1.Coupling != nil && phase1.Coupling.ShouldEscalate()
 	hasTestIssue := phase1.TestRatio != nil && phase1.TestRatio.ShouldEscalate()
@@ -174,7 +174,7 @@ func shouldBeHotspot(phase1 *metrics.Phase1Result, result *models.RiskResult) bo
 	return hasCouplingIssue || hasTestIssue || hasCoChangeIssue
 }
 
-func calculateHotspotScore(phase1 *metrics.Phase1Result, result *models.RiskResult) float64 {
+func calculateHotspotScore(phase1 *metrics.Phase1Result, result *types.RiskResult) float64 {
 	score := 0.0
 
 	// Factor 1: Coupling (0-0.3)
@@ -200,7 +200,7 @@ func calculateHotspotScore(phase1 *metrics.Phase1Result, result *models.RiskResu
 	return minFloat64(score, 1.0)
 }
 
-func determineHotspotReason(phase1 *metrics.Phase1Result, result *models.RiskResult) string {
+func determineHotspotReason(phase1 *metrics.Phase1Result, result *types.RiskResult) string {
 	// Prioritize reasons
 	if phase1.Coupling != nil && phase1.Coupling.ShouldEscalate() {
 		if phase1.TestRatio != nil && phase1.TestRatio.ShouldEscalate() {

@@ -10,8 +10,33 @@ import (
 	"strings"
 
 	"github.com/rohankatakam/coderisk/internal/database"
-	"github.com/rohankatakam/coderisk/internal/temporal"
 )
+
+// normalizeGitHubEmail normalizes GitHub email formats to ensure consistency
+// between commit authors and PR authors.
+//
+// GitHub uses two email formats:
+//   - Commits: "{GitHub_ID}+{login}@users.noreply.github.com" (e.g., "12345+user@...")
+//   - PRs: "{login}@users.noreply.github.com" (e.g., "user@...")
+//
+// This function strips the GitHub ID prefix to create a canonical email.
+//
+// Examples:
+//   - "38349974+EddyDavies@users.noreply.github.com" → "EddyDavies@users.noreply.github.com"
+//   - "EddyDavies@users.noreply.github.com" → "EddyDavies@users.noreply.github.com"
+//   - "real.email@example.com" → "real.email@example.com" (unchanged)
+func normalizeGitHubEmail(email string) string {
+	// Check if this is a GitHub noreply email with ID prefix
+	if strings.Contains(email, "+") && strings.Contains(email, "@users.noreply.github.com") {
+		parts := strings.Split(email, "+")
+		if len(parts) == 2 {
+			// Return "login@users.noreply.github.com"
+			return parts[1]
+		}
+	}
+	// Return email unchanged if not a GitHub noreply format
+	return email
+}
 
 // Builder orchestrates graph construction from PostgreSQL staging tables
 // Reference: dev_docs/03-implementation/integration_guides/layers_2_3_graph_construction.md
@@ -37,11 +62,12 @@ type BuildStats struct {
 // BuildGraph constructs the complete graph for a repository
 // This is Priority 6B: PostgreSQL → Neo4j/Neptune
 // repoPath is the absolute path to the cloned repository (needed to resolve file paths)
+// Schema: PRE_COMMIT_GRAPH_SPEC.md - 4 nodes (File, Developer, Commit, PR), 7 edges
 func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string) (*BuildStats, error) {
 	log.Printf("🔨 Building graph for repo %d (path: %s)...", repoID, repoPath)
 	stats := &BuildStats{}
 
-	// Process commits (Layer 2: Temporal)
+	// Process commits (creates Commit, Developer nodes + AUTHORED, MODIFIED edges)
 	commitStats, err := b.processCommits(ctx, repoID, repoPath)
 	if err != nil {
 		return stats, fmt.Errorf("process commits failed: %w", err)
@@ -50,16 +76,7 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string)
 	stats.Edges += commitStats.Edges
 	log.Printf("  ✓ Processed commits: %d nodes, %d edges", commitStats.Nodes, commitStats.Edges)
 
-	// Process issues (Layer 3: Incidents)
-	issueStats, err := b.processIssues(ctx, repoID)
-	if err != nil {
-		return stats, fmt.Errorf("process issues failed: %w", err)
-	}
-	stats.Nodes += issueStats.Nodes
-	stats.Edges += issueStats.Edges
-	log.Printf("  ✓ Processed issues: %d nodes, %d edges", issueStats.Nodes, issueStats.Edges)
-
-	// Process PRs (Layer 3: Incidents)
+	// Process PRs (creates PR nodes + CREATED, MERGED_AS edges)
 	prStats, err := b.processPRs(ctx, repoID)
 	if err != nil {
 		return stats, fmt.Errorf("process PRs failed: %w", err)
@@ -68,34 +85,26 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string)
 	stats.Edges += prStats.Edges
 	log.Printf("  ✓ Processed PRs: %d nodes, %d edges", prStats.Nodes, prStats.Edges)
 
-	// Process branches (Layer 2: Temporal)
-	branchStats, err := b.processBranches(ctx, repoID)
-	if err != nil {
-		return stats, fmt.Errorf("process branches failed: %w", err)
-	}
-	stats.Nodes += branchStats.Nodes
-	log.Printf("  ✓ Processed branches: %d nodes", branchStats.Nodes)
+	// NOTE: OWNS edges removed - ownership is now computed dynamically via queries
+	// See: IMPLEMENTATION_GAP_ANALYSIS.md - Ownership should be dynamic from AUTHORED + MODIFIED edges
+	// No pre-computed OWNS edges in MVP spec
 
-	// Link commits to default branch (MVP simplification: only default branch)
-	// See: dev_docs/01-architecture/simplified_graph_schema.md line 268
-	commitBranchStats, err := b.linkCommitsToDefaultBranch(ctx, repoID)
+	// Link commits to PRs via IN_PR edges
+	commitPRStats, err := b.linkCommitsToPRs(ctx, repoID)
 	if err != nil {
-		return stats, fmt.Errorf("link commits to default branch failed: %w", err)
+		return stats, fmt.Errorf("link commits to PRs failed: %w", err)
 	}
-	stats.Edges += commitBranchStats.Edges
-	log.Printf("  ✓ Linked commits to default branch: %d edges", commitBranchStats.Edges)
+	stats.Edges += commitPRStats.Edges
+	log.Printf("  ✓ Linked commits to PRs: %d edges", commitPRStats.Edges)
 
-	// Link PRs to branches
-	prBranchStats, err := b.linkPRsToBranches(ctx, repoID)
+	// Process Issues (creates Issue nodes)
+	// Phase 2 of issue_ingestion_implementation_plan.md
+	issueStats, err := b.processIssues(ctx, repoID)
 	if err != nil {
-		return stats, fmt.Errorf("link PRs to branches failed: %w", err)
+		return stats, fmt.Errorf("process issues failed: %w", err)
 	}
-	stats.Edges += prBranchStats.Edges
-	log.Printf("  ✓ Linked PRs to branches: %d edges", prBranchStats.Edges)
-
-	// Note: CO_CHANGED edges are now computed dynamically in queries, not pre-calculated
-	// This prevents stale data and reduces ingestion time by ~30%
-	// See: dev_docs/01-architecture/simplified_graph_schema.md
+	stats.Nodes += issueStats.Nodes
+	log.Printf("  ✓ Processed issues: %d nodes", issueStats.Nodes)
 
 	return stats, nil
 }
@@ -186,28 +195,33 @@ func (b *Builder) transformCommit(commit database.CommitData, repoPath string) (
 	}
 
 	// 1. Create Commit node
+	// Schema: PRE_COMMIT_GRAPH_SPEC.md - Commit with on_default_branch property
 	commitNode := GraphNode{
 		Label: "Commit",
 		ID:    fmt.Sprintf("commit:%s", commit.SHA),
 		Properties: map[string]interface{}{
-			"sha":          commit.SHA,
-			"message":      commit.Message,
-			"author_email": commit.AuthorEmail,
-			"author_name":  commit.AuthorName,
-			"author_date":  commit.AuthorDate.Unix(),
-			"additions":    fullCommit.Stats.Additions,
-			"deletions":    fullCommit.Stats.Deletions,
+			"sha":                commit.SHA,
+			"message":            commit.Message,
+			"author_email":       commit.AuthorEmail,
+			"committed_at":       commit.AuthorDate.Unix(),
+			"additions":          fullCommit.Stats.Additions,
+			"deletions":          fullCommit.Stats.Deletions,
+			"on_default_branch":  true, // All commits from GitHub API are on default branch
 		},
 	}
 	nodes = append(nodes, commitNode)
 
 	// 2. Create Developer node
+	// Schema: PRE_COMMIT_GRAPH_SPEC.md - Developer with email (PRIMARY KEY), name
+	// Normalize email to ensure consistency with PR authors
+	normalizedEmail := normalizeGitHubEmail(commit.AuthorEmail)
 	developerNode := GraphNode{
 		Label: "Developer",
-		ID:    fmt.Sprintf("developer:%s", commit.AuthorEmail),
+		ID:    fmt.Sprintf("developer:%s", normalizedEmail),
 		Properties: map[string]interface{}{
-			"email": commit.AuthorEmail,
-			"name":  commit.AuthorName,
+			"email":        normalizedEmail,
+			"name":         commit.AuthorName,
+			"last_active":  commit.AuthorDate.Unix(), // Most recent commit timestamp
 		},
 	}
 	nodes = append(nodes, developerNode)
@@ -223,30 +237,218 @@ func (b *Builder) transformCommit(commit database.CommitData, repoPath string) (
 	}
 	edges = append(edges, authoredEdge)
 
-	// 4. Create MODIFIES edges for each file
-	// Convert relative GitHub paths to absolute paths matching File nodes
+	// 4. Create File nodes + MODIFIED edges for each file (Commit → File)
+	// Schema: PRE_COMMIT_GRAPH_SPEC.md - MODIFIED edge with additions, deletions, status
+	// GitHub API provides relative paths which now match File node paths exactly!
+	// Reference: issue_ingestion_implementation_plan.md Phase 1 - File Resolution
 	for _, file := range fullCommit.Files {
-		// Convert relative path (e.g., "src/main.go") to absolute (e.g., "/path/to/repo/src/main.go")
-		absolutePath := fmt.Sprintf("%s/%s", repoPath, file.Filename)
+		// Use GitHub API path directly - it's relative from repo root
+		relativePath := file.Filename
 
-		modifiesEdge := GraphEdge{
-			Label: "MODIFIES",
-			From:  commitNode.ID,
-			To:    fmt.Sprintf("file:%s", absolutePath),
+		// Create File node with historical flag
+		// These represent files as they existed at commit time (historical paths)
+		fileNode := GraphNode{
+			Label: "File",
+			ID:    fmt.Sprintf("file:%s", relativePath),
 			Properties: map[string]interface{}{
-				"status":    file.Status,
-				"additions": file.Additions,
-				"deletions": file.Deletions,
-				"timestamp": commit.AuthorDate.Unix(),
+				"path":       relativePath,
+				"historical": true, // Mark as historical (from GitHub commits)
 			},
 		}
-		edges = append(edges, modifiesEdge)
+		nodes = append(nodes, fileNode)
+
+		// Create MODIFIED edge
+		modifiedEdge := GraphEdge{
+			Label: "MODIFIED",
+			From:  commitNode.ID,
+			To:    fmt.Sprintf("file:%s", relativePath),
+			Properties: map[string]interface{}{
+				"additions": file.Additions,
+				"deletions": file.Deletions,
+				"status":    file.Status, // "added", "modified", "deleted", "renamed"
+			},
+		}
+		edges = append(edges, modifiedEdge)
 	}
 
 	return nodes, edges, nil
 }
 
-// processIssues transforms issues from PostgreSQL to graph nodes
+// NOTE: Issue processing removed - Issues are not part of PRE_COMMIT_GRAPH_SPEC.md
+// Issues will still be fetched from GitHub API for future use, but not stored in graph
+
+// processPRs transforms PRs from PostgreSQL to graph nodes/edges
+// Creates PR nodes + CREATED (Developer → PR) and MERGED_AS (PR → Commit) edges
+func (b *Builder) processPRs(ctx context.Context, repoID int64) (*BuildStats, error) {
+	batchSize := 100
+	stats := &BuildStats{}
+
+	for {
+		// Fetch unprocessed PRs
+		prs, err := b.stagingDB.FetchUnprocessedPRs(ctx, repoID, batchSize)
+		if err != nil {
+			return stats, err
+		}
+
+		if len(prs) == 0 {
+			break
+		}
+
+		// Transform to graph entities
+		var allNodes []GraphNode
+		var allEdges []GraphEdge
+		var prIDs []int64
+
+		for _, pr := range prs {
+			node, edges, err := b.transformPR(pr)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to transform PR #%d: %v", pr.Number, err)
+				continue
+			}
+
+			allNodes = append(allNodes, node)
+			allEdges = append(allEdges, edges...)
+
+			// Add CREATED edge (Developer → PR)
+			// Parse raw data to get author email
+			var fullPR struct {
+				User struct {
+					Login string `json:"login"`
+					Email string `json:"email"`
+				} `json:"user"`
+			}
+			if err := json.Unmarshal(pr.RawData, &fullPR); err == nil {
+				// GitHub API doesn't always return email, construct from login
+				authorEmail := fullPR.User.Email
+				if authorEmail == "" {
+					// Fallback: use login@users.noreply.github.com
+					authorEmail = fmt.Sprintf("%s@users.noreply.github.com", fullPR.User.Login)
+				}
+
+				createdEdge := GraphEdge{
+					Label: "CREATED",
+					From:  fmt.Sprintf("developer:%s", authorEmail),
+					To:    node.ID,
+					Properties: map[string]interface{}{},
+				}
+				allEdges = append(allEdges, createdEdge)
+			}
+
+			prIDs = append(prIDs, pr.ID)
+		}
+
+		// Create nodes
+		if len(allNodes) > 0 {
+			if _, err := b.backend.CreateNodes(ctx, allNodes); err != nil {
+				return stats, fmt.Errorf("failed to create PR nodes: %w", err)
+			}
+			stats.Nodes += len(allNodes)
+		}
+
+		// Create edges
+		if len(allEdges) > 0 {
+			if err := b.backend.CreateEdges(ctx, allEdges); err != nil {
+				return stats, fmt.Errorf("failed to create PR edges: %w", err)
+			}
+			stats.Edges += len(allEdges)
+		}
+
+		// Mark as processed
+		if len(prIDs) > 0 {
+			if err := b.stagingDB.MarkPRsProcessed(ctx, prIDs); err != nil {
+				return stats, fmt.Errorf("failed to mark PRs as processed: %w", err)
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// transformPR converts a PR into graph node and edges
+// Schema: PRE_COMMIT_GRAPH_SPEC.md - PR node with CREATED and MERGED_AS edges
+func (b *Builder) transformPR(pr database.PRData) (GraphNode, []GraphEdge, error) {
+	var edges []GraphEdge
+
+	// Parse raw data to extract author information
+	var fullPR struct {
+		User struct {
+			Login string `json:"login"`
+			Email string `json:"email"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(pr.RawData, &fullPR); err != nil {
+		log.Printf("  ⚠️  Failed to parse PR author from raw data: %v", err)
+	}
+
+	// Parse raw data to extract branch information
+	var fullPRData struct {
+		Base struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+		Head struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+	}
+	if err := json.Unmarshal(pr.RawData, &fullPRData); err != nil {
+		log.Printf("  ⚠️  Failed to parse PR branches from raw data: %v", err)
+	}
+
+	// Extract author email - GitHub API returns login, may not have email
+	authorEmail := fullPR.User.Email
+	if authorEmail == "" {
+		// Fallback: use login@users.noreply.github.com
+		authorEmail = fmt.Sprintf("%s@users.noreply.github.com", fullPR.User.Login)
+	}
+	// Normalize email to match Developer nodes
+	authorEmail = normalizeGitHubEmail(authorEmail)
+
+	// Create PR node
+	// Schema: PRE_COMMIT_GRAPH_SPEC.md - PR with author_email, base_branch, head_branch, merge_commit_sha
+	node := GraphNode{
+		Label: "PR",
+		ID:    fmt.Sprintf("pr:%d", pr.Number),
+		Properties: map[string]interface{}{
+			"number":       pr.Number,
+			"title":        pr.Title,
+			"body":         pr.Body,
+			"state":        pr.State,
+			"base_branch":  fullPRData.Base.Ref,
+			"head_branch":  fullPRData.Head.Ref,
+			"author_email": authorEmail, // Links to Developer (normalized)
+			"created_at":   pr.CreatedAt.Unix(),
+		},
+	}
+
+	if pr.MergedAt != nil {
+		node.Properties["merged_at"] = pr.MergedAt.Unix()
+	}
+
+	if pr.MergeCommitSHA != nil {
+		node.Properties["merge_commit_sha"] = *pr.MergeCommitSHA
+	}
+
+	// CREATED edge will be added in processPRs
+
+	// Create MERGED_AS edge if merged (PR → Commit)
+	// Schema: PRE_COMMIT_GRAPH_SPEC.md - MERGED_AS relationship
+	if pr.Merged && pr.MergeCommitSHA != nil {
+		mergedAsEdge := GraphEdge{
+			Label:      "MERGED_AS",
+			From:       node.ID,
+			To:         fmt.Sprintf("commit:%s", *pr.MergeCommitSHA),
+			Properties: map[string]interface{}{},
+		}
+		edges = append(edges, mergedAsEdge)
+	}
+
+	// NOTE: FIXES edges removed - Issue nodes not in PRE_COMMIT_GRAPH_SPEC.md
+
+	return node, edges, nil
+}
+
+// processIssues transforms Issues from PostgreSQL to graph nodes
+// Phase 2 of issue_ingestion_implementation_plan.md
+// Creates Issue nodes with all properties from schema.md
 func (b *Builder) processIssues(ctx context.Context, repoID int64) (*BuildStats, error) {
 	batchSize := 100
 	stats := &BuildStats{}
@@ -296,14 +498,17 @@ func (b *Builder) processIssues(ctx context.Context, repoID int64) (*BuildStats,
 	return stats, nil
 }
 
-// transformIssue converts an issue into a graph node
+// transformIssue converts an Issue into a graph node
+// Schema reference: dev_docs/mvp/issue_ingestion_implementation_plan.md Phase 4.2
 func (b *Builder) transformIssue(issue database.IssueData) (GraphNode, error) {
-	// Parse labels
+	// Parse labels from JSON array
 	var labels []string
 	if err := json.Unmarshal(issue.Labels, &labels); err != nil {
-		return GraphNode{}, fmt.Errorf("failed to unmarshal labels: %w", err)
+		log.Printf("  ⚠️  Failed to parse labels for issue #%d: %v", issue.Number, err)
+		labels = []string{} // Default to empty array
 	}
 
+	// Create Issue node
 	node := GraphNode{
 		Label: "Issue",
 		ID:    fmt.Sprintf("issue:%d", issue.Number),
@@ -317,125 +522,12 @@ func (b *Builder) transformIssue(issue database.IssueData) (GraphNode, error) {
 		},
 	}
 
+	// Add closed_at if issue is closed
 	if issue.ClosedAt != nil {
 		node.Properties["closed_at"] = issue.ClosedAt.Unix()
 	}
 
 	return node, nil
-}
-
-// processPRs transforms PRs from PostgreSQL to graph nodes/edges
-func (b *Builder) processPRs(ctx context.Context, repoID int64) (*BuildStats, error) {
-	batchSize := 100
-	stats := &BuildStats{}
-
-	for {
-		// Fetch unprocessed PRs
-		prs, err := b.stagingDB.FetchUnprocessedPRs(ctx, repoID, batchSize)
-		if err != nil {
-			return stats, err
-		}
-
-		if len(prs) == 0 {
-			break
-		}
-
-		// Transform to graph entities
-		var allNodes []GraphNode
-		var allEdges []GraphEdge
-		var prIDs []int64
-
-		for _, pr := range prs {
-			node, edges, err := b.transformPR(pr)
-			if err != nil {
-				log.Printf("  ⚠️  Failed to transform PR #%d: %v", pr.Number, err)
-				continue
-			}
-
-			allNodes = append(allNodes, node)
-			allEdges = append(allEdges, edges...)
-			prIDs = append(prIDs, pr.ID)
-		}
-
-		// Create nodes
-		if len(allNodes) > 0 {
-			if _, err := b.backend.CreateNodes(ctx, allNodes); err != nil {
-				return stats, fmt.Errorf("failed to create PR nodes: %w", err)
-			}
-			stats.Nodes += len(allNodes)
-		}
-
-		// Create edges
-		if len(allEdges) > 0 {
-			if err := b.backend.CreateEdges(ctx, allEdges); err != nil {
-				return stats, fmt.Errorf("failed to create PR edges: %w", err)
-			}
-			stats.Edges += len(allEdges)
-		}
-
-		// Mark as processed
-		if len(prIDs) > 0 {
-			if err := b.stagingDB.MarkPRsProcessed(ctx, prIDs); err != nil {
-				return stats, fmt.Errorf("failed to mark PRs as processed: %w", err)
-			}
-		}
-	}
-
-	return stats, nil
-}
-
-// transformPR converts a PR into graph node and edges
-func (b *Builder) transformPR(pr database.PRData) (GraphNode, []GraphEdge, error) {
-	var edges []GraphEdge
-
-	// Create PR node
-	node := GraphNode{
-		Label: "PullRequest",
-		ID:    fmt.Sprintf("pr:%d", pr.Number),
-		Properties: map[string]interface{}{
-			"number":     pr.Number,
-			"title":      pr.Title,
-			"body":       pr.Body,
-			"state":      pr.State,
-			"merged":     pr.Merged,
-			"created_at": pr.CreatedAt.Unix(),
-		},
-	}
-
-	if pr.MergedAt != nil {
-		node.Properties["merged_at"] = pr.MergedAt.Unix()
-	}
-
-	// Create MERGED_TO edge if merged
-	if pr.Merged && pr.MergeCommitSHA != nil {
-		mergedToEdge := GraphEdge{
-			Label:      "MERGED_TO",
-			From:       node.ID,
-			To:         fmt.Sprintf("commit:%s", *pr.MergeCommitSHA),
-			Properties: map[string]interface{}{},
-		}
-		if pr.MergedAt != nil {
-			mergedToEdge.Properties["merged_at"] = pr.MergedAt.Unix()
-		}
-		edges = append(edges, mergedToEdge)
-	}
-
-	// Extract issue references from title and body for FIXES edges
-	issueNumbers := extractIssueReferences(pr.Title, pr.Body)
-	for _, issueNum := range issueNumbers {
-		fixesEdge := GraphEdge{
-			Label: "FIXES",
-			From:  node.ID,
-			To:    fmt.Sprintf("issue:%d", issueNum),
-			Properties: map[string]interface{}{
-				"detected_from": "pr_body",
-				"timestamp":     pr.CreatedAt.Unix(),
-			},
-		}
-		edges = append(edges, fixesEdge)
-	}
-
-	return node, edges, nil
 }
 
 // extractIssueReferences parses text for "Fixes #123", "Closes #456" patterns
@@ -461,210 +553,39 @@ func extractIssueReferences(title, body string) []int {
 	return issueNumbers
 }
 
-// AddLayer2CoChangedEdges is DEPRECATED - CO_CHANGED edges are now computed dynamically
-// This method is kept for backwards compatibility but does nothing
-// See: dev_docs/01-architecture/simplified_graph_schema.md
-func (b *Builder) AddLayer2CoChangedEdges(ctx context.Context, coChanges []temporal.CoChangeResult) (*BuildStats, error) {
-	log.Printf("⚠️  AddLayer2CoChangedEdges called but CO_CHANGED edges are now computed dynamically")
-	log.Printf("    See: dev_docs/01-architecture/simplified_graph_schema.md")
-	return &BuildStats{}, nil
-}
+// REMOVED: calculateOwnership - OWNS edges are now computed dynamically via queries
+// Per IMPLEMENTATION_GAP_ANALYSIS.md:
+// "Pre-computed OWNS edges contradict dynamic query philosophy"
+// Ownership is now calculated on-demand using:
+//   MATCH (d:Developer)-[:AUTHORED]->(c:Commit)-[:MODIFIED]->(f:File {path: $file_path})
+// See: internal/risk/queries.go - QueryOwnership for the dynamic query
 
-// AddLayer3IncidentNodes creates Incident nodes in the graph
-// This is called from the incidents package when creating manual incident links
-func (b *Builder) AddLayer3IncidentNodes(ctx context.Context, incidents []GraphNode) (*BuildStats, error) {
+// linkCommitsToPRs creates IN_PR edges (Commit → PR)
+// Schema: PRE_COMMIT_GRAPH_SPEC.md - IN_PR relationship
+func (b *Builder) linkCommitsToPRs(ctx context.Context, repoID int64) (*BuildStats, error) {
 	stats := &BuildStats{}
 
-	if len(incidents) == 0 {
-		return stats, nil
-	}
-
-	// Create incident nodes
-	if _, err := b.backend.CreateNodes(ctx, incidents); err != nil {
-		return stats, fmt.Errorf("failed to create incident nodes: %w", err)
-	}
-
-	stats.Nodes = len(incidents)
-	return stats, nil
-}
-
-// AddLayer3CausedByEdges creates CAUSED_BY edges between incidents and files
-// This is called from the incidents package when creating manual incident links
-func (b *Builder) AddLayer3CausedByEdges(ctx context.Context, edges []GraphEdge) (*BuildStats, error) {
-	stats := &BuildStats{}
-
-	if len(edges) == 0 {
-		return stats, nil
-	}
-
-	// Create CAUSED_BY edges
-	if err := b.backend.CreateEdges(ctx, edges); err != nil {
-		return stats, fmt.Errorf("failed to create CAUSED_BY edges: %w", err)
-	}
-
-	stats.Edges = len(edges)
-	return stats, nil
-}
-
-// processBranches transforms branches from PostgreSQL to graph nodes
-func (b *Builder) processBranches(ctx context.Context, repoID int64) (*BuildStats, error) {
-	batchSize := 100
-	stats := &BuildStats{}
-
-	// Get default branch name
-	defaultBranchName, err := b.stagingDB.GetDefaultBranchName(ctx, repoID)
-	if err != nil {
-		return stats, fmt.Errorf("failed to get default branch name: %w", err)
-	}
-
-	for {
-		// Fetch unprocessed branches
-		branches, err := b.stagingDB.FetchUnprocessedBranches(ctx, repoID, batchSize)
-		if err != nil {
-			return stats, err
-		}
-
-		if len(branches) == 0 {
-			break
-		}
-
-		// Transform to graph entities
-		var allNodes []GraphNode
-		var branchIDs []int64
-
-		for _, branch := range branches {
-			node := b.transformBranch(branch, defaultBranchName)
-			allNodes = append(allNodes, node)
-			branchIDs = append(branchIDs, branch.ID)
-		}
-
-		// Create nodes
-		if len(allNodes) > 0 {
-			if _, err := b.backend.CreateNodes(ctx, allNodes); err != nil {
-				return stats, fmt.Errorf("failed to create branch nodes: %w", err)
-			}
-			stats.Nodes += len(allNodes)
-		}
-
-		// Mark as processed
-		if len(branchIDs) > 0 {
-			if err := b.stagingDB.MarkBranchesProcessed(ctx, branchIDs); err != nil {
-				return stats, fmt.Errorf("failed to mark branches as processed: %w", err)
-			}
-		}
-	}
-
-	return stats, nil
-}
-
-// transformBranch converts a branch into a graph node
-func (b *Builder) transformBranch(branch database.BranchData, defaultBranchName string) GraphNode {
-	isDefault := branch.Name == defaultBranchName
-
-	node := GraphNode{
-		Label: "Branch",
-		ID:    fmt.Sprintf("branch:%s", branch.Name),
-		Properties: map[string]interface{}{
-			"name":       branch.Name,
-			"is_default": isDefault,
-		},
-	}
-
-	return node
-}
-
-// linkCommitsToDefaultBranch creates [:ON_BRANCH] edges from all commits to the default branch
-// MVP simplification: only link to default branch (see simplified_graph_schema.md line 268)
-func (b *Builder) linkCommitsToDefaultBranch(ctx context.Context, repoID int64) (*BuildStats, error) {
-	stats := &BuildStats{}
-
-	// Get default branch name
-	defaultBranchName, err := b.stagingDB.GetDefaultBranchName(ctx, repoID)
-	if err != nil {
-		return stats, fmt.Errorf("failed to get default branch name: %w", err)
-	}
-
-	// Get all processed commit SHAs
-	shas, err := b.stagingDB.GetProcessedCommitSHAs(ctx, repoID)
-	if err != nil {
-		return stats, fmt.Errorf("failed to get commit SHAs: %w", err)
-	}
-
-	// Build ON_BRANCH edges
-	var edges []GraphEdge
-	for _, sha := range shas {
-		edge := GraphEdge{
-			Label:      "ON_BRANCH",
-			From:       fmt.Sprintf("commit:%s", sha),
-			To:         fmt.Sprintf("branch:%s", defaultBranchName),
-			Properties: map[string]interface{}{},
-		}
-		edges = append(edges, edge)
-	}
-
-	// Create edges in batches
-	if len(edges) > 0 {
-		batchSize := 100
-		for i := 0; i < len(edges); i += batchSize {
-			end := i + batchSize
-			if end > len(edges) {
-				end = len(edges)
-			}
-
-			batch := edges[i:end]
-			if err := b.backend.CreateEdges(ctx, batch); err != nil {
-				return stats, fmt.Errorf("failed to create ON_BRANCH edges (batch %d-%d): %w", i, end, err)
-			}
-		}
-
-		stats.Edges = len(edges)
-	}
-
-	return stats, nil
-}
-
-// linkPRsToBranches creates [:FROM_BRANCH], [:TO_BRANCH], [:MERGED_AS] edges for PRs
-func (b *Builder) linkPRsToBranches(ctx context.Context, repoID int64) (*BuildStats, error) {
-	stats := &BuildStats{}
-
-	// Get all processed PRs with branch data
+	// Get all processed PRs with their commit data
 	prs, err := b.stagingDB.GetProcessedPRBranchData(ctx, repoID)
 	if err != nil {
-		return stats, fmt.Errorf("failed to get PR branch data: %w", err)
+		return stats, fmt.Errorf("failed to get PR data: %w", err)
 	}
 
-	// Build PR-branch edges
+	// For each PR, we need to find all commits that are part of it
+	// This is complex - for MVP, we'll link the merge commit via IN_PR
+	// Full implementation would require fetching PR commits from GitHub API
+
 	var edges []GraphEdge
 	for _, pr := range prs {
-		prID := fmt.Sprintf("pr:%d", pr.Number)
-
-		// Create FROM_BRANCH edge (source branch)
-		fromBranchEdge := GraphEdge{
-			Label:      "FROM_BRANCH",
-			From:       prID,
-			To:         fmt.Sprintf("branch:%s", pr.HeadRef),
-			Properties: map[string]interface{}{},
-		}
-		edges = append(edges, fromBranchEdge)
-
-		// Create TO_BRANCH edge (target branch)
-		toBranchEdge := GraphEdge{
-			Label:      "TO_BRANCH",
-			From:       prID,
-			To:         fmt.Sprintf("branch:%s", pr.BaseRef),
-			Properties: map[string]interface{}{},
-		}
-		edges = append(edges, toBranchEdge)
-
-		// Create MERGED_AS edge if PR was merged
-		if pr.Merged && pr.MergeCommitSHA != nil {
-			mergedAsEdge := GraphEdge{
-				Label:      "MERGED_AS",
-				From:       prID,
-				To:         fmt.Sprintf("commit:%s", *pr.MergeCommitSHA),
+		if pr.MergeCommitSHA != nil {
+			// Link the merge commit to the PR
+			inPREdge := GraphEdge{
+				Label: "IN_PR",
+				From:  fmt.Sprintf("commit:%s", *pr.MergeCommitSHA),
+				To:    fmt.Sprintf("pr:%d", pr.Number),
 				Properties: map[string]interface{}{},
 			}
-			edges = append(edges, mergedAsEdge)
+			edges = append(edges, inPREdge)
 		}
 	}
 
@@ -679,7 +600,7 @@ func (b *Builder) linkPRsToBranches(ctx context.Context, repoID int64) (*BuildSt
 
 			batch := edges[i:end]
 			if err := b.backend.CreateEdges(ctx, batch); err != nil {
-				return stats, fmt.Errorf("failed to create PR-branch edges (batch %d-%d): %w", i, end, err)
+				return stats, fmt.Errorf("failed to create IN_PR edges (batch %d-%d): %w", i, end, err)
 			}
 		}
 
@@ -688,3 +609,9 @@ func (b *Builder) linkPRsToBranches(ctx context.Context, repoID int64) (*BuildSt
 
 	return stats, nil
 }
+
+// REMOVED: Deprecated methods (AddLayer2CoChangedEdges, AddLayer3IncidentNodes, AddLayer3CausedByEdges)
+// These methods were marked deprecated and are now removed per IMPLEMENTATION_GAP_ANALYSIS.md
+// - CO_CHANGED edges: Now computed dynamically via queries (see internal/risk/queries.go)
+// - Incident nodes: Not part of MVP schema (deferred to post-MVP)
+// - CAUSED_BY edges: Not part of MVP schema (deferred to post-MVP)

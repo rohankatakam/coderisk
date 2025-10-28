@@ -13,28 +13,28 @@ import (
 func TestQuietFormatter(t *testing.T) {
 	tests := []struct {
 		name     string
-		result   *models.RiskResult
+		result   *types.RiskResult
 		expected string
 	}{
 		{
 			name: "low risk",
-			result: &models.RiskResult{
+			result: &types.RiskResult{
 				RiskLevel: "LOW",
 			},
 			expected: "✅ LOW risk\n",
 		},
 		{
 			name: "none risk",
-			result: &models.RiskResult{
+			result: &types.RiskResult{
 				RiskLevel: "NONE",
 			},
 			expected: "✅ NONE risk\n",
 		},
 		{
 			name: "medium risk with 1 issue",
-			result: &models.RiskResult{
+			result: &types.RiskResult{
 				RiskLevel: "MEDIUM",
-				Issues: []models.RiskIssue{
+				Issues: []types.RiskIssue{
 					{Message: "No tests"},
 				},
 			},
@@ -42,9 +42,9 @@ func TestQuietFormatter(t *testing.T) {
 		},
 		{
 			name: "high risk with 3 issues",
-			result: &models.RiskResult{
+			result: &types.RiskResult{
 				RiskLevel: "HIGH",
-				Issues: []models.RiskIssue{
+				Issues: []types.RiskIssue{
 					{Message: "No tests"},
 					{Message: "High coupling"},
 					{Message: "No error handling"},
@@ -72,11 +72,11 @@ func TestQuietFormatter(t *testing.T) {
 }
 
 func TestStandardFormatter(t *testing.T) {
-	result := &models.RiskResult{
+	result := &types.RiskResult{
 		Branch:       "feature/test",
 		FilesChanged: 3,
 		RiskLevel:    "MEDIUM",
-		Issues: []models.RiskIssue{
+		Issues: []types.RiskIssue{
 			{
 				Severity: "MEDIUM",
 				File:     "auth.py",
@@ -147,22 +147,22 @@ func TestExplainFormatter(t *testing.T) {
 	threshold1 := 10.0
 	threshold2 := 0.7
 
-	result := &models.RiskResult{
+	result := &types.RiskResult{
 		StartTime: time.Date(2025, 10, 4, 14, 23, 15, 0, time.UTC),
 		EndTime:   time.Date(2025, 10, 4, 14, 23, 17, 0, time.UTC),
 		Duration:  2 * time.Second,
 		RiskLevel: "MEDIUM",
-		InvestigationTrace: []models.InvestigationHop{
+		InvestigationTrace: []types.InvestigationHop{
 			{
 				NodeID: "auth.py",
-				ChangedEntities: []models.ChangedEntity{
+				ChangedEntities: []types.ChangedEntity{
 					{
 						Name:      "authenticate_user()",
 						StartLine: 45,
 						EndLine:   67,
 					},
 				},
-				Metrics: []models.Metric{
+				Metrics: []types.Metric{
 					{
 						Name:      "Complexity",
 						Value:     6,

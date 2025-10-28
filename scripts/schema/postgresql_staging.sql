@@ -29,6 +29,9 @@ CREATE TABLE github_repositories (
     name VARCHAR(255) NOT NULL,                    -- e.g., "omnara"
     full_name VARCHAR(512) NOT NULL UNIQUE,        -- e.g., "omnara-ai/omnara"
 
+    -- Local repository path (for converting relative <-> absolute paths)
+    absolute_path TEXT,                             -- e.g., "/Users/.../omnara" (local clone location)
+
     -- Raw API response
     raw_data JSONB NOT NULL,
 

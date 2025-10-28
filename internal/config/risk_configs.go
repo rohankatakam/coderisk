@@ -200,7 +200,7 @@ var RiskConfigs = map[string]AdaptiveRiskConfig{
 }
 
 // GetConfig returns the risk config for the given key
-func GetConfig(key string) (RiskConfig, error) {
+func GetConfig(key string) (AdaptiveRiskConfig, error) {
 	config, exists := RiskConfigs[key]
 	if !exists {
 		return AdaptiveRiskConfig{}, fmt.Errorf("config not found: %s", key)
@@ -287,7 +287,7 @@ func getPermissivenessWord(valA, valB int) string {
 
 // SelectConfigWithReason returns default config for MVP
 // NOTE: Adaptive config selection deferred to v2
-func SelectConfigWithReason(metadata RepoMetadata) (RiskConfig, string) {
+func SelectConfigWithReason(metadata RepoMetadata) (AdaptiveRiskConfig, string) {
 	// MVP: Always use default config with fixed thresholds
 	return GetDefaultConfig(), "MVP uses default fixed thresholds (adaptive config deferred to v2)"
 }

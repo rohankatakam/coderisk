@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -54,10 +55,11 @@ func (b *BatchNodeCreator) CreateFileNodes(ctx context.Context, nodes []GraphNod
 		batch := nodeParams[i:end]
 
 		// Use UNWIND for efficient batch creation
-		// Match on file_path (Layer 1 key) for idempotent MERGE
+		// Match on path (Layer 1 key) for idempotent MERGE
+		// Reference: dev_docs/01-architecture/simplified_graph_schema.md line 94 (File nodes use 'path' property)
 		query := `
 			UNWIND $nodes AS node
-			MERGE (f:File {file_path: node.file_path})
+			MERGE (f:File {path: node.path})
 			SET f += node
 			RETURN count(f) as created
 		`
@@ -241,6 +243,12 @@ func (b *BatchNodeCreator) CreateIssueNodes(ctx context.Context, nodes []GraphNo
 		return nil
 	}
 
+	// Determine label from first node (all nodes in batch should have same label)
+	label := "Issue"
+	if len(nodes) > 0 && nodes[0].Label != "" {
+		label = nodes[0].Label
+	}
+
 	nodeParams := make([]map[string]any, len(nodes))
 	for i, node := range nodes {
 		nodeParams[i] = node.Properties
@@ -255,12 +263,13 @@ func (b *BatchNodeCreator) CreateIssueNodes(ctx context.Context, nodes []GraphNo
 
 		batch := nodeParams[i:end]
 
-		query := `
+		// Use dynamic label for Issue/PR/Incident nodes (all use 'number' as unique key)
+		query := fmt.Sprintf(`
 			UNWIND $nodes AS node
-			MERGE (i:Issue {number: node.number})
-			SET i += node
-			RETURN count(i) as created
-		`
+			MERGE (n:%s {number: node.number})
+			SET n += node
+			RETURN count(n) as created
+		`, label)
 
 		_, err := neo4j.ExecuteQuery(ctx, b.driver, query,
 			map[string]any{"nodes": batch},
@@ -268,7 +277,7 @@ func (b *BatchNodeCreator) CreateIssueNodes(ctx context.Context, nodes []GraphNo
 			neo4j.ExecuteQueryWithDatabase(b.database))
 
 		if err != nil {
-			return fmt.Errorf("batch issue creation failed (batch %d-%d): %w", i, end, err)
+			return fmt.Errorf("batch %s creation failed (batch %d-%d): %w", label, i, end, err)
 		}
 	}
 
@@ -344,7 +353,7 @@ func (b *BatchNodeCreator) createEdgesBatchByType(ctx context.Context, edgeType 
 			RETURN count(r) as created
 		`, sanitizeLabel(edgeType))
 
-		_, err := neo4j.ExecuteQuery(ctx, b.driver, query,
+		result, err := neo4j.ExecuteQuery(ctx, b.driver, query,
 			map[string]any{"edges": edgeParams},
 			neo4j.EagerResultTransformer,
 			neo4j.ExecuteQueryWithDatabase(b.database))
@@ -352,6 +361,17 @@ func (b *BatchNodeCreator) createEdgesBatchByType(ctx context.Context, edgeType 
 		if err != nil {
 			return fmt.Errorf("batch edge creation failed for %s (batch %d-%d): %w",
 				edgeType, i, end, err)
+		}
+
+		// Log edge creation count for debugging
+		if len(result.Records) > 0 {
+			if created, ok := result.Records[0].Get("created"); ok {
+				createdCount := created.(int64)
+				if createdCount < int64(len(batch)) {
+					log.Printf("⚠️  WARNING: Only created %d/%d %s edges (batch %d-%d). Some nodes may not exist.",
+						createdCount, len(batch), edgeType, i, end)
+				}
+			}
 		}
 	}
 

@@ -11,8 +11,8 @@ import (
 // AdaptivePhase1Result extends Phase1Result with adaptive configuration
 type AdaptivePhase1Result struct {
 	*Phase1Result
-	SelectedConfig config.RiskConfig `json:"selected_config"`
-	ConfigReason   string            `json:"config_reason"`
+	SelectedConfig config.AdaptiveRiskConfig `json:"selected_config"`
+	ConfigReason   string                    `json:"config_reason"`
 }
 
 // CalculatePhase1WithConfig performs Phase 1 assessment using adaptive thresholds
@@ -21,7 +21,7 @@ func CalculatePhase1WithConfig(
 	neo4j *graph.Client,
 	repoID string,
 	filePath string,
-	riskConfig config.RiskConfig,
+	riskConfig config.AdaptiveRiskConfig,
 ) (*AdaptivePhase1Result, error) {
 	// Calculate baseline metrics (raw values)
 	coupling, err := CalculateCoupling(ctx, neo4j, repoID, filePath)
@@ -112,7 +112,7 @@ func ClassifyTestRatioWithThreshold(ratio float64, threshold float64) RiskLevel 
 }
 
 // ShouldEscalateWithConfig determines if Phase 2 escalation is needed using adaptive thresholds
-func ShouldEscalateWithConfig(result *Phase1Result, riskConfig config.RiskConfig) bool {
+func ShouldEscalateWithConfig(result *Phase1Result, riskConfig config.AdaptiveRiskConfig) bool {
 	// Escalate if ANY metric exceeds its domain-specific threshold
 	shouldEscalate := false
 

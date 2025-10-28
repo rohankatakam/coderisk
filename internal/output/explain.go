@@ -11,7 +11,7 @@ import (
 // ExplainFormatter outputs full investigation trace
 type ExplainFormatter struct{}
 
-func (f *ExplainFormatter) Format(result *models.RiskResult, w io.Writer) error {
+func (f *ExplainFormatter) Format(result *types.RiskResult, w io.Writer) error {
 	// Header
 	fmt.Fprintf(w, "🔍 CodeRisk Investigation Report\n")
 	fmt.Fprintf(w, "Started: %s\n", result.StartTime.Format(time.RFC3339))

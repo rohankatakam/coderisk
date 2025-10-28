@@ -10,7 +10,7 @@ import (
 // QuietFormatter outputs one-line summary (for pre-commit hooks)
 type QuietFormatter struct{}
 
-func (f *QuietFormatter) Format(result *models.RiskResult, w io.Writer) error {
+func (f *QuietFormatter) Format(result *types.RiskResult, w io.Writer) error {
 	// Success case
 	if result.RiskLevel == "LOW" || result.RiskLevel == "NONE" {
 		fmt.Fprintf(w, "✅ %s risk\n", result.RiskLevel)

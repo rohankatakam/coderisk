@@ -3,6 +3,8 @@ package graph
 import (
 	"context"
 	"fmt"
+	"log"
+	"strconv"
 	"strings"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -94,30 +96,25 @@ func (n *Neo4jBackend) CreateNodes(ctx context.Context, nodes []GraphNode) ([]st
 	}
 
 	// Process each node type with appropriate batch handler
+	// Schema: PRE_COMMIT_GRAPH_SPEC.md - File, Developer, Commit, PR nodes only
+	// Phase 2: Added Issue nodes (issue_ingestion_implementation_plan.md)
 	for label, labelNodes := range nodesByLabel {
 		var err error
 		switch label {
 		case "File":
 			err = batchCreator.CreateFileNodes(ctx, labelNodes)
-		case "Function":
-			err = batchCreator.CreateFunctionNodes(ctx, labelNodes)
-		case "Class":
-			err = batchCreator.CreateClassNodes(ctx, labelNodes)
-		case "Commit":
-			err = batchCreator.CreateCommitNodes(ctx, labelNodes)
 		case "Developer":
 			err = batchCreator.CreateDeveloperNodes(ctx, labelNodes)
+		case "Commit":
+			err = batchCreator.CreateCommitNodes(ctx, labelNodes)
+		case "PR":
+			err = batchCreator.CreateIssueNodes(ctx, labelNodes) // Reuse Issue pattern for PRs
 		case "Issue":
-			err = batchCreator.CreateIssueNodes(ctx, labelNodes)
-		case "PullRequest":
-			// PullRequests use same pattern as Issues
-			err = batchCreator.CreateIssueNodes(ctx, labelNodes)
-		case "Incident":
-			// Incidents use same pattern as Issues
-			err = batchCreator.CreateIssueNodes(ctx, labelNodes)
+			err = batchCreator.CreateIssueNodes(ctx, labelNodes) // Phase 2: Issue node support
 		default:
-			// Fallback to original implementation for unknown types
-			// Build parameterized queries for each node
+			// Fallback to original implementation for unknown/deprecated types
+			// This handles Function, Class, Branch, Issue, Incident (deprecated)
+			log.Printf("⚠️  Creating deprecated node type: %s", label)
 			queries := make([]QueryWithParams, len(labelNodes))
 			for i, node := range labelNodes {
 				builder := NewCypherBuilder()
@@ -254,7 +251,7 @@ func (n *Neo4jBackend) ExecuteBatchWithParams(ctx context.Context, queries []Que
 	return err
 }
 
-// Query executes a Cypher query and returns results
+// Query executes a Cypher query and returns results (simple, no parameters)
 // Uses modern ExecuteQuery API for better performance
 // Routing: Read operation - routes to read replicas in cluster deployments
 func (n *Neo4jBackend) Query(ctx context.Context, query string) (interface{}, error) {
@@ -277,6 +274,34 @@ func (n *Neo4jBackend) Query(ctx context.Context, query string) (interface{}, er
 	return 0, nil
 }
 
+// QueryWithParams executes a parameterized Cypher query and returns all results
+// Returns a slice of maps, where each map represents a record with column names as keys
+func (n *Neo4jBackend) QueryWithParams(ctx context.Context, query string, params map[string]interface{}) ([]map[string]interface{}, error) {
+	result, err := neo4j.ExecuteQuery(ctx, n.driver, query,
+		params,
+		neo4j.EagerResultTransformer,
+		neo4j.ExecuteQueryWithDatabase(n.database),
+		neo4j.ExecuteQueryWithReadersRouting()) // Read optimization
+
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+
+	// Convert Neo4j records to map[string]interface{}
+	results := make([]map[string]interface{}, 0, len(result.Records))
+	for _, record := range result.Records {
+		row := make(map[string]interface{})
+		for _, key := range record.Keys {
+			if value, ok := record.Get(key); ok {
+				row[key] = value
+			}
+		}
+		results = append(results, row)
+	}
+
+	return results, nil
+}
+
 // Close closes the Neo4j driver connection
 func (n *Neo4jBackend) Close(ctx context.Context) error {
 	return n.driver.Close(ctx)
@@ -290,12 +315,33 @@ func (n *Neo4jBackend) Close(ctx context.Context) error {
 // All query generation now uses CypherBuilder with parameterized queries.
 
 // parseNodeID extracts label and ID from node reference (e.g., "commit:abc123" -> "Commit", "abc123")
-func parseNodeID(nodeID string) (label, id string) {
+// For PR/Issue nodes, converts the ID to an integer to match Neo4j storage type
+func parseNodeID(nodeID string) (label string, id interface{}) {
 	parts := strings.SplitN(nodeID, ":", 2)
 	if len(parts) == 2 {
-		// Capitalize first letter for label
-		label = strings.ToUpper(string(parts[0][0])) + parts[0][1:]
-		return label, parts[1]
+		prefix := parts[0]
+
+		// Handle special uppercase labels
+		switch strings.ToLower(prefix) {
+		case "pr":
+			label = "PR"
+		case "issue":
+			label = "Issue"
+		default:
+			// Capitalize first letter for label
+			label = strings.ToUpper(string(prefix[0])) + prefix[1:]
+		}
+
+		// Convert PR/Issue numbers to integers (Neo4j stores them as integers)
+		// This fixes type mismatch bug where string "42" doesn't match integer 42
+		if label == "PR" || label == "Issue" {
+			if num, err := strconv.Atoi(parts[1]); err == nil {
+				return label, num // Return as integer
+			}
+			// Fall through to string if conversion fails
+		}
+
+		return label, parts[1] // Return as string for other types
 	}
 
 	// If no prefix, assume it's a file path (backwards compatibility)
@@ -308,28 +354,32 @@ func parseNodeID(nodeID string) (label, id string) {
 }
 
 // getUniqueKey returns the unique identifier field for each node type
+// Schema: PRE_COMMIT_GRAPH_SPEC.md - File (path), Developer (email), Commit (sha), PR (number)
 func getUniqueKey(label string) string {
 	keys := map[string]string{
-		"Commit":      "sha",
-		"commit":      "sha",
-		"Developer":   "email",
-		"developer":   "email",
+		// Active node types (PRE_COMMIT_GRAPH_SPEC.md)
+		"File":      "path",  // PRIMARY KEY for Files
+		"file":      "path",
+		"Developer": "email", // PRIMARY KEY for Developers
+		"developer": "email",
+		"Commit":    "sha",   // PRIMARY KEY for Commits
+		"commit":    "sha",
+		"PR":        "number", // PRIMARY KEY for PRs
+		"pr":        "number",
+
+		// Deprecated node types (kept for backwards compatibility)
 		"Issue":       "number",
 		"issue":       "number",
-		"PullRequest": "number",
-		"pullrequest": "number",
-		// Incident nodes (Layer 3)
-		"Incident": "id", // For Incidents, id = UUID string
-		"incident": "id",
-		// Tree-sitter entity types (Layer 1)
-		"File":     "file_path", // For Files, use file_path for matching
-		"file":     "file_path",
-		"Function": "unique_id", // For Functions, unique_id = filepath:name:line
-		"function": "unique_id",
-		"Class":    "unique_id", // For Classes, unique_id = filepath:name:line
-		"class":    "unique_id",
-		"Import":   "unique_id", // For Imports, unique_id = filepath:name:line
-		"import":   "unique_id",
+		"Branch":      "name",
+		"branch":      "name",
+		"Incident":    "id",
+		"incident":    "id",
+		"Function":    "unique_id",
+		"function":    "unique_id",
+		"Class":       "unique_id",
+		"class":       "unique_id",
+		"Import":      "unique_id",
+		"import":      "unique_id",
 	}
 
 	if key, ok := keys[label]; ok {
