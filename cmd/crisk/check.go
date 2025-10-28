@@ -213,18 +213,53 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			"reason", configReason)
 	}
 
-	// Resolve relative paths to absolute paths in cloned repo
-	// This is needed because the graph stores absolute paths from init-local
-	resolvedFiles, err := resolveFilePaths(files)
+	// Get repository root for file resolution
+	repoRoot, err := git.GetRepoRoot()
 	if err != nil {
-		return fmt.Errorf("failed to resolve file paths: %w", err)
+		return fmt.Errorf("failed to get repository root: %w", err)
 	}
 
-	for i, file := range files {
-		resolvedPath := resolvedFiles[i]
+	// Create file resolver to bridge current paths to historical graph data
+	// Uses 2-level strategy: exact match (100% confidence) -> git log --follow (95% confidence)
+	resolver := git.NewFileResolver(repoRoot, neo4jClient)
+
+	// Batch resolve all files in parallel
+	resolvedFilesMap, err := resolver.BatchResolve(ctx, files)
+	if err != nil {
+		return fmt.Errorf("file resolution failed: %w", err)
+	}
+
+	for _, file := range files {
+		matches := resolvedFilesMap[file]
+
+		// Determine which path(s) to use for queries
+		var queryPath string
+		var resolutionMethod string
+		var resolutionConfidence float64
+
+		if len(matches) == 0 {
+			// New file - no historical data in graph
+			queryPath = file
+			resolutionMethod = "new-file"
+			resolutionConfidence = 0.0
+
+			if !quiet && !preCommit {
+				fmt.Printf("\nℹ️  %s: New file (no historical data)\n", file)
+			}
+		} else {
+			// Use highest confidence match
+			queryPath = matches[0].HistoricalPath
+			resolutionMethod = matches[0].Method
+			resolutionConfidence = matches[0].Confidence
+
+			if !quiet && !preCommit && resolutionMethod == "git-follow" {
+				fmt.Printf("\n🔍 %s: Resolved via git history\n", file)
+				fmt.Printf("   Historical path: %s (confidence: %.0f%%)\n", queryPath, resolutionConfidence*100)
+			}
+		}
 
 		// Phase 1: Baseline Assessment with Adaptive Config
-		adaptiveResult, err := metrics.CalculatePhase1WithConfig(ctx, neo4jClient, repoID, resolvedPath, riskConfig)
+		adaptiveResult, err := metrics.CalculatePhase1WithConfig(ctx, neo4jClient, repoID, queryPath, riskConfig)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			continue
@@ -479,6 +514,7 @@ func getRepoPath() string {
 
 // resolveFilePaths converts relative file paths to absolute paths in the cloned repo
 // This matches the absolute paths stored in the graph during init-local
+// DEPRECATED: Replaced by FileResolver for better file history tracking
 func resolveFilePaths(files []string) ([]string, error) {
 	// Get the current git remote URL
 	remoteURL, err := git.GetRemoteURL()
