@@ -193,3 +193,53 @@ func (c *Client) ShouldEscalateToPhase2(couplingScore, coChangeScore, testRatio 
 	c.logger.Debug("staying in phase 1", "coupling", couplingScore, "co_change", coChangeScore, "test_ratio", testRatio)
 	return false
 }
+
+// CompleteJSON sends a prompt to the LLM and returns JSON response
+// Uses response_format: json_object for structured outputs
+// Reference: REVISED_MVP_STRATEGY.md - Two-way extraction with structured outputs
+func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	if !c.enabled {
+		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and OPENAI_API_KEY)")
+	}
+
+	if c.provider != ProviderOpenAI {
+		return "", fmt.Errorf("no openai provider configured")
+	}
+
+	resp, err := c.openaiClient.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: c.fastModel, // Use fast model (gpt-4o-mini) for extraction
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemPrompt,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: userPrompt,
+			},
+		},
+		ResponseFormat: &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		},
+		Temperature: 0.1,  // Low temperature for consistency
+		MaxTokens:   2000, // Sufficient for batch processing
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("openai completion failed: %w", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("openai returned no choices")
+	}
+
+	response := resp.Choices[0].Message.Content
+	c.logger.Debug("openai json completion",
+		"model", c.fastModel,
+		"prompt_length", len(userPrompt),
+		"response_length", len(response),
+		"tokens_used", resp.Usage.TotalTokens,
+	)
+
+	return response, nil
+}

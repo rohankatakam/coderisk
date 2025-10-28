@@ -106,7 +106,23 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string)
 	stats.Nodes += issueStats.Nodes
 	log.Printf("  ✓ Processed issues: %d nodes", issueStats.Nodes)
 
+	// Link Issues to Commits/PRs (creates FIXED_BY edges)
+	// Reference: REVISED_MVP_STRATEGY.md - Two-way issue linking
+	linkStats, err := b.linkIssues(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("link issues failed: %w", err)
+	}
+	stats.Nodes += linkStats.Nodes
+	stats.Edges += linkStats.Edges
+	log.Printf("  ✓ Linked issues: %d nodes, %d edges", linkStats.Nodes, linkStats.Edges)
+
 	return stats, nil
+}
+
+// linkIssues creates Issue nodes and FIXED_BY edges based on LLM extraction
+func (b *Builder) linkIssues(ctx context.Context, repoID int64) (*BuildStats, error) {
+	linker := NewIssueLinker(b.stagingDB, b.backend)
+	return linker.LinkIssues(ctx, repoID)
 }
 
 // processCommits transforms commits from PostgreSQL to graph nodes/edges

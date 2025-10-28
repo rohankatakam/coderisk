@@ -596,3 +596,192 @@ func (c *StagingClient) GetProcessedPRBranchData(ctx context.Context, repoID int
 
 	return prs, rows.Err()
 }
+
+// ===================================
+// Issue Timeline Operations
+// ===================================
+
+// TimelineEventData represents a timeline event
+type TimelineEventData struct {
+	IssueID         int64
+	EventType       string
+	CreatedAt       time.Time
+	SourceType      *string
+	SourceNumber    *int
+	SourceSHA       *string
+	SourceTitle     *string
+	SourceBody      *string
+	SourceState     *string
+	SourceMergedAt  *time.Time
+	ActorLogin      *string
+	ActorID         *int64
+	RawData         json.RawMessage
+}
+
+// StoreTimelineEvent stores a timeline event
+func (c *StagingClient) StoreTimelineEvent(ctx context.Context, event TimelineEventData) error {
+	query := `
+		INSERT INTO github_issue_timeline (
+			issue_id, event_type, created_at, source_type, source_number, source_sha,
+			source_title, source_body, source_state, source_merged_at,
+			actor_login, actor_id, raw_data, fetched_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+		ON CONFLICT (issue_id, event_type, created_at, source_number) DO NOTHING
+	`
+
+	_, err := c.db.ExecContext(ctx, query,
+		event.IssueID, event.EventType, event.CreatedAt,
+		event.SourceType, event.SourceNumber, event.SourceSHA,
+		event.SourceTitle, event.SourceBody, event.SourceState, event.SourceMergedAt,
+		event.ActorLogin, event.ActorID, event.RawData,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to store timeline event: %w", err)
+	}
+
+	return nil
+}
+
+// FetchUnprocessedTimelineEvents retrieves timeline events ready for LLM extraction
+func (c *StagingClient) FetchUnprocessedTimelineEvents(ctx context.Context, repoID int64, limit int) ([]TimelineEventData, error) {
+	query := `
+		SELECT t.id as issue_id, t.event_type, t.created_at, t.source_type, t.source_number,
+			   t.source_sha, t.source_title, t.source_body, t.source_state, t.source_merged_at,
+			   t.actor_login, t.actor_id, t.raw_data
+		FROM github_issue_timeline t
+		JOIN github_issues i ON t.issue_id = i.id
+		WHERE i.repo_id = $1 AND t.processed_at IS NULL
+		LIMIT $2
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, repoID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch unprocessed timeline events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []TimelineEventData
+	for rows.Next() {
+		var e TimelineEventData
+		if err := rows.Scan(&e.IssueID, &e.EventType, &e.CreatedAt, &e.SourceType, &e.SourceNumber,
+			&e.SourceSHA, &e.SourceTitle, &e.SourceBody, &e.SourceState, &e.SourceMergedAt,
+			&e.ActorLogin, &e.ActorID, &e.RawData); err != nil {
+			return nil, fmt.Errorf("failed to scan timeline event: %w", err)
+		}
+		events = append(events, e)
+	}
+
+	return events, rows.Err()
+}
+
+// MarkTimelineEventsProcessed updates processed_at timestamp for timeline events
+func (c *StagingClient) MarkTimelineEventsProcessed(ctx context.Context, eventIDs []int64) error {
+	query := `
+		UPDATE github_issue_timeline
+		SET processed_at = NOW()
+		WHERE id = ANY($1)
+	`
+
+	_, err := c.db.ExecContext(ctx, query, pq.Array(eventIDs))
+	if err != nil {
+		return fmt.Errorf("failed to mark timeline events as processed: %w", err)
+	}
+
+	return nil
+}
+
+// ===================================
+// Issue-Commit Reference Operations
+// ===================================
+
+// IssueCommitRef represents a reference between an issue and a commit/PR
+type IssueCommitRef struct {
+	RepoID          int64
+	IssueNumber     int
+	CommitSHA       *string
+	PRNumber        *int
+	Action          string
+	Confidence      float64
+	DetectionMethod string
+	ExtractedFrom   string
+}
+
+// StoreIssueCommitRefs stores multiple issue-commit references in a batch
+func (c *StagingClient) StoreIssueCommitRefs(ctx context.Context, refs []IssueCommitRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+
+	query := `
+		INSERT INTO github_issue_commit_refs (
+			repo_id, issue_number, commit_sha, pr_number,
+			action, confidence, detection_method, extracted_from,
+			extracted_at, created_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+		ON CONFLICT (repo_id, issue_number, commit_sha, pr_number, detection_method)
+		DO UPDATE SET
+			confidence = GREATEST(github_issue_commit_refs.confidence, EXCLUDED.confidence),
+			extracted_at = NOW()
+	`
+
+	// Use a transaction for batch insert
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, ref := range refs {
+		_, err := stmt.ExecContext(ctx,
+			ref.RepoID, ref.IssueNumber, ref.CommitSHA, ref.PRNumber,
+			ref.Action, ref.Confidence, ref.DetectionMethod, ref.ExtractedFrom,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert reference: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// GetIssueCommitRefs retrieves all issue-commit references for a repository
+func (c *StagingClient) GetIssueCommitRefs(ctx context.Context, repoID int64) ([]IssueCommitRef, error) {
+	query := `
+		SELECT repo_id, issue_number, commit_sha, pr_number,
+			   action, confidence, detection_method, extracted_from
+		FROM github_issue_commit_refs
+		WHERE repo_id = $1
+		ORDER BY confidence DESC, issue_number, commit_sha
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query references: %w", err)
+	}
+	defer rows.Close()
+
+	var refs []IssueCommitRef
+	for rows.Next() {
+		var ref IssueCommitRef
+		if err := rows.Scan(&ref.RepoID, &ref.IssueNumber, &ref.CommitSHA, &ref.PRNumber,
+			&ref.Action, &ref.Confidence, &ref.DetectionMethod, &ref.ExtractedFrom); err != nil {
+			return nil, fmt.Errorf("failed to scan reference: %w", err)
+		}
+		refs = append(refs, ref)
+	}
+
+	return refs, rows.Err()
+}

@@ -132,6 +132,14 @@ func (f *Fetcher) FetchAll(ctx context.Context, owner, repo, repoPath string) (i
 		log.Printf("  ✓ Fetched %d contributors", contributorCount)
 	}
 
+	// 8. Fetch issue timeline events for closed issues
+	timelineCount, err := f.FetchIssueTimelines(ctx, repoID, owner, repo)
+	if err != nil {
+		log.Printf("  ⚠️  Failed to fetch issue timelines: %v", err)
+	} else {
+		log.Printf("  ✓ Fetched timeline events for %d issues", timelineCount)
+	}
+
 	return repoID, stats, nil
 }
 
@@ -566,6 +574,177 @@ func (f *Fetcher) FetchContributors(ctx context.Context, repoID int64, owner, re
 	}
 
 	return count, nil
+}
+
+// FetchIssueTimelines fetches timeline events for all closed issues
+// Reference: GITHUB_API_ANALYSIS.md - Timeline API contains cross-references
+func (f *Fetcher) FetchIssueTimelines(ctx context.Context, repoID int64, owner, repo string) (int, error) {
+	// First, get all closed issues from the database
+	issues, err := f.stagingDB.FetchUnprocessedIssues(ctx, repoID, 1000)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch issues: %w", err)
+	}
+
+	issueCount := 0
+	for _, issue := range issues {
+		// Only fetch timelines for closed issues (where timeline data is most useful)
+		if issue.State == "closed" || issue.ClosedAt != nil {
+			if err := f.fetchIssueTimeline(ctx, repoID, owner, repo, issue.Number); err != nil {
+				log.Printf("  ⚠️  Failed to fetch timeline for issue #%d: %v", issue.Number, err)
+				continue
+			}
+			issueCount++
+		}
+	}
+
+	return issueCount, nil
+}
+
+// fetchIssueTimeline fetches timeline events for a single issue
+func (f *Fetcher) fetchIssueTimeline(ctx context.Context, repoID int64, owner, repo string, issueNumber int) error {
+	if err := f.rateLimiter.Wait(ctx); err != nil {
+		return err
+	}
+
+	// GitHub Timeline API requires Accept header
+	// Reference: https://docs.github.com/en/rest/issues/timeline
+	req, err := f.client.NewRequest("GET", fmt.Sprintf("repos/%s/%s/issues/%d/timeline", owner, repo, issueNumber), nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github.mockingbird-preview+json")
+
+	var timelineEvents []map[string]interface{}
+	_, err = f.client.Do(ctx, req, &timelineEvents)
+	if err != nil {
+		return fmt.Errorf("timeline API request failed: %w", err)
+	}
+
+	// Get issue ID from database
+	issueID, err := f.getIssueID(ctx, repoID, issueNumber)
+	if err != nil {
+		return fmt.Errorf("failed to get issue ID: %w", err)
+	}
+
+	// Store each timeline event
+	for _, event := range timelineEvents {
+		if err := f.storeTimelineEvent(ctx, issueID, event); err != nil {
+			log.Printf("  ⚠️  Failed to store timeline event for issue #%d: %v", issueNumber, err)
+			continue
+		}
+	}
+
+	return nil
+}
+
+// getIssueID retrieves the internal issue ID from the database
+func (f *Fetcher) getIssueID(ctx context.Context, repoID int64, issueNumber int) (int64, error) {
+	// Fetch all issues and find the matching one
+	// This is a workaround since we don't have direct database access method
+	// In production, we'd add a GetIssueID method to StagingClient
+	issues, err := f.stagingDB.FetchUnprocessedIssues(ctx, repoID, 1000)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch issues: %w", err)
+	}
+
+	for _, issue := range issues {
+		if issue.Number == issueNumber {
+			return issue.ID, nil
+		}
+	}
+
+	return 0, fmt.Errorf("issue #%d not found", issueNumber)
+}
+
+// storeTimelineEvent stores a single timeline event
+func (f *Fetcher) storeTimelineEvent(ctx context.Context, issueID int64, rawEvent map[string]interface{}) error {
+	// Parse event type
+	eventType, ok := rawEvent["event"].(string)
+	if !ok {
+		return fmt.Errorf("missing event type")
+	}
+
+	// Parse created_at
+	createdAtStr, ok := rawEvent["created_at"].(string)
+	if !ok {
+		return fmt.Errorf("missing created_at")
+	}
+	createdAt, err := time.Parse(time.RFC3339, createdAtStr)
+	if err != nil {
+		return fmt.Errorf("invalid created_at: %w", err)
+	}
+
+	// Marshal raw data
+	rawData, err := json.Marshal(rawEvent)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	event := database.TimelineEventData{
+		IssueID:   issueID,
+		EventType: eventType,
+		CreatedAt: createdAt,
+		RawData:   rawData,
+	}
+
+	// Extract source information for cross-reference events
+	if eventType == "cross-referenced" {
+		if source, ok := rawEvent["source"].(map[string]interface{}); ok {
+			if sourceIssue, ok := source["issue"].(map[string]interface{}); ok {
+				// Extract source type (PR or issue)
+				if _, hasPR := sourceIssue["pull_request"]; hasPR {
+					sourceType := "pr"
+					event.SourceType = &sourceType
+				} else {
+					sourceType := "issue"
+					event.SourceType = &sourceType
+				}
+
+				// Extract source number
+				if num, ok := sourceIssue["number"].(float64); ok {
+					sourceNum := int(num)
+					event.SourceNumber = &sourceNum
+				}
+
+				// Extract source title
+				if title, ok := sourceIssue["title"].(string); ok {
+					event.SourceTitle = &title
+				}
+
+				// Extract source body
+				if body, ok := sourceIssue["body"].(string); ok {
+					event.SourceBody = &body
+				}
+
+				// Extract source state
+				if state, ok := sourceIssue["state"].(string); ok {
+					event.SourceState = &state
+				}
+
+				// Extract merged_at for PRs
+				if pr, ok := sourceIssue["pull_request"].(map[string]interface{}); ok {
+					if mergedAtStr, ok := pr["merged_at"].(string); ok && mergedAtStr != "" {
+						if mergedAt, err := time.Parse(time.RFC3339, mergedAtStr); err == nil {
+							event.SourceMergedAt = &mergedAt
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Extract actor information
+	if actor, ok := rawEvent["actor"].(map[string]interface{}); ok {
+		if login, ok := actor["login"].(string); ok {
+			event.ActorLogin = &login
+		}
+		if id, ok := actor["id"].(float64); ok {
+			actorID := int64(id)
+			event.ActorID = &actorID
+		}
+	}
+
+	return f.stagingDB.StoreTimelineEvent(ctx, event)
 }
 
 // logRateLimit logs GitHub API rate limit info

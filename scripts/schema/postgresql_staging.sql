@@ -439,6 +439,89 @@ WHERE p.processed_at IS NULL
 ORDER BY p.created_at ASC;
 
 -- ============================================
+-- Layer 4: Issue Timeline & References
+-- ============================================
+
+-- Issue Timeline Events Table
+-- Stores timeline events from GitHub Issues Timeline API
+-- Reference: GITHUB_API_ANALYSIS.md - Timeline API is the gold mine
+CREATE TABLE github_issue_timeline (
+    id BIGSERIAL PRIMARY KEY,
+
+    -- Foreign key
+    issue_id BIGINT NOT NULL REFERENCES github_issues(id) ON DELETE CASCADE,
+
+    -- Event identification
+    event_type VARCHAR(50) NOT NULL,                 -- 'cross-referenced', 'commented', 'closed', 'referenced'
+    created_at TIMESTAMP NOT NULL,
+
+    -- Source information (for cross-references)
+    source_type VARCHAR(20),                         -- 'pr', 'issue', 'commit'
+    source_number INTEGER,                           -- PR or Issue number
+    source_sha VARCHAR(40),                          -- Commit SHA (if commit reference)
+    source_title TEXT,                               -- PR/Issue title
+    source_body TEXT,                                -- PR/Issue body (may contain "Fixes #123")
+    source_state VARCHAR(20),                        -- 'open', 'closed', 'merged'
+    source_merged_at TIMESTAMP,                      -- When PR was merged (if PR)
+
+    -- Actor information
+    actor_login VARCHAR(255),
+    actor_id BIGINT,
+
+    -- Raw API response
+    raw_data JSONB NOT NULL,
+
+    -- Metadata
+    fetched_at TIMESTAMP DEFAULT NOW(),
+    processed_at TIMESTAMP,                          -- For LLM extraction tracking
+
+    -- Constraints
+    CONSTRAINT unique_issue_timeline_event UNIQUE(issue_id, event_type, created_at, source_number)
+);
+
+CREATE INDEX idx_timeline_issue_id ON github_issue_timeline(issue_id);
+CREATE INDEX idx_timeline_event_type ON github_issue_timeline(event_type);
+CREATE INDEX idx_timeline_source_type ON github_issue_timeline(source_type);
+CREATE INDEX idx_timeline_source_number ON github_issue_timeline(source_number) WHERE source_number IS NOT NULL;
+CREATE INDEX idx_timeline_processed ON github_issue_timeline(processed_at) WHERE processed_at IS NULL;
+
+-- Issue-Commit References Table
+-- Stores extracted relationships from LLM analysis
+-- Reference: REVISED_MVP_STRATEGY.md - Two-way extraction
+CREATE TABLE github_issue_commit_refs (
+    id BIGSERIAL PRIMARY KEY,
+
+    -- Foreign keys
+    repo_id BIGINT NOT NULL REFERENCES github_repositories(id) ON DELETE CASCADE,
+    issue_number INTEGER NOT NULL,                   -- Issue number (not FK to allow flexibility)
+    commit_sha VARCHAR(40),                          -- Commit SHA (not FK to allow flexibility)
+    pr_number INTEGER,                               -- PR number if reference is via PR
+
+    -- Reference metadata
+    action VARCHAR(20) NOT NULL,                     -- 'fixes', 'closes', 'resolves', 'mentions'
+    confidence FLOAT NOT NULL,                       -- 0.0 to 1.0 confidence score
+    detection_method VARCHAR(50) NOT NULL,           -- 'issue_extraction', 'commit_extraction', 'pr_extraction', 'timeline_extraction', 'bidirectional'
+
+    -- Source tracking
+    extracted_from VARCHAR(50) NOT NULL,             -- 'issue_body', 'issue_timeline', 'commit_message', 'pr_body', 'pr_title'
+    extracted_at TIMESTAMP DEFAULT NOW(),
+
+    -- Metadata
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    -- Constraints
+    CONSTRAINT unique_issue_commit_ref UNIQUE(repo_id, issue_number, commit_sha, pr_number, detection_method)
+);
+
+CREATE INDEX idx_refs_repo_id ON github_issue_commit_refs(repo_id);
+CREATE INDEX idx_refs_issue_number ON github_issue_commit_refs(issue_number);
+CREATE INDEX idx_refs_commit_sha ON github_issue_commit_refs(commit_sha) WHERE commit_sha IS NOT NULL;
+CREATE INDEX idx_refs_pr_number ON github_issue_commit_refs(pr_number) WHERE pr_number IS NOT NULL;
+CREATE INDEX idx_refs_action ON github_issue_commit_refs(action);
+CREATE INDEX idx_refs_confidence ON github_issue_commit_refs(confidence);
+CREATE INDEX idx_refs_detection_method ON github_issue_commit_refs(detection_method);
+
+-- ============================================
 -- Helper Functions
 -- ============================================
 
