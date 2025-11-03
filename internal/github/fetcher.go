@@ -141,6 +141,22 @@ func (f *Fetcher) FetchAll(ctx context.Context, owner, repo, repoPath string, da
 		log.Printf("  ✓ Fetched timeline events for %d issues", timelineCount)
 	}
 
+	// 9. Fetch PR file changes (for temporal-semantic linking)
+	prFileCount, err := f.FetchPRFiles(ctx, repoID, owner, repo, days)
+	if err != nil {
+		log.Printf("  ⚠️  Failed to fetch PR files: %v", err)
+	} else if prFileCount > 0 {
+		log.Printf("  ✓ Fetched %d PR file changes", prFileCount)
+	}
+
+	// 10. Fetch issue comments (for comment-based linking)
+	commentCount, err := f.FetchIssueComments(ctx, repoID, owner, repo, days)
+	if err != nil {
+		log.Printf("  ⚠️  Failed to fetch issue comments: %v", err)
+	} else if commentCount > 0 {
+		log.Printf("  ✓ Fetched %d issue comments", commentCount)
+	}
+
 	return repoID, stats, nil
 }
 
@@ -778,6 +794,154 @@ func (f *Fetcher) storeTimelineEvent(ctx context.Context, issueID int64, rawEven
 	}
 
 	return f.stagingDB.StoreTimelineEvent(ctx, event)
+}
+
+// FetchPRFiles fetches file changes for each PR (needed for temporal-semantic matching)
+// Reference: TEMPORAL_SEMANTIC_LINKING.md lines 88-113
+func (f *Fetcher) FetchPRFiles(ctx context.Context, repoID int64, owner, repo string, days int) (int, error) {
+	log.Printf("🔍 Fetching PR file changes...")
+
+	// Get list of PRs that need file data
+	prs, err := f.stagingDB.GetPRsWithoutFiles(ctx, repoID, days)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get PRs without files: %w", err)
+	}
+
+	if len(prs) == 0 {
+		log.Printf("  ℹ️  No PRs need file data")
+		return 0, nil
+	}
+
+	log.Printf("  Found %d PRs needing file data", len(prs))
+
+	fileCount := 0
+	for i, pr := range prs {
+		if err := f.rateLimiter.Wait(ctx); err != nil {
+			return fileCount, err
+		}
+
+		// API call: GET /repos/{owner}/{repo}/pulls/{number}/files
+		files, resp, err := f.client.PullRequests.ListFiles(ctx, owner, repo, pr.Number, &github.ListOptions{PerPage: 100})
+		if err != nil {
+			log.Printf("  ⚠️  Failed to fetch files for PR #%d: %v", pr.Number, err)
+			continue
+		}
+
+		// Store each file
+		for _, file := range files {
+			rawData, err := json.Marshal(file)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to marshal file %s: %v", file.GetFilename(), err)
+				continue
+			}
+
+			err = f.stagingDB.StorePRFile(
+				ctx,
+				repoID,
+				pr.ID,
+				file.GetFilename(),
+				file.GetStatus(),
+				file.GetAdditions(),
+				file.GetDeletions(),
+				file.GetChanges(),
+				file.PreviousFilename,
+				file.Patch,
+				rawData,
+			)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to store file %s: %v", file.GetFilename(), err)
+				continue
+			}
+			fileCount++
+		}
+
+		f.logRateLimit(resp)
+
+		if (i+1)%10 == 0 {
+			log.Printf("  Progress: %d/%d PRs processed, %d files stored", i+1, len(prs), fileCount)
+		}
+	}
+
+	log.Printf("  ✓ Fetched %d files for %d PRs", fileCount, len(prs))
+	return fileCount, nil
+}
+
+// FetchIssueComments fetches comments for each issue (needed for comment-based linking)
+// Reference: Stagehand ground truth test case #1060
+func (f *Fetcher) FetchIssueComments(ctx context.Context, repoID int64, owner, repo string, days int) (int, error) {
+	log.Printf("🔍 Fetching issue comments...")
+
+	// Get list of issues that need comment data
+	issues, err := f.stagingDB.GetIssuesWithoutComments(ctx, repoID, days)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get issues without comments: %w", err)
+	}
+
+	if len(issues) == 0 {
+		log.Printf("  ℹ️  No issues need comment data")
+		return 0, nil
+	}
+
+	log.Printf("  Found %d issues needing comment data", len(issues))
+
+	commentCount := 0
+	for i, issue := range issues {
+		if err := f.rateLimiter.Wait(ctx); err != nil {
+			return commentCount, err
+		}
+
+		// API call: GET /repos/{owner}/{repo}/issues/{number}/comments
+		comments, resp, err := f.client.Issues.ListComments(ctx, owner, repo, issue.Number, &github.IssueListCommentsOptions{
+			ListOptions: github.ListOptions{PerPage: 100},
+		})
+		if err != nil {
+			log.Printf("  ⚠️  Failed to fetch comments for issue #%d: %v", issue.Number, err)
+			continue
+		}
+
+		// Store each comment
+		for _, comment := range comments {
+			rawData, err := json.Marshal(comment)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to marshal comment: %v", err)
+				continue
+			}
+
+			var updatedAt *time.Time
+			if comment.UpdatedAt != nil {
+				t := comment.GetUpdatedAt().Time
+				updatedAt = &t
+			}
+
+			err = f.stagingDB.StoreIssueComment(
+				ctx,
+				repoID,
+				issue.ID,
+				comment.GetID(),
+				comment.GetBody(),
+				comment.GetUser().GetLogin(),
+				comment.GetUser().GetID(),
+				comment.GetAuthorAssociation(),
+				comment.GetCreatedAt().Time,
+				updatedAt,
+				rawData,
+			)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to store comment: %v", err)
+				continue
+			}
+			commentCount++
+		}
+
+		f.logRateLimit(resp)
+
+		if (i+1)%10 == 0 {
+			log.Printf("  Progress: %d/%d issues processed, %d comments stored", i+1, len(issues), commentCount)
+		}
+	}
+
+	log.Printf("  ✓ Fetched %d comments for %d issues", commentCount, len(issues))
+	return commentCount, nil
 }
 
 // logRateLimit logs GitHub API rate limit info

@@ -794,3 +794,246 @@ func (c *StagingClient) GetIssueCommitRefs(ctx context.Context, repoID int64) ([
 func (c *StagingClient) QueryRow(ctx context.Context, query string, args ...interface{}) *sql.Row {
 	return c.db.QueryRowContext(ctx, query, args...)
 }
+
+// Query executes a query that returns multiple rows
+func (c *StagingClient) Query(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	return c.db.QueryContext(ctx, query, args...)
+}
+
+// ===================================
+// PR Files Operations (for Temporal-Semantic Linking)
+// ===================================
+
+// PRFileData represents a file changed in a pull request
+type PRFileData struct {
+	ID               int64
+	RepoID           int64
+	PRID             int64
+	Filename         string
+	Status           string
+	Additions        int
+	Deletions        int
+	Changes          int
+	PreviousFilename *string
+	Patch            *string
+	RawData          json.RawMessage
+}
+
+// StorePRFile stores a single PR file change
+func (c *StagingClient) StorePRFile(ctx context.Context, repoID, prID int64, filename, status string, additions, deletions, changes int, previousFilename, patch *string, rawData json.RawMessage) error {
+	query := `
+		INSERT INTO github_pr_files (
+			repo_id, pr_id, filename, status, additions, deletions, changes,
+			previous_filename, patch, raw_data, fetched_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+		ON CONFLICT (pr_id, filename)
+		DO UPDATE SET
+			status = EXCLUDED.status,
+			additions = EXCLUDED.additions,
+			deletions = EXCLUDED.deletions,
+			changes = EXCLUDED.changes,
+			previous_filename = EXCLUDED.previous_filename,
+			patch = EXCLUDED.patch,
+			raw_data = EXCLUDED.raw_data,
+			fetched_at = NOW()
+	`
+
+	_, err := c.db.ExecContext(ctx, query, repoID, prID, filename, status, additions, deletions, changes, previousFilename, patch, rawData)
+	if err != nil {
+		return fmt.Errorf("failed to store PR file: %w", err)
+	}
+
+	return nil
+}
+
+// GetPRFiles retrieves all files for a specific PR
+func (c *StagingClient) GetPRFiles(ctx context.Context, prID int64) ([]PRFileData, error) {
+	query := `
+		SELECT id, repo_id, pr_id, filename, status, additions, deletions, changes,
+		       previous_filename, patch, raw_data
+		FROM github_pr_files
+		WHERE pr_id = $1
+		ORDER BY changes DESC
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, prID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query PR files: %w", err)
+	}
+	defer rows.Close()
+
+	var files []PRFileData
+	for rows.Next() {
+		var f PRFileData
+		if err := rows.Scan(&f.ID, &f.RepoID, &f.PRID, &f.Filename, &f.Status, &f.Additions, &f.Deletions, &f.Changes, &f.PreviousFilename, &f.Patch, &f.RawData); err != nil {
+			return nil, fmt.Errorf("failed to scan PR file: %w", err)
+		}
+		files = append(files, f)
+	}
+
+	return files, rows.Err()
+}
+
+// GetPRsWithoutFiles returns PRs that don't have file data yet
+func (c *StagingClient) GetPRsWithoutFiles(ctx context.Context, repoID int64, days int) ([]PRData, error) {
+	var cutoff *time.Time
+	if days > 0 {
+		t := time.Now().AddDate(0, 0, -days)
+		cutoff = &t
+	}
+
+	query := `
+		SELECT p.id, p.repo_id, p.number, p.title, p.body, p.state, p.merged,
+		       p.merge_commit_sha, p.created_at, p.merged_at, p.raw_data
+		FROM github_pull_requests p
+		WHERE p.repo_id = $1
+		  AND p.merged_at IS NOT NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM github_pr_files pf WHERE pf.pr_id = p.id
+		  )
+	`
+
+	args := []interface{}{repoID}
+
+	if cutoff != nil {
+		query += ` AND (p.merged_at >= $2 OR p.closed_at >= $2)`
+		args = append(args, cutoff)
+	}
+
+	query += ` ORDER BY p.merged_at DESC`
+
+	rows, err := c.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query PRs without files: %w", err)
+	}
+	defer rows.Close()
+
+	var prs []PRData
+	for rows.Next() {
+		var p PRData
+		if err := rows.Scan(&p.ID, &p.RepoID, &p.Number, &p.Title, &p.Body, &p.State, &p.Merged, &p.MergeCommitSHA, &p.CreatedAt, &p.MergedAt, &p.RawData); err != nil {
+			return nil, fmt.Errorf("failed to scan PR: %w", err)
+		}
+		prs = append(prs, p)
+	}
+
+	return prs, rows.Err()
+}
+
+// ===================================
+// Issue Comments Operations (for Comment-Based Linking)
+// ===================================
+
+// IssueCommentData represents a comment on an issue
+type IssueCommentData struct {
+	ID                 int64
+	RepoID             int64
+	IssueID            int64
+	GitHubID           int64
+	Body               string
+	UserLogin          string
+	UserID             int64
+	AuthorAssociation  string
+	CreatedAt          time.Time
+	UpdatedAt          *time.Time
+	RawData            json.RawMessage
+}
+
+// StoreIssueComment stores a single issue comment
+func (c *StagingClient) StoreIssueComment(ctx context.Context, repoID, issueID, githubID int64, body, userLogin string, userID int64, authorAssociation string, createdAt time.Time, updatedAt *time.Time, rawData json.RawMessage) error {
+	query := `
+		INSERT INTO github_issue_comments (
+			repo_id, issue_id, github_id, body, user_login, user_id,
+			author_association, created_at, updated_at, raw_data, fetched_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+		ON CONFLICT (repo_id, github_id)
+		DO UPDATE SET
+			body = EXCLUDED.body,
+			updated_at = EXCLUDED.updated_at,
+			raw_data = EXCLUDED.raw_data,
+			fetched_at = NOW()
+	`
+
+	_, err := c.db.ExecContext(ctx, query, repoID, issueID, githubID, body, userLogin, userID, authorAssociation, createdAt, updatedAt, rawData)
+	if err != nil {
+		return fmt.Errorf("failed to store issue comment: %w", err)
+	}
+
+	return nil
+}
+
+// GetIssueComments retrieves all comments for a specific issue
+func (c *StagingClient) GetIssueComments(ctx context.Context, issueID int64) ([]IssueCommentData, error) {
+	query := `
+		SELECT id, repo_id, issue_id, github_id, body, user_login, user_id,
+		       author_association, created_at, updated_at, raw_data
+		FROM github_issue_comments
+		WHERE issue_id = $1
+		ORDER BY created_at ASC
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, issueID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query issue comments: %w", err)
+	}
+	defer rows.Close()
+
+	var comments []IssueCommentData
+	for rows.Next() {
+		var c IssueCommentData
+		if err := rows.Scan(&c.ID, &c.RepoID, &c.IssueID, &c.GitHubID, &c.Body, &c.UserLogin, &c.UserID, &c.AuthorAssociation, &c.CreatedAt, &c.UpdatedAt, &c.RawData); err != nil {
+			return nil, fmt.Errorf("failed to scan issue comment: %w", err)
+		}
+		comments = append(comments, c)
+	}
+
+	return comments, rows.Err()
+}
+
+// GetIssuesWithoutComments returns issues that don't have comments fetched yet
+func (c *StagingClient) GetIssuesWithoutComments(ctx context.Context, repoID int64, days int) ([]IssueData, error) {
+	var cutoff *time.Time
+	if days > 0 {
+		t := time.Now().AddDate(0, 0, -days)
+		cutoff = &t
+	}
+
+	query := `
+		SELECT i.id, i.repo_id, i.number, i.title, i.body, i.state, i.labels,
+		       i.created_at, i.closed_at, i.raw_data
+		FROM github_issues i
+		WHERE i.repo_id = $1
+		  AND i.state = 'closed'
+		  AND NOT EXISTS (
+		      SELECT 1 FROM github_issue_comments ic WHERE ic.issue_id = i.id
+		  )
+	`
+
+	args := []interface{}{repoID}
+
+	if cutoff != nil {
+		query += ` AND i.closed_at >= $2`
+		args = append(args, cutoff)
+	}
+
+	query += ` ORDER BY i.closed_at DESC`
+
+	rows, err := c.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query issues without comments: %w", err)
+	}
+	defer rows.Close()
+
+	var issues []IssueData
+	for rows.Next() {
+		var i IssueData
+		if err := rows.Scan(&i.ID, &i.RepoID, &i.Number, &i.Title, &i.Body, &i.State, &i.Labels, &i.CreatedAt, &i.ClosedAt, &i.RawData); err != nil {
+			return nil, fmt.Errorf("failed to scan issue: %w", err)
+		}
+		issues = append(issues, i)
+	}
+
+	return issues, rows.Err()
+}
