@@ -12,10 +12,10 @@
     "rank": "Poor Quality"
   },
   "overall_metrics": {
-    "accuracy": 0.3333333333333333,
-    "f1_score": 0,
-    "precision": 0,
-    "recall": 0
+    "accuracy": 0.5,
+    "f1_score": 0.6666666666666665,
+    "precision": 0.6,
+    "recall": 0.75
   },
   "repository": "omnara-ai/omnara",
   "semantic_metrics": {
@@ -51,7 +51,7 @@
     "total_false_positives": 0,
     "total_missed_links": 1
   },
-  "test_date": "2025-11-02T18:45:18-08:00",
-  "timestamp": "2025-11-02T18:45:18-08:00",
+  "test_date": "2025-11-02T19:29:09-08:00",
+  "timestamp": "2025-11-02T19:29:09-08:00",
   "total_cases": 6
 }

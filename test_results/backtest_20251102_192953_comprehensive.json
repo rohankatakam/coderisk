@@ -1,6 +1,6 @@
 {
   "repository": "omnara-ai/omnara",
-  "test_date": "2025-11-02T18:45:18-08:00",
+  "test_date": "2025-11-02T19:29:53-08:00",
   "total_cases": 6,
   "results": [
     {
@@ -37,17 +37,24 @@
       },
       "actual": {
         "found": true,
-        "pr_links": [],
-        "commit_links": [],
+        "pr_links": [
+          197,
+          222
+        ],
+        "commit_links": [
+          "998f8b0564cd78c1a29bcc8bcef15f9d44ba7e93",
+          "d177a1d9d31e8e15f3379113a039fc1cecb97bc3",
+          "fb9391b731e764a08feb1c5e637a2d722dfdf4d8"
+        ],
         "confidence": 0.75,
-        "evidence": [],
+        "evidence": [
+          "temporal_match_1hr",
+          "temporal_match_1hr"
+        ],
         "detection_method": ""
       },
-      "status": "FAIL",
-      "confidence_delta": 0,
-      "errors": [
-        "Found links don't match expected links"
-      ]
+      "status": "PASS",
+      "confidence_delta": 0
     },
     {
       "test_case": {
@@ -266,14 +273,14 @@
     }
   ],
   "metrics": {
-    "true_positives": 0,
+    "true_positives": 1,
     "true_negatives": 2,
     "false_positives": 0,
-    "false_negatives": 4,
-    "precision": 0,
-    "recall": 0,
-    "f1_score": 0,
-    "accuracy": 0.3333333333333333
+    "false_negatives": 3,
+    "precision": 1,
+    "recall": 0.25,
+    "f1_score": 0.4,
+    "accuracy": 0.5
   },
   "pattern_analysis": {
     "temporal": {
@@ -305,5 +312,5 @@
       "avg_confidence": 0
     }
   },
-  "summary": "Backtesting Results for omnara-ai/omnara\nTest Date: 2025-11-02T18:45:18-08:00\nTotal Cases: 6\n\nOverall Performance:\n  Precision: 0.00%\n  Recall: 0.00%\n  F1 Score: 0.00%\n  Accuracy: 33.33%\n\nPattern Analysis:\n  Temporal: 1/3 detected (33.3%), avg confidence: 0.75\n  Semantic: 0/1 detected (0.0%), avg confidence: 0.00\n  Explicit: 0/0 detected (0.0%), avg confidence: 0.00\n  Comment: 0/0 detected (0.0%), avg confidence: 0.00\n"
+  "summary": "Backtesting Results for omnara-ai/omnara\nTest Date: 2025-11-02T19:29:53-08:00\nTotal Cases: 6\n\nOverall Performance:\n  Precision: 100.00%\n  Recall: 25.00%\n  F1 Score: 40.00%\n  Accuracy: 50.00%\n\nPattern Analysis:\n  Temporal: 1/3 detected (33.3%), avg confidence: 0.75\n  Semantic: 0/1 detected (0.0%), avg confidence: 0.00\n  Explicit: 0/0 detected (0.0%), avg confidence: 0.00\n  Comment: 0/0 detected (0.0%), avg confidence: 0.00\n"
 }

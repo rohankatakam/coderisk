@@ -1,0 +1,57 @@
+{
+  "clqs": {
+    "components": {
+      "bidirectional_refs": 0,
+      "comment_quality": 0,
+      "explicit_linking": 0,
+      "semantic_consistency": 0,
+      "temporal_correlation": 0
+    },
+    "grade": "F",
+    "overall_score": 0,
+    "rank": "Poor Quality"
+  },
+  "overall_metrics": {
+    "accuracy": 0.5,
+    "f1_score": 0.6666666666666665,
+    "precision": 0.6,
+    "recall": 0.75
+  },
+  "repository": "omnara-ai/omnara",
+  "semantic_metrics": {
+    "avg_confidence": 0.5,
+    "avg_semantic_score": 0.2222222222222222,
+    "f1_score": 0,
+    "match_rate": 0,
+    "matched_cases": 0,
+    "precision": 0,
+    "recall": 0,
+    "total_cases": 1,
+    "total_detected_links": 1,
+    "total_expected_links": 1,
+    "total_false_positives": 0,
+    "total_missed_links": 1
+  },
+  "target_comparison": {
+    "meets_targets": false,
+    "target_f1": 0.86,
+    "target_precision": 1,
+    "target_recall": 0.75
+  },
+  "temporal_metrics": {
+    "avg_confidence": 0,
+    "f1_score": 0,
+    "match_rate": 0,
+    "matched_cases": 0,
+    "precision": 0,
+    "recall": 0,
+    "total_cases": 1,
+    "total_detected_links": 0,
+    "total_expected_links": 1,
+    "total_false_positives": 0,
+    "total_missed_links": 1
+  },
+  "test_date": "2025-11-02T19:14:21-08:00",
+  "timestamp": "2025-11-02T19:14:22-08:00",
+  "total_cases": 6
+}

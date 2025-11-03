@@ -1,0 +1,400 @@
+{
+  "repository": "omnara-ai/omnara",
+  "test_date": "2025-11-02T19:29:09-08:00",
+  "total_cases": 6,
+  "results": [
+    {
+      "test_case": {
+        "issue_number": 221,
+        "title": "[FEATURE] allow user to set default agent for omnara",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/221",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            222
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "temporal"
+        ],
+        "primary_evidence": {
+          "issue_closed_at": "2025-10-26T00:00:00Z",
+          "note": "Timestamps approximate - need exact values from GitHub API",
+          "pr_merged_at": "2025-10-26T00:02:00Z",
+          "temporal_delta_seconds": 120
+        },
+        "link_quality": "medium",
+        "difficulty": "hard",
+        "notes": "Only way to find is temporally (PR merged near same time of comment). No explicit 'Fixes #221' in PR body.",
+        "expected_confidence": 0.75,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          197,
+          223,
+          222,
+          220
+        ],
+        "commit_links": [
+          "998f8b0564cd78c1a29bcc8bcef15f9d44ba7e93",
+          "d177a1d9d31e8e15f3379113a039fc1cecb97bc3",
+          "dc47846227ce13f8a66f5f8a3e07e385b2f1f239",
+          "fb9391b731e764a08feb1c5e637a2d722dfdf4d8",
+          "e346f58db6bfd63d4475cfebe22dcfa8fd93c902"
+        ],
+        "confidence": 0.75,
+        "evidence": [
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 227,
+        "title": "[BUG] Codex version is not reflective of installed version",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/227",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "none"
+        ],
+        "primary_evidence": {
+          "close_reason": "not_planned",
+          "issue_state": "closed"
+        },
+        "link_quality": "n/a",
+        "difficulty": "easy",
+        "notes": "True negative - no fix provided, issue closed without resolution",
+        "expected_confidence": 0,
+        "should_detect": false,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": null,
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          228
+        ],
+        "commit_links": [
+          "71b5dd47333c8e46ed0b1be1a49cc388eb27389e",
+          "a7edaa50ff39917e551072acf6154966493357a4"
+        ],
+        "confidence": 0.55,
+        "evidence": [
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr"
+        ],
+        "detection_method": ""
+      },
+      "status": "FAIL",
+      "confidence_delta": 0,
+      "errors": [
+        "False positive: found link when none expected"
+      ]
+    },
+    {
+      "test_case": {
+        "issue_number": 189,
+        "title": "[BUG] Ctrl + Z = Dead",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/189",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            203
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "temporal"
+        ],
+        "primary_evidence": {
+          "note": "Commits in same time range, no explicit reference",
+          "temporal_delta_seconds": 300
+        },
+        "link_quality": "medium",
+        "difficulty": "hard",
+        "notes": "Temporal match only - commits in same time range as issue close",
+        "expected_confidence": 0.7,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          204,
+          201,
+          205,
+          203,
+          202
+        ],
+        "commit_links": [
+          "ba7b1b76bfb9be42aa2fa60b1c1fecc36818f421",
+          "1f1d2fcb6d67621898a3259a8fd68c995d8d3b27",
+          "9cd53e1bce2faf7bf1c7c2b715a7b6dcd38aaf33",
+          "6728c33e33f24cfad85b9c8ac871530ce5191d52",
+          "202d2f8af9518bb167d659a0b2c6da2596e36804"
+        ],
+        "confidence": 0.55,
+        "evidence": [
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": -0.1499999999999999
+    },
+    {
+      "test_case": {
+        "issue_number": 187,
+        "title": "[BUG] Mobile interface sync issues with Claude Code subagents",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/187",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            218
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "temporal",
+          "semantic"
+        ],
+        "primary_evidence": {
+          "issue_title": "Mobile interface sync issues with Claude Code subagents",
+          "keyword_overlap": [
+            "mobile",
+            "interface",
+            "sync",
+            "claude",
+            "code"
+          ],
+          "pr_title": "Fix mobile interface sync with Claude Code",
+          "semantic_match": true,
+          "temporal_delta_seconds": 60
+        },
+        "link_quality": "high",
+        "difficulty": "medium",
+        "notes": "Both temporal AND semantic - bug name matches PR title",
+        "expected_confidence": 0.9,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          218,
+          216
+        ],
+        "commit_links": [
+          "0af9f01cf6f890d87f35a80b75731e668203a518",
+          "85b0a59c19d6e1dadcf5cc2551e6261bae273ec2"
+        ],
+        "confidence": 0.65,
+        "evidence": [
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": -0.25
+    },
+    {
+      "test_case": {
+        "issue_number": 188,
+        "title": "[BUG] git diff view x button on mobile not accessible",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/188",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "internal_fix"
+        ],
+        "primary_evidence": {
+          "note": "Can't find issue, might be an internal fix or unreleased"
+        },
+        "link_quality": "unknown",
+        "difficulty": "hard",
+        "notes": "Internal fix - unavoidable miss (no GitHub trace)",
+        "expected_confidence": 0,
+        "should_detect": false,
+        "expected_miss": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": null,
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": false,
+        "pr_links": [],
+        "commit_links": [],
+        "confidence": 0,
+        "evidence": [],
+        "detection_method": ""
+      },
+      "status": "EXPECTED_MISS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 219,
+        "title": "[BUG] prompts from subagents aren't shown",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/219",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "none"
+        ],
+        "primary_evidence": {
+          "close_reason": "completed",
+          "issue_state": "closed"
+        },
+        "link_quality": "n/a",
+        "difficulty": "easy",
+        "notes": "True negative - no fix found (may be internal or pending)",
+        "expected_confidence": 0,
+        "should_detect": false,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": null,
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          230,
+          232,
+          229,
+          228
+        ],
+        "commit_links": [
+          "6a0bc238368f4a117a857426ead4ae6c8ed446b7",
+          "a7edaa50ff39917e551072acf6154966493357a4",
+          "f19ad5a11750fa2160b5e590df3dd188a5d63b69",
+          "a4a109250470f81468cc1da28f2229019705f4c0",
+          "9a3b253cc46236e8ba5fca34ac37dd4d9b7f7758",
+          "2e62dc91da4d71cc7ef09b83bc6022e34e7bfaab",
+          "4aaa0157adb525a14b5d315f73d9580d28b75078",
+          "bf05983a19cd49bf09bf1c0c436ff45028b6e414",
+          "2e690631a4be18192ece263b2303660fec78c8c7",
+          "71b5dd47333c8e46ed0b1be1a49cc388eb27389e",
+          "b0b9b23b6c1f09ef1fc978d4b328f93783f5b622"
+        ],
+        "confidence": 0.55,
+        "evidence": [
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr",
+          "temporal_match_24hr"
+        ],
+        "detection_method": ""
+      },
+      "status": "FAIL",
+      "confidence_delta": 0,
+      "errors": [
+        "False positive: found link when none expected"
+      ]
+    }
+  ],
+  "metrics": {
+    "true_positives": 3,
+    "true_negatives": 0,
+    "false_positives": 2,
+    "false_negatives": 1,
+    "precision": 0.6,
+    "recall": 0.75,
+    "f1_score": 0.6666666666666665,
+    "accuracy": 0.5
+  },
+  "pattern_analysis": {
+    "temporal": {
+      "total_cases": 3,
+      "detected": 3,
+      "missed": 0,
+      "detection_rate": 1,
+      "avg_confidence": 0.65
+    },
+    "semantic": {
+      "total_cases": 1,
+      "detected": 1,
+      "missed": 0,
+      "detection_rate": 1,
+      "avg_confidence": 0.65
+    },
+    "explicit": {
+      "total_cases": 0,
+      "detected": 0,
+      "missed": 0,
+      "detection_rate": 0,
+      "avg_confidence": 0
+    },
+    "comment": {
+      "total_cases": 0,
+      "detected": 0,
+      "missed": 0,
+      "detection_rate": 0,
+      "avg_confidence": 0
+    }
+  },
+  "summary": "Backtesting Results for omnara-ai/omnara\nTest Date: 2025-11-02T19:29:09-08:00\nTotal Cases: 6\n\nOverall Performance:\n  Precision: 60.00%\n  Recall: 75.00%\n  F1 Score: 66.67%\n  Accuracy: 50.00%\n\nPattern Analysis:\n  Temporal: 3/3 detected (100.0%), avg confidence: 0.65\n  Semantic: 1/1 detected (100.0%), avg confidence: 0.65\n  Explicit: 0/0 detected (0.0%), avg confidence: 0.00\n  Comment: 0/0 detected (0.0%), avg confidence: 0.00\n"
+}

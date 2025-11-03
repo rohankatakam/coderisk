@@ -242,7 +242,7 @@ func (bt *Backtester) testCase(ctx context.Context, repoID int64, testCase Groun
 	// Query Neo4j for actual links
 	query := `
 		MATCH (i:Issue {number: $issue_number})
-		OPTIONAL MATCH (i)-[r:FIXES_ISSUE|ASSOCIATED_WITH|MENTIONS]->(target)
+		OPTIONAL MATCH (i)-[r:FIXED_BY|RESOLVED_BY|ASSOCIATED_WITH]->(target)
 		WHERE target:PR OR target:Commit
 		RETURN
 			labels(target) as target_type,

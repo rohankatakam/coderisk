@@ -34,19 +34,19 @@
             "pr_keyword_count": 3
           },
           "issue_keywords": [
+            "subagents",
+            "bug",
+            "mobile",
             "interface",
             "sync",
             "issues",
             "claude",
-            "code",
-            "subagents",
-            "bug",
-            "mobile"
+            "code"
           ],
           "pr_keywords": [
-            "headless",
             "claude",
-            "code"
+            "code",
+            "headless"
           ],
           "common_keywords": [
             "claude",
@@ -71,5 +71,5 @@
       }
     }
   ],
-  "timestamp": "2025-11-02T18:49:23-08:00"
+  "timestamp": "2025-11-02T19:29:09-08:00"
 }
