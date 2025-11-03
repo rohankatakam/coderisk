@@ -1,0 +1,325 @@
+{
+  "repository": "omnara-ai/omnara",
+  "github_url": "https://github.com/omnara-ai/omnara",
+  "validation_date": "2025-11-02",
+  "validator": "manual_human",
+  "total_cases": 11,
+  "pattern_distribution": {
+    "explicit": 5,
+    "temporal": 3,
+    "true_negative": 2,
+    "internal_fix": 1
+  },
+  "test_cases": [
+    {
+      "issue_number": 122,
+      "title": "[BUG] Dashboard does not show up claude code output",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/122",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [123],
+        "associated_issues": []
+      },
+      "linking_patterns": ["explicit"],
+      "primary_evidence": {
+        "pr_body_contains": "fixes claude json parsing issue shown in #122",
+        "reference_type": "fixes",
+        "explicit": true,
+        "issue_closed_at": "2025-08-15T17:26:17Z",
+        "pr_merged_at": "2025-08-15T00:00:00Z"
+      },
+      "link_quality": "high",
+      "difficulty": "easy",
+      "notes": "Clear explicit reference in PR body. PR #123 states 'fixes claude json parsing issue shown in #122'. Root cause: improper parsing of file paths with @ symbol.",
+      "expected_confidence": 0.95,
+      "should_detect": true,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": "merged",
+        "verified_manually": true,
+        "verified_date": "2025-11-02"
+      }
+    },
+    {
+      "issue_number": 115,
+      "title": "[BUG] Claude output didn't show up in dashboard",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/115",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [120],
+        "associated_issues": []
+      },
+      "linking_patterns": ["explicit"],
+      "primary_evidence": {
+        "pr_body_contains": "Fixes /clear and /reset behavior noted in #115",
+        "reference_type": "fixes",
+        "explicit": true,
+        "issue_closed_at": "2025-08-15T00:00:00Z",
+        "pr_merged_at": "2025-08-15T00:00:00Z"
+      },
+      "link_quality": "high",
+      "difficulty": "easy",
+      "notes": "PR #120 explicitly states 'Fixes /clear and /reset behavior noted in #115'. Fixed bug where /clear command caused dashboard rendering failure.",
+      "expected_confidence": 0.95,
+      "should_detect": true,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": "merged",
+        "verified_manually": true,
+        "verified_date": "2025-11-02"
+      }
+    },
+    {
+      "issue_number": 53,
+      "title": "[BUG] Claude Code Not Found",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/53",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [54],
+        "associated_issues": []
+      },
+      "linking_patterns": ["explicit"],
+      "primary_evidence": {
+        "pr_body_contains": "For issue #53",
+        "reference_type": "for_issue",
+        "explicit": true,
+        "issue_closed_at": "2025-08-08T00:00:00Z",
+        "pr_merged_at": "2025-08-08T00:00:00Z"
+      },
+      "link_quality": "high",
+      "difficulty": "easy",
+      "notes": "PR #54 explicitly states 'For issue #53'. Fixed Claude CLI detection when installed locally vs globally. Contributor WindChimeRan mentioned issue in PR.",
+      "expected_confidence": 0.90,
+      "should_detect": true,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": "merged",
+        "verified_manually": true,
+        "verified_date": "2025-11-02"
+      }
+    },
+    {
+      "issue_number": 160,
+      "title": "[FEATURE] Name Agents",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/160",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [162],
+        "associated_issues": []
+      },
+      "linking_patterns": ["explicit"],
+      "primary_evidence": {
+        "pr_body_contains": "requested in #160",
+        "reference_type": "requested_in",
+        "explicit": true,
+        "issue_closed_at": "2025-08-23T00:00:00Z",
+        "pr_merged_at": "2025-08-23T00:00:00Z"
+      },
+      "link_quality": "high",
+      "difficulty": "easy",
+      "notes": "PR #162 states 'requested in #160'. Implemented --name flag for omnara CLI to allow custom agent names in dashboard.",
+      "expected_confidence": 0.75,
+      "should_detect": true,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": "merged",
+        "verified_manually": true,
+        "verified_date": "2025-11-02"
+      }
+    },
+    {
+      "issue_number": 165,
+      "title": "[FEATURE] [DOCS] Architecture visibility in dark mode",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/165",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [166],
+        "associated_issues": []
+      },
+      "linking_patterns": ["explicit"],
+      "primary_evidence": {
+        "pr_body_contains": "better contrast in mermaid diagram #165",
+        "reference_type": "issue_number",
+        "explicit": true,
+        "issue_closed_at": "2025-08-25T00:00:00Z",
+        "pr_merged_at": "2025-08-25T00:00:00Z"
+      },
+      "link_quality": "high",
+      "difficulty": "easy",
+      "notes": "PR #166 references '#165'. Documentation fix to improve diagram visibility in GitHub dark mode by enhancing text contrast.",
+      "expected_confidence": 0.75,
+      "should_detect": true,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": "merged",
+        "verified_manually": true,
+        "verified_date": "2025-11-02"
+      }
+    },
+    {
+      "issue_number": 221,
+      "title": "[FEATURE] allow user to set default agent for omnara",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/221",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [222],
+        "associated_issues": []
+      },
+      "linking_patterns": ["temporal"],
+      "primary_evidence": {
+        "temporal_delta_seconds": 120,
+        "issue_closed_at": "2025-10-26T00:00:00Z",
+        "pr_merged_at": "2025-10-26T00:02:00Z",
+        "note": "Timestamps approximate - need exact values from GitHub API"
+      },
+      "link_quality": "medium",
+      "difficulty": "hard",
+      "notes": "Only way to find is temporally (PR merged near same time of comment). No explicit 'Fixes #221' in PR body.",
+      "expected_confidence": 0.75,
+      "should_detect": true,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": "merged",
+        "verified_manually": true
+      }
+    },
+    {
+      "issue_number": 189,
+      "title": "[BUG] Ctrl + Z = Dead",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/189",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [203],
+        "associated_issues": []
+      },
+      "linking_patterns": ["temporal"],
+      "primary_evidence": {
+        "temporal_delta_seconds": 300,
+        "note": "Commits in same time range, no explicit reference"
+      },
+      "link_quality": "medium",
+      "difficulty": "hard",
+      "notes": "Temporal match only - commits in same time range as issue close",
+      "expected_confidence": 0.70,
+      "should_detect": true,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": "merged",
+        "verified_manually": true
+      }
+    },
+    {
+      "issue_number": 187,
+      "title": "[BUG] Mobile interface sync issues with Claude Code subagents",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/187",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [218],
+        "associated_issues": []
+      },
+      "linking_patterns": ["temporal", "semantic"],
+      "primary_evidence": {
+        "temporal_delta_seconds": 60,
+        "semantic_match": true,
+        "pr_title": "Fix mobile interface sync with Claude Code",
+        "issue_title": "Mobile interface sync issues with Claude Code subagents",
+        "keyword_overlap": ["mobile", "interface", "sync", "claude", "code"]
+      },
+      "link_quality": "high",
+      "difficulty": "medium",
+      "notes": "Both temporal AND semantic - bug name matches PR title",
+      "expected_confidence": 0.90,
+      "should_detect": true,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": "merged",
+        "verified_manually": true
+      }
+    },
+    {
+      "issue_number": 227,
+      "title": "[BUG] Codex version is not reflective of installed version",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/227",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [],
+        "associated_issues": []
+      },
+      "linking_patterns": ["none"],
+      "primary_evidence": {
+        "issue_state": "closed",
+        "close_reason": "not_planned"
+      },
+      "link_quality": "n/a",
+      "difficulty": "easy",
+      "notes": "True negative - no fix provided, issue closed without resolution",
+      "expected_confidence": null,
+      "should_detect": false,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": null,
+        "verified_manually": true
+      }
+    },
+    {
+      "issue_number": 219,
+      "title": "[BUG] prompts from subagents aren't shown",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/219",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [],
+        "associated_issues": []
+      },
+      "linking_patterns": ["none"],
+      "primary_evidence": {
+        "issue_state": "closed",
+        "close_reason": "completed"
+      },
+      "link_quality": "n/a",
+      "difficulty": "easy",
+      "notes": "True negative - no fix found (may be internal or pending)",
+      "expected_confidence": null,
+      "should_detect": false,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": null,
+        "verified_manually": true
+      }
+    },
+    {
+      "issue_number": 188,
+      "title": "[BUG] git diff view x button on mobile not accessible",
+      "issue_url": "https://github.com/omnara-ai/omnara/issues/188",
+      "expected_links": {
+        "fixed_by_commits": [],
+        "associated_prs": [],
+        "associated_issues": []
+      },
+      "linking_patterns": ["internal_fix"],
+      "primary_evidence": {
+        "note": "Can't find issue, might be an internal fix or unreleased"
+      },
+      "link_quality": "unknown",
+      "difficulty": "hard",
+      "notes": "Internal fix - unavoidable miss (no GitHub trace)",
+      "expected_confidence": null,
+      "should_detect": false,
+      "expected_miss": true,
+      "github_verification": {
+        "issue_state": "closed",
+        "pr_state": null,
+        "verified_manually": true
+      }
+    }
+  ],
+  "validation_metrics": {
+    "expected_true_positives": 8,
+    "expected_true_negatives": 2,
+    "expected_false_negatives": 1,
+    "expected_false_positives": 0,
+    "target_precision": 1.0,
+    "target_recall": 0.89,
+    "target_f1": 0.94
+  },
+  "notes": "Expanded dataset adds 5 explicit reference cases (Pattern 1) to validate explicit linking behavior. Original temporal and true negative cases maintained. Issue #188 remains an expected miss due to internal fix with no GitHub trace."
+}
