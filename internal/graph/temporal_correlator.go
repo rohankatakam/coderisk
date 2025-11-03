@@ -36,10 +36,17 @@ type TemporalMatch struct {
 }
 
 // FindTemporalMatches finds PRs/commits that occurred near the time an issue was closed
+// Applies semantic validation to filter out false positives
 func (tc *TemporalCorrelator) FindTemporalMatches(ctx context.Context, repoID int64) ([]TemporalMatch, error) {
-	log.Printf("🕐 Finding temporal correlations...")
+	log.Printf("🕐 Finding temporal correlations with semantic validation...")
 
 	matches := []TemporalMatch{}
+	semanticMatcher := NewSemanticMatcher()
+
+	// Counters for logging
+	totalCandidates := 0
+	semanticRejections := 0
+	semanticBoosts := 0
 
 	// Get all closed issues with timestamps
 	issues, err := tc.getClosedIssues(ctx, repoID)
@@ -63,10 +70,40 @@ func (tc *TemporalCorrelator) FindTemporalMatches(ctx context.Context, repoID in
 		}
 
 		for _, pr := range prs {
+			totalCandidates++
+
+			// Create temporal match
 			match := tc.createTemporalMatch(issue.Number, *issue.ClosedAt, "pr", fmt.Sprintf("%d", pr.Number), pr.MergedAt)
-			if match.Confidence > 0.0 {
-				matches = append(matches, match)
+
+			// Skip if temporal confidence is zero (outside time windows)
+			if match.Confidence == 0.0 {
+				semanticRejections++
+				continue
 			}
+
+			// Validate with semantic similarity (using improved title+body matching)
+			similarity := semanticMatcher.CalculateIssueToPRSimilarity(issue.Title, issue.Body, pr.Title, pr.Body)
+
+			// Adaptive filtering based on semantic relevance:
+			// - High similarity (≥10%): Accept all temporal matches
+			// - Low similarity (<10%): Only accept if very close in time (<1 hour)
+			if similarity < 0.10 && match.Delta >= 1*time.Hour {
+				semanticRejections++
+				continue // Reject: low relevance and not very close in time
+			}
+
+			// Apply semantic boost if similarity is high
+			if similarity >= 0.20 {
+				match.Confidence = min(match.Confidence+0.10, 0.98)
+				match.Evidence = append(match.Evidence, "semantic_boost")
+				semanticBoosts++
+			} else if similarity >= 0.10 {
+				match.Confidence = min(match.Confidence+0.05, 0.98)
+				match.Evidence = append(match.Evidence, "semantic_boost")
+				semanticBoosts++
+			}
+
+			matches = append(matches, match)
 		}
 
 		// Find commits around the same time
@@ -77,15 +114,95 @@ func (tc *TemporalCorrelator) FindTemporalMatches(ctx context.Context, repoID in
 		}
 
 		for _, commit := range commits {
+			totalCandidates++
+
+			// Create temporal match
 			match := tc.createTemporalMatch(issue.Number, *issue.ClosedAt, "commit", commit.SHA, commit.AuthorDate)
-			if match.Confidence > 0.0 {
-				matches = append(matches, match)
+
+			// Skip if temporal confidence is zero (outside time windows)
+			if match.Confidence == 0.0 {
+				semanticRejections++
+				continue
 			}
+
+			// Validate with semantic similarity (using improved title+body matching)
+			similarity := semanticMatcher.CalculateIssueToCommitSimilarity(issue.Title, issue.Body, commit.Message)
+
+			// Adaptive filtering based on semantic relevance:
+			// - High similarity (≥10%): Accept all temporal matches
+			// - Low similarity (<10%): Only accept if very close in time (<1 hour)
+			if similarity < 0.10 && match.Delta >= 1*time.Hour {
+				semanticRejections++
+				continue // Reject: low relevance and not very close in time
+			}
+
+			// Apply semantic boost if similarity is high
+			if similarity >= 0.20 {
+				match.Confidence = min(match.Confidence+0.10, 0.98)
+				match.Evidence = append(match.Evidence, "semantic_boost")
+				semanticBoosts++
+			} else if similarity >= 0.10 {
+				match.Confidence = min(match.Confidence+0.05, 0.98)
+				match.Evidence = append(match.Evidence, "semantic_boost")
+				semanticBoosts++
+			}
+
+			matches = append(matches, match)
 		}
 	}
 
-	log.Printf("  ✓ Found %d temporal matches", len(matches))
+	log.Printf("  ✓ Found %d temporal matches (%d candidates, %d rejected by semantic filter, %d boosted)",
+		len(matches), totalCandidates, semanticRejections, semanticBoosts)
 	return matches, nil
+}
+
+// min returns the minimum of two float64 values
+func min(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// StoreTemporalMatches stores temporal matches as IssueCommitRef entries in the database
+func (tc *TemporalCorrelator) StoreTemporalMatches(ctx context.Context, repoID int64, matches []TemporalMatch) error {
+	if len(matches) == 0 {
+		return nil
+	}
+
+	// Convert temporal matches to IssueCommitRef entries
+	refs := make([]database.IssueCommitRef, 0, len(matches))
+	for _, match := range matches {
+		ref := database.IssueCommitRef{
+			RepoID:          repoID,
+			IssueNumber:     match.IssueNumber,
+			Action:          "associated_with", // Temporal matches are associations, not explicit fixes
+			Confidence:      match.Confidence,
+			DetectionMethod: "temporal",
+			ExtractedFrom:   fmt.Sprintf("temporal_correlation_%s", match.Evidence[0]),
+			Evidence:        match.Evidence, // Store evidence tags (e.g., ["temporal_match_5min"])
+		}
+
+		// Set target based on type
+		if match.TargetType == "pr" {
+			prNum := 0
+			if _, err := fmt.Sscanf(match.TargetID, "%d", &prNum); err == nil {
+				ref.PRNumber = &prNum
+			}
+		} else if match.TargetType == "commit" {
+			ref.CommitSHA = &match.TargetID
+		}
+
+		refs = append(refs, ref)
+	}
+
+	// Store in database
+	if err := tc.stagingDB.StoreIssueCommitRefs(ctx, refs); err != nil {
+		return fmt.Errorf("failed to store temporal matches: %w", err)
+	}
+
+	log.Printf("  ✓ Stored %d temporal matches to database", len(refs))
+	return nil
 }
 
 // createTemporalMatch calculates confidence and evidence for a temporal match
@@ -160,27 +277,71 @@ func ApplyTemporalBoost(confidence float64, evidence []string, issueClosedAt, ta
 
 // getClosedIssues retrieves all closed issues with timestamps
 func (tc *TemporalCorrelator) getClosedIssues(ctx context.Context, repoID int64) ([]IssueInfo, error) {
-	// Use FetchUnprocessedIssues as a template - we need all closed issues
-	// For now, return empty slice - this will be implemented when integrating
-	return []IssueInfo{}, nil
+	issues, err := tc.stagingDB.GetClosedIssues(ctx, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get closed issues: %w", err)
+	}
+
+	result := make([]IssueInfo, len(issues))
+	for i, issue := range issues {
+		result[i] = IssueInfo{
+			Number:   issue.Number,
+			Title:    issue.Title,
+			Body:     issue.Body,
+			State:    issue.State,
+			ClosedAt: issue.ClosedAt,
+		}
+	}
+	return result, nil
 }
 
 // getPRsMergedNear finds PRs merged within a time window
 func (tc *TemporalCorrelator) getPRsMergedNear(ctx context.Context, repoID int64, targetTime time.Time, window time.Duration) ([]PRInfo, error) {
-	// TODO: Implement when integrating - need to add Query method to StagingClient
-	return []PRInfo{}, nil
+	prs, err := tc.stagingDB.GetPRsMergedNear(ctx, repoID, targetTime, window)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PRs merged near time: %w", err)
+	}
+
+	result := make([]PRInfo, len(prs))
+	for i, pr := range prs {
+		mergedAt := time.Time{}
+		if pr.MergedAt != nil {
+			mergedAt = *pr.MergedAt
+		}
+		result[i] = PRInfo{
+			Number:   pr.Number,
+			Title:    pr.Title,
+			Body:     pr.Body,
+			State:    pr.State,
+			MergedAt: mergedAt,
+		}
+	}
+	return result, nil
 }
 
 // getCommitsNear finds commits created within a time window
 func (tc *TemporalCorrelator) getCommitsNear(ctx context.Context, repoID int64, targetTime time.Time, window time.Duration) ([]CommitInfo, error) {
-	// TODO: Implement when integrating - need to add Query method to StagingClient
-	return []CommitInfo{}, nil
+	commits, err := tc.stagingDB.GetCommitsNear(ctx, repoID, targetTime, window)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commits near time: %w", err)
+	}
+
+	result := make([]CommitInfo, len(commits))
+	for i, commit := range commits {
+		result[i] = CommitInfo{
+			SHA:        commit.SHA,
+			Message:    commit.Message,
+			AuthorDate: commit.AuthorDate,
+		}
+	}
+	return result, nil
 }
 
 // Helper types
 type IssueInfo struct {
 	Number    int
 	Title     string
+	Body      string // Added for semantic matching
 	State     string
 	ClosedAt  *time.Time
 }
@@ -188,6 +349,7 @@ type IssueInfo struct {
 type PRInfo struct {
 	Number    int
 	Title     string
+	Body      string // Added for semantic matching
 	State     string
 	MergedAt  time.Time
 }

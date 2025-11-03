@@ -171,6 +171,7 @@ func (l *IssueLinker) createIncidentEdges(ctx context.Context, repoID int64) (*B
 					"confidence":        ref.Confidence,
 					"detected_via":      ref.DetectionMethod,
 					"rationale":         fmt.Sprintf("Extracted from %s", ref.ExtractedFrom),
+					"evidence":          ref.Evidence, // Evidence tags for CLQS calculation
 				},
 			}
 
@@ -190,6 +191,7 @@ func (l *IssueLinker) createIncidentEdges(ctx context.Context, repoID int64) (*B
 					"confidence":        ref.Confidence,
 					"detected_via":      ref.DetectionMethod,
 					"rationale":         fmt.Sprintf("Extracted from %s", ref.ExtractedFrom),
+					"evidence":          ref.Evidence, // Evidence tags for CLQS calculation
 				},
 			}
 

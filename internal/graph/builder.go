@@ -106,8 +106,17 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string)
 	stats.Nodes += issueStats.Nodes
 	log.Printf("  ✓ Processed issues: %d nodes", issueStats.Nodes)
 
-	// Link Issues to Commits/PRs (creates FIXED_BY edges)
+	// Run Temporal Correlation (finds temporal matches and stores as IssueCommitRefs)
+	// Reference: LINKING_PATTERNS.md - Pattern 2: Temporal (20% of real-world cases)
+	temporalStats, err := b.runTemporalCorrelation(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("temporal correlation failed: %w", err)
+	}
+	log.Printf("  ✓ Temporal correlation: found %d matches", temporalStats.Edges)
+
+	// Link Issues to Commits/PRs (creates FIXED_BY/ASSOCIATED_WITH edges)
 	// Reference: REVISED_MVP_STRATEGY.md - Two-way issue linking
+	// This now includes both explicit references AND temporal matches
 	linkStats, err := b.linkIssues(ctx, repoID)
 	if err != nil {
 		return stats, fmt.Errorf("link issues failed: %w", err)
@@ -119,7 +128,31 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string)
 	return stats, nil
 }
 
-// linkIssues creates Issue nodes and FIXED_BY edges based on LLM extraction
+// runTemporalCorrelation finds temporal correlations between issues and PRs/commits
+// and stores them as IssueCommitRef entries in the database
+func (b *Builder) runTemporalCorrelation(ctx context.Context, repoID int64) (*BuildStats, error) {
+	stats := &BuildStats{}
+
+	// Create temporal correlator (only needs staging DB, not Neo4j)
+	correlator := NewTemporalCorrelator(b.stagingDB, nil)
+
+	// Find temporal matches
+	matches, err := correlator.FindTemporalMatches(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("failed to find temporal matches: %w", err)
+	}
+
+	// Store matches in database as IssueCommitRefs
+	if err := correlator.StoreTemporalMatches(ctx, repoID, matches); err != nil {
+		return stats, fmt.Errorf("failed to store temporal matches: %w", err)
+	}
+
+	stats.Edges = len(matches)
+	return stats, nil
+}
+
+// linkIssues creates Issue nodes and FIXED_BY/ASSOCIATED_WITH edges
+// based on both explicit LLM extraction AND temporal correlation
 func (b *Builder) linkIssues(ctx context.Context, repoID int64) (*BuildStats, error) {
 	linker := NewIssueLinker(b.stagingDB, b.backend)
 	return linker.LinkIssues(ctx, repoID)

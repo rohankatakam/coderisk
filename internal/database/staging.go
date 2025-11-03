@@ -706,6 +706,7 @@ type IssueCommitRef struct {
 	Confidence      float64
 	DetectionMethod string
 	ExtractedFrom   string
+	Evidence        []string // Array of evidence tags (e.g., ["temporal_match_5min", "semantic_high"])
 }
 
 // StoreIssueCommitRefs stores multiple issue-commit references in a batch
@@ -718,12 +719,13 @@ func (c *StagingClient) StoreIssueCommitRefs(ctx context.Context, refs []IssueCo
 		INSERT INTO github_issue_commit_refs (
 			repo_id, issue_number, commit_sha, pr_number,
 			action, confidence, detection_method, extracted_from,
-			extracted_at, created_at
+			evidence, extracted_at, created_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
 		ON CONFLICT (repo_id, issue_number, commit_sha, pr_number, detection_method)
 		DO UPDATE SET
 			confidence = GREATEST(github_issue_commit_refs.confidence, EXCLUDED.confidence),
+			evidence = EXCLUDED.evidence,
 			extracted_at = NOW()
 	`
 
@@ -744,6 +746,7 @@ func (c *StagingClient) StoreIssueCommitRefs(ctx context.Context, refs []IssueCo
 		_, err := stmt.ExecContext(ctx,
 			ref.RepoID, ref.IssueNumber, ref.CommitSHA, ref.PRNumber,
 			ref.Action, ref.Confidence, ref.DetectionMethod, ref.ExtractedFrom,
+			pq.Array(ref.Evidence), // Use pq.Array for PostgreSQL array type
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert reference: %w", err)
@@ -761,7 +764,8 @@ func (c *StagingClient) StoreIssueCommitRefs(ctx context.Context, refs []IssueCo
 func (c *StagingClient) GetIssueCommitRefs(ctx context.Context, repoID int64) ([]IssueCommitRef, error) {
 	query := `
 		SELECT repo_id, issue_number, commit_sha, pr_number,
-			   action, confidence, detection_method, extracted_from
+			   action, confidence, detection_method, extracted_from,
+			   COALESCE(evidence, '{}') as evidence
 		FROM github_issue_commit_refs
 		WHERE repo_id = $1
 		ORDER BY confidence DESC, issue_number, commit_sha
@@ -777,13 +781,110 @@ func (c *StagingClient) GetIssueCommitRefs(ctx context.Context, repoID int64) ([
 	for rows.Next() {
 		var ref IssueCommitRef
 		if err := rows.Scan(&ref.RepoID, &ref.IssueNumber, &ref.CommitSHA, &ref.PRNumber,
-			&ref.Action, &ref.Confidence, &ref.DetectionMethod, &ref.ExtractedFrom); err != nil {
+			&ref.Action, &ref.Confidence, &ref.DetectionMethod, &ref.ExtractedFrom,
+			pq.Array(&ref.Evidence)); err != nil { // Use pq.Array for PostgreSQL array type
 			return nil, fmt.Errorf("failed to scan reference: %w", err)
 		}
 		refs = append(refs, ref)
 	}
 
 	return refs, rows.Err()
+}
+
+// ===================================
+// Temporal Correlation Query Methods
+// ===================================
+
+// GetClosedIssues retrieves all closed issues with timestamps for temporal correlation
+func (c *StagingClient) GetClosedIssues(ctx context.Context, repoID int64) ([]IssueData, error) {
+	query := `
+		SELECT id, repo_id, number, title, body, state, labels, created_at, closed_at, raw_data
+		FROM github_issues
+		WHERE repo_id = $1 AND state = 'closed' AND closed_at IS NOT NULL
+		ORDER BY closed_at DESC
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch closed issues: %w", err)
+	}
+	defer rows.Close()
+
+	var issues []IssueData
+	for rows.Next() {
+		var i IssueData
+		if err := rows.Scan(&i.ID, &i.RepoID, &i.Number, &i.Title, &i.Body, &i.State, &i.Labels, &i.CreatedAt, &i.ClosedAt, &i.RawData); err != nil {
+			return nil, fmt.Errorf("failed to scan issue: %w", err)
+		}
+		issues = append(issues, i)
+	}
+
+	return issues, rows.Err()
+}
+
+// GetPRsMergedNear retrieves PRs merged within a time window of a target time
+func (c *StagingClient) GetPRsMergedNear(ctx context.Context, repoID int64, targetTime time.Time, window time.Duration) ([]PRData, error) {
+	// Calculate time bounds
+	startTime := targetTime.Add(-window)
+	endTime := targetTime.Add(window)
+
+	query := `
+		SELECT id, repo_id, number, title, body, state, merged, merge_commit_sha, created_at, merged_at, raw_data
+		FROM github_pull_requests
+		WHERE repo_id = $1
+			AND merged_at IS NOT NULL
+			AND merged_at BETWEEN $2 AND $3
+		ORDER BY merged_at DESC
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, repoID, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch PRs merged near time: %w", err)
+	}
+	defer rows.Close()
+
+	var prs []PRData
+	for rows.Next() {
+		var p PRData
+		if err := rows.Scan(&p.ID, &p.RepoID, &p.Number, &p.Title, &p.Body, &p.State, &p.Merged, &p.MergeCommitSHA, &p.CreatedAt, &p.MergedAt, &p.RawData); err != nil {
+			return nil, fmt.Errorf("failed to scan PR: %w", err)
+		}
+		prs = append(prs, p)
+	}
+
+	return prs, rows.Err()
+}
+
+// GetCommitsNear retrieves commits authored within a time window of a target time
+func (c *StagingClient) GetCommitsNear(ctx context.Context, repoID int64, targetTime time.Time, window time.Duration) ([]CommitData, error) {
+	// Calculate time bounds
+	startTime := targetTime.Add(-window)
+	endTime := targetTime.Add(window)
+
+	query := `
+		SELECT id, repo_id, sha, author_email, author_name, author_date, message, raw_data
+		FROM github_commits
+		WHERE repo_id = $1
+			AND author_date BETWEEN $2 AND $3
+		ORDER BY author_date DESC
+	`
+
+	rows, err := c.db.QueryContext(ctx, query, repoID, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch commits near time: %w", err)
+	}
+	defer rows.Close()
+
+	var commits []CommitData
+	for rows.Next() {
+		var c CommitData
+		if err := rows.Scan(&c.ID, &c.RepoID, &c.SHA, &c.AuthorEmail, &c.AuthorName, &c.AuthorDate, &c.Message, &c.RawData); err != nil {
+			return nil, fmt.Errorf("failed to scan commit: %w", err)
+		}
+		commits = append(commits, c)
+	}
+
+	return commits, rows.Err()
 }
 
 // ===================================
