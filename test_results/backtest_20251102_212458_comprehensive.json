@@ -1,0 +1,797 @@
+{
+  "repository": "omnara-ai/omnara",
+  "test_date": "2025-11-02T21:24:58-08:00",
+  "total_cases": 15,
+  "results": [
+    {
+      "test_case": {
+        "issue_number": 122,
+        "title": "[BUG] Dashboard does not show up claude code output",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/122",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            123
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "explicit"
+        ],
+        "primary_evidence": {
+          "explicit": true,
+          "issue_closed_at": "2025-08-15T17:26:17Z",
+          "pr_body_contains": "fixes claude json parsing issue shown in #122",
+          "pr_merged_at": "2025-08-15T00:00:00Z",
+          "reference_type": "fixes"
+        },
+        "link_quality": "high",
+        "difficulty": "easy",
+        "notes": "Clear explicit reference in PR body. PR #123 states 'fixes claude json parsing issue shown in #122'. Root cause: improper parsing of file paths with @ symbol.",
+        "expected_confidence": 0.95,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          123,
+          123
+        ],
+        "commit_links": [
+          "17e6496b122daba22399209935197aedeef1864c",
+          "17e6496b122daba22399209935197aedeef1864c"
+        ],
+        "confidence": 0.95,
+        "evidence": [
+          "temporal_match_1hr",
+          "temporal_match_1hr"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 115,
+        "title": "[BUG] Claude output didn't show up in dashboard",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/115",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            120
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "explicit"
+        ],
+        "primary_evidence": {
+          "explicit": true,
+          "issue_closed_at": "2025-08-15T00:00:00Z",
+          "pr_body_contains": "Fixes /clear and /reset behavior noted in #115",
+          "pr_merged_at": "2025-08-15T00:00:00Z",
+          "reference_type": "fixes"
+        },
+        "link_quality": "high",
+        "difficulty": "easy",
+        "notes": "PR #120 explicitly states 'Fixes /clear and /reset behavior noted in #115'. Fixed bug where /clear command caused dashboard rendering failure.",
+        "expected_confidence": 0.95,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          120,
+          120
+        ],
+        "commit_links": [
+          "85b96487ca7fb4d7c70ec6edf9139241efb3578b",
+          "85b96487ca7fb4d7c70ec6edf9139241efb3578b",
+          "6114f8ee80607688498639e04ed2f8d9fb0eeef6"
+        ],
+        "confidence": 0.95,
+        "evidence": [
+          "temporal_match_5min",
+          "temporal_match_5min",
+          "temporal_match_1hr"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 53,
+        "title": "[BUG] Claude Code Not Found",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/53",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            54
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "explicit"
+        ],
+        "primary_evidence": {
+          "explicit": true,
+          "issue_closed_at": "2025-08-08T00:00:00Z",
+          "pr_body_contains": "For issue #53",
+          "pr_merged_at": "2025-08-08T00:00:00Z",
+          "reference_type": "for_issue"
+        },
+        "link_quality": "high",
+        "difficulty": "easy",
+        "notes": "PR #54 explicitly states 'For issue #53'. Fixed Claude CLI detection when installed locally vs globally. Contributor WindChimeRan mentioned issue in PR.",
+        "expected_confidence": 0.9,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          54,
+          38,
+          54
+        ],
+        "commit_links": [
+          "664fb207194d3738021aa957a99db62ab98eb00b",
+          "664fb207194d3738021aa957a99db62ab98eb00b"
+        ],
+        "confidence": 0.9,
+        "evidence": [
+          "temporal_match_1hr",
+          "semantic_boost",
+          "temporal_match_1hr",
+          "semantic_boost"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 160,
+        "title": "[FEATURE] Name Agents",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/160",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            162
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "explicit"
+        ],
+        "primary_evidence": {
+          "explicit": true,
+          "issue_closed_at": "2025-08-23T00:00:00Z",
+          "pr_body_contains": "requested in #160",
+          "pr_merged_at": "2025-08-23T00:00:00Z",
+          "reference_type": "requested_in"
+        },
+        "link_quality": "high",
+        "difficulty": "easy",
+        "notes": "PR #162 states 'requested in #160'. Implemented --name flag for omnara CLI to allow custom agent names in dashboard.",
+        "expected_confidence": 0.75,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          162
+        ],
+        "commit_links": [
+          "2521052fe6a548d433116234939879c9793d024c"
+        ],
+        "confidence": 0.75,
+        "evidence": [],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 165,
+        "title": "[FEATURE] [DOCS] Architecture visibility in dark mode",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/165",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            166
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "explicit"
+        ],
+        "primary_evidence": {
+          "explicit": true,
+          "issue_closed_at": "2025-08-25T00:00:00Z",
+          "pr_body_contains": "better contrast in mermaid diagram #165",
+          "pr_merged_at": "2025-08-25T00:00:00Z",
+          "reference_type": "issue_number"
+        },
+        "link_quality": "high",
+        "difficulty": "easy",
+        "notes": "PR #166 references '#165'. Documentation fix to improve diagram visibility in GitHub dark mode by enhancing text contrast.",
+        "expected_confidence": 0.75,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          166
+        ],
+        "commit_links": [
+          "364849d123dd17883baa7f1ad72cd42a86e9f609"
+        ],
+        "confidence": 0.75,
+        "evidence": [
+          "temporal_match_5min",
+          "temporal_match_5min"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 221,
+        "title": "[FEATURE] allow user to set default agent for omnara",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/221",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            222
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "explicit"
+        ],
+        "primary_evidence": {
+          "explicit": true,
+          "issue_closed_at": "2025-09-11T20:19:46Z",
+          "pr_body_contains": "#221",
+          "pr_merged_at": "2025-09-11T09:37:00Z",
+          "reference_type": "issue_number"
+        },
+        "link_quality": "high",
+        "difficulty": "easy",
+        "notes": "PR #222 explicitly references '#221' in description. Implements --set-default option for default agent configuration.",
+        "expected_confidence": 0.75,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          222,
+          197,
+          223,
+          220
+        ],
+        "commit_links": [
+          "998f8b0564cd78c1a29bcc8bcef15f9d44ba7e93",
+          "d177a1d9d31e8e15f3379113a039fc1cecb97bc3",
+          "fb9391b731e764a08feb1c5e637a2d722dfdf4d8",
+          "dc47846227ce13f8a66f5f8a3e07e385b2f1f239"
+        ],
+        "confidence": 0.75,
+        "evidence": [
+          "temporal_match_1hr",
+          "semantic_boost",
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_24hr",
+          "semantic_boost"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 189,
+        "title": "[BUG] Ctrl + Z = Dead",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/189",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            203
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "temporal"
+        ],
+        "primary_evidence": {
+          "issue_closed_at": "2025-09-04T18:01:38Z",
+          "note": "PR title 'handle ctrl z' matches issue. Closed within minutes of each other.",
+          "pr_merged_at": "2025-09-04T18:00:00Z",
+          "temporal_delta_seconds": 300
+        },
+        "link_quality": "medium",
+        "difficulty": "hard",
+        "notes": "Temporal match - PR #203 'handle ctrl z' merged same time as issue close. No explicit reference but clear semantic + temporal match.",
+        "expected_confidence": 0.65,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          203
+        ],
+        "commit_links": [],
+        "confidence": 0.65,
+        "evidence": [
+          "temporal_match_24hr",
+          "semantic_boost"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 187,
+        "title": "[BUG] Mobile interface sync issues with Claude Code subagents",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/187",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            218
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "temporal"
+        ],
+        "primary_evidence": {
+          "issue_closed_at": "2025-09-09T20:01:12Z",
+          "note": "PR #218 'handle subtask permission requests' merged same day as issue close. No explicit reference.",
+          "pr_merged_at": "2025-09-09T20:00:00Z",
+          "temporal_delta_seconds": 60
+        },
+        "link_quality": "medium",
+        "difficulty": "hard",
+        "notes": "Temporal match - PR merged same time as issue close. Weak semantic match (subtask permissions vs mobile interface sync).",
+        "expected_confidence": 0.65,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          218
+        ],
+        "commit_links": [
+          "0af9f01cf6f890d87f35a80b75731e668203a518"
+        ],
+        "confidence": 0.65,
+        "evidence": [
+          "temporal_match_1hr",
+          "temporal_match_1hr"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 227,
+        "title": "[BUG] Codex version is not reflective of installed version",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/227",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "none"
+        ],
+        "primary_evidence": {
+          "close_reason": "not_planned",
+          "issue_state": "closed"
+        },
+        "link_quality": "n/a",
+        "difficulty": "easy",
+        "notes": "True negative - no fix provided, issue closed without resolution",
+        "expected_confidence": 0,
+        "should_detect": false,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": null,
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": false,
+        "pr_links": [],
+        "commit_links": [],
+        "confidence": 0,
+        "evidence": [],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 219,
+        "title": "[BUG] prompts from subagents aren't shown",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/219",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "none"
+        ],
+        "primary_evidence": {
+          "close_reason": "completed",
+          "issue_state": "closed"
+        },
+        "link_quality": "n/a",
+        "difficulty": "easy",
+        "notes": "True negative - no fix found (may be internal or pending)",
+        "expected_confidence": 0,
+        "should_detect": false,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": null,
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": false,
+        "pr_links": [],
+        "commit_links": [],
+        "confidence": 0,
+        "evidence": [],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 188,
+        "title": "[BUG] git diff view x button on mobile not accessible",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/188",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "internal_fix"
+        ],
+        "primary_evidence": {
+          "note": "Can't find issue, might be an internal fix or unreleased"
+        },
+        "link_quality": "unknown",
+        "difficulty": "hard",
+        "notes": "Internal fix - unavoidable miss (no GitHub trace)",
+        "expected_confidence": 0,
+        "should_detect": false,
+        "expected_miss": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": null,
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": false,
+        "pr_links": [],
+        "commit_links": [],
+        "confidence": 0,
+        "evidence": [],
+        "detection_method": ""
+      },
+      "status": "EXPECTED_MISS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 111,
+        "title": "[BUG] CONTRIBUTING guide link in readme broken",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/111",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            112
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "explicit"
+        ],
+        "primary_evidence": {
+          "explicit": true,
+          "issue_closed_at": "2025-08-14T00:00:00Z",
+          "pr_body_contains": "Address #111",
+          "pr_merged_at": "2025-08-14T00:00:00Z",
+          "reference_type": "address"
+        },
+        "link_quality": "high",
+        "difficulty": "easy",
+        "notes": "PR #112 explicitly states 'Address #111'. Added CONTRIBUTING.md file to fix broken README link.",
+        "expected_confidence": 0.75,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          112,
+          114,
+          119,
+          100
+        ],
+        "commit_links": [
+          "b70209b98b0c3a7dcc91f328bf1485853c11e9ff",
+          "f0defba3ff188e0c7a877389ea340936532b294b",
+          "d218261295188fe4e3d76ddfd937a80392e5b713",
+          "99fb6b7c5c49993078464a11ad83eb8bda6a9535",
+          "4b7a2cfb63b8a79572e1cb8d01d969730eb2d445",
+          "d48a73425f642ebb8c9930b14089e2ae38daa3b8"
+        ],
+        "confidence": 0.85,
+        "evidence": [
+          "temporal_match_5min",
+          "semantic_boost",
+          "temporal_match_5min",
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_1hr",
+          "temporal_match_24hr",
+          "semantic_boost",
+          "temporal_match_24hr",
+          "semantic_boost",
+          "temporal_match_24hr",
+          "semantic_boost"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0.09999999999999998
+    },
+    {
+      "test_case": {
+        "issue_number": 62,
+        "title": "[FEATURE] Other modes of Claude Code",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/62",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [
+            133
+          ],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "explicit"
+        ],
+        "primary_evidence": {
+          "explicit": true,
+          "issue_closed_at": "2025-08-17T00:00:00Z",
+          "pr_mentioned_in": "ksarangmath mentioned this pull request Aug 17, 2025 [FEATURE] Other modes of Claude Code #62",
+          "pr_merged_at": "2025-08-17T00:00:00Z",
+          "reference_type": "mentioned"
+        },
+        "link_quality": "high",
+        "difficulty": "easy",
+        "notes": "PR #133 mentioned Issue #62. Implemented --permission-mode and --dangerously-skip-permissions flags for Claude operational modes.",
+        "expected_confidence": 0.75,
+        "should_detect": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": "merged",
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": true,
+        "pr_links": [
+          133,
+          135,
+          104
+        ],
+        "commit_links": [
+          "eb49bbd2a1c78557152abd9796b0f86251d37bb4"
+        ],
+        "confidence": 0.85,
+        "evidence": [
+          "temporal_match_5min",
+          "semantic_boost",
+          "temporal_match_5min",
+          "temporal_match_24hr",
+          "semantic_boost",
+          "temporal_match_24hr",
+          "semantic_boost"
+        ],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0.09999999999999998
+    },
+    {
+      "test_case": {
+        "issue_number": 164,
+        "title": "[FEATURE] codex cli integration",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/164",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "internal_fix"
+        ],
+        "primary_evidence": {
+          "note": "Complex multi-PR feature implemented incrementally without explicit GitHub references. Feature announcement on issue closure but no specific PR links."
+        },
+        "link_quality": "unknown",
+        "difficulty": "hard",
+        "notes": "Complex multi-PR feature. Codex CLI integration announced as complete but no specific PRs linked on GitHub. Internal implementation or commits directly to main.",
+        "expected_confidence": 0,
+        "should_detect": false,
+        "expected_miss": true,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": null,
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": false,
+        "pr_links": [],
+        "commit_links": [],
+        "confidence": 0,
+        "evidence": [],
+        "detection_method": ""
+      },
+      "status": "EXPECTED_MISS",
+      "confidence_delta": 0
+    },
+    {
+      "test_case": {
+        "issue_number": 206,
+        "title": "[Proposal] Rename Omnara",
+        "issue_url": "https://github.com/omnara-ai/omnara/issues/206",
+        "expected_links": {
+          "fixed_by_commits": [],
+          "associated_prs": [],
+          "associated_issues": []
+        },
+        "linking_patterns": [
+          "none"
+        ],
+        "primary_evidence": {
+          "close_reason": "completed",
+          "issue_state": "closed",
+          "note": "Proposal rejected due to existing .com domain ownership",
+          "proposal_rejected": true
+        },
+        "link_quality": "n/a",
+        "difficulty": "easy",
+        "notes": "True negative - proposal rejected. No PRs created. Closed by original poster after maintainer response. Tests rejection of non-actionable proposals.",
+        "expected_confidence": 0,
+        "should_detect": false,
+        "github_verification": {
+          "issue_state": "closed",
+          "pr_state": null,
+          "verified_manually": true
+        }
+      },
+      "actual": {
+        "found": false,
+        "pr_links": [],
+        "commit_links": [],
+        "confidence": 0,
+        "evidence": [],
+        "detection_method": ""
+      },
+      "status": "PASS",
+      "confidence_delta": 0
+    }
+  ],
+  "metrics": {
+    "true_positives": 10,
+    "true_negatives": 3,
+    "false_positives": 0,
+    "false_negatives": 2,
+    "precision": 1,
+    "recall": 0.8333333333333334,
+    "f1_score": 0.9090909090909091,
+    "accuracy": 0.8666666666666667
+  },
+  "pattern_analysis": {
+    "temporal": {
+      "total_cases": 2,
+      "detected": 2,
+      "missed": 0,
+      "detection_rate": 1,
+      "avg_confidence": 0.65
+    },
+    "semantic": {
+      "total_cases": 0,
+      "detected": 0,
+      "missed": 0,
+      "detection_rate": 0,
+      "avg_confidence": 0
+    },
+    "explicit": {
+      "total_cases": 8,
+      "detected": 8,
+      "missed": 0,
+      "detection_rate": 1,
+      "avg_confidence": 0.8437499999999999
+    },
+    "comment": {
+      "total_cases": 0,
+      "detected": 0,
+      "missed": 0,
+      "detection_rate": 0,
+      "avg_confidence": 0
+    }
+  },
+  "summary": "Backtesting Results for omnara-ai/omnara\nTest Date: 2025-11-02T21:24:58-08:00\nTotal Cases: 15\n\nOverall Performance:\n  Precision: 100.00%\n  Recall: 83.33%\n  F1 Score: 90.91%\n  Accuracy: 86.67%\n\nPattern Analysis:\n  Temporal: 2/2 detected (100.0%), avg confidence: 0.65\n  Semantic: 0/0 detected (0.0%), avg confidence: 0.00\n  Explicit: 8/8 detected (100.0%), avg confidence: 0.84\n  Comment: 0/0 detected (0.0%), avg confidence: 0.00\n"
+}

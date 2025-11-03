@@ -1,0 +1,161 @@
+{
+  "metrics": {
+    "avg_confidence": 0.5642857142857143,
+    "f1_score": 0.4444444444444445,
+    "match_rate": 1,
+    "matched_cases": 2,
+    "precision": 0.2857142857142857,
+    "recall": 1,
+    "total_cases": 2,
+    "total_detected_links": 7,
+    "total_expected_links": 2,
+    "total_false_positives": 0,
+    "total_missed_links": 0
+  },
+  "results": [
+    {
+      "issue_number": 189,
+      "expected_prs": [
+        203
+      ],
+      "detected_prs": [
+        {
+          "pr_number": 204,
+          "pr_title": "fix: Align CORS with token‑only auth",
+          "pr_merged_at": "2025-09-05T01:10:39Z",
+          "issue_closed_at": "2025-09-04T18:01:38Z",
+          "time_delta": 25741000000000,
+          "delta_seconds": 25741,
+          "confidence": 0.55,
+          "evidence": [
+            "temporal_match_24hr"
+          ]
+        },
+        {
+          "pr_number": 203,
+          "pr_title": "handle ctrl z",
+          "pr_merged_at": "2025-09-04T06:52:29Z",
+          "issue_closed_at": "2025-09-04T18:01:38Z",
+          "time_delta": 40149000000000,
+          "delta_seconds": 40149,
+          "confidence": 0.55,
+          "evidence": [
+            "temporal_match_24hr"
+          ],
+          "semantic_score": 0.25
+        },
+        {
+          "pr_number": 205,
+          "pr_title": "update readme",
+          "pr_merged_at": "2025-09-05T05:46:18Z",
+          "issue_closed_at": "2025-09-04T18:01:38Z",
+          "time_delta": 42280000000000,
+          "delta_seconds": 42280,
+          "confidence": 0.55,
+          "evidence": [
+            "temporal_match_24hr"
+          ]
+        },
+        {
+          "pr_number": 202,
+          "pr_title": "dont reuse linux wheel",
+          "pr_merged_at": "2025-09-04T03:55:19Z",
+          "issue_closed_at": "2025-09-04T18:01:38Z",
+          "time_delta": 50779000000000,
+          "delta_seconds": 50779,
+          "confidence": 0.55,
+          "evidence": [
+            "temporal_match_24hr"
+          ]
+        },
+        {
+          "pr_number": 201,
+          "pr_title": "no rebuild of rust app",
+          "pr_merged_at": "2025-09-04T03:26:37Z",
+          "issue_closed_at": "2025-09-04T18:01:38Z",
+          "time_delta": 52501000000000,
+          "delta_seconds": 52501,
+          "confidence": 0.55,
+          "evidence": [
+            "temporal_match_24hr"
+          ]
+        }
+      ],
+      "matched": true,
+      "matched_prs": [
+        203
+      ],
+      "missed_prs": [],
+      "false_positives": [],
+      "timing_analysis": {
+        "expected_delta_seconds": 300,
+        "issue_closed_at": "2025-09-04T18:01:38Z"
+      },
+      "confidence_scores": {
+        "201": 0.55,
+        "202": 0.55,
+        "203": 0.55,
+        "204": 0.55,
+        "205": 0.55
+      },
+      "evidence_found": [
+        "temporal_match_24hr",
+        "temporal_match_24hr",
+        "temporal_match_24hr",
+        "temporal_match_24hr",
+        "temporal_match_24hr"
+      ]
+    },
+    {
+      "issue_number": 187,
+      "expected_prs": [
+        218
+      ],
+      "detected_prs": [
+        {
+          "pr_number": 218,
+          "pr_title": "handle subtask permission requests",
+          "pr_merged_at": "2025-09-09T19:26:36Z",
+          "issue_closed_at": "2025-09-09T20:01:12Z",
+          "time_delta": 2076000000000,
+          "delta_seconds": 2076,
+          "confidence": 0.65,
+          "evidence": [
+            "temporal_match_1hr"
+          ]
+        },
+        {
+          "pr_number": 216,
+          "pr_title": "feat: Add codex heartbeating",
+          "pr_merged_at": "2025-09-09T00:31:06Z",
+          "issue_closed_at": "2025-09-09T20:01:12Z",
+          "time_delta": 70206000000000,
+          "delta_seconds": 70206,
+          "confidence": 0.55,
+          "evidence": [
+            "temporal_match_24hr"
+          ]
+        }
+      ],
+      "matched": true,
+      "matched_prs": [
+        218
+      ],
+      "missed_prs": [],
+      "false_positives": [],
+      "timing_analysis": {
+        "expected_delta_seconds": 60,
+        "issue_closed_at": "2025-09-09T20:01:12Z"
+      },
+      "confidence_scores": {
+        "216": 0.55,
+        "218": 0.65
+      },
+      "evidence_found": [
+        "temporal_match_1hr",
+        "temporal_match_24hr"
+      ]
+    }
+  ],
+  "timestamp": "2025-11-02T21:24:58-08:00"
+}

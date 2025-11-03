@@ -256,9 +256,13 @@ func (tm *TemporalMatcher) ValidateAllTemporalCases(ctx context.Context, groundT
 		}
 
 		if result.Matched {
+			confidence := 0.0
+			if len(result.MatchedPRs) > 0 && result.ConfidenceScores[result.MatchedPRs[0]] > 0 {
+				confidence = result.ConfidenceScores[result.MatchedPRs[0]]
+			}
 			log.Printf("    ✅ Matched: %v (confidence: %.2f)",
 				result.MatchedPRs,
-				result.ConfidenceScores[result.MatchedPRs[0]])
+				confidence)
 		} else {
 			log.Printf("    ❌ Failed:")
 			if len(result.MissedPRs) > 0 {
