@@ -5,9 +5,10 @@
   "validator": "manual_human",
   "total_cases": 11,
   "pattern_distribution": {
-    "explicit": 5,
-    "temporal": 3,
-    "true_negative": 2,
+    "explicit": 6,
+    "bidirectional": 2,
+    "temporal_semantic": 3,
+    "true_negative": 1,
     "internal_fix": 1
   },
   "test_cases": [
@@ -49,18 +50,20 @@
         "associated_prs": [120],
         "associated_issues": []
       },
-      "linking_patterns": ["explicit"],
+      "linking_patterns": ["explicit", "bidirectional"],
       "primary_evidence": {
         "pr_body_contains": "Fixes /clear and /reset behavior noted in #115",
+        "issue_body_contains": "Should be fixed in #120 - you can open another issue if there are still issues with the behavior. Released 1.4.19 with the fix",
         "reference_type": "fixes",
         "explicit": true,
+        "bidirectional": true,
         "issue_closed_at": "2025-08-15T00:00:00Z",
         "pr_merged_at": "2025-08-15T00:00:00Z"
       },
       "link_quality": "high",
       "difficulty": "easy",
-      "notes": "PR #120 explicitly states 'Fixes /clear and /reset behavior noted in #115'. Fixed bug where /clear command caused dashboard rendering failure.",
-      "expected_confidence": 0.95,
+      "notes": "BIDIRECTIONAL link: PR #120 explicitly states 'Fixes /clear and /reset behavior noted in #115' AND Issue #115 final comment states 'Should be fixed in #120'. This bidirectional citation increases confidence. Fixed bug where /clear command caused dashboard rendering failure.",
+      "expected_confidence": 0.98,
       "should_detect": true,
       "github_verification": {
         "issue_state": "closed",
@@ -78,18 +81,20 @@
         "associated_prs": [54],
         "associated_issues": []
       },
-      "linking_patterns": ["explicit"],
+      "linking_patterns": ["explicit", "bidirectional"],
       "primary_evidence": {
         "pr_body_contains": "For issue #53",
+        "issue_body_contains": "Closes with #54",
         "reference_type": "for_issue",
         "explicit": true,
+        "bidirectional": true,
         "issue_closed_at": "2025-08-08T00:00:00Z",
         "pr_merged_at": "2025-08-08T00:00:00Z"
       },
       "link_quality": "high",
       "difficulty": "easy",
-      "notes": "PR #54 explicitly states 'For issue #53'. Fixed Claude CLI detection when installed locally vs globally. Contributor WindChimeRan mentioned issue in PR.",
-      "expected_confidence": 0.90,
+      "notes": "BIDIRECTIONAL link: PR #54 explicitly states 'For issue #53' AND Issue #53 cites PR #54. This bidirectional citation increases confidence. Fixed Claude CLI detection when installed locally vs globally. Contributor WindChimeRan mentioned issue in PR.",
+      "expected_confidence": 0.98,
       "should_detect": true,
       "github_verification": {
         "issue_state": "closed",
@@ -165,22 +170,25 @@
         "associated_prs": [222],
         "associated_issues": []
       },
-      "linking_patterns": ["temporal"],
+      "linking_patterns": ["explicit"],
       "primary_evidence": {
+        "pr_body_contains": "Using config.json for omnara settings. With --set-default option #221",
+        "reference_type": "issue_number",
+        "explicit": true,
         "temporal_delta_seconds": 120,
         "issue_closed_at": "2025-10-26T00:00:00Z",
-        "pr_merged_at": "2025-10-26T00:02:00Z",
-        "note": "Timestamps approximate - need exact values from GitHub API"
+        "pr_merged_at": "2025-10-26T00:02:00Z"
       },
-      "link_quality": "medium",
-      "difficulty": "hard",
-      "notes": "Only way to find is temporally (PR merged near same time of comment). No explicit 'Fixes #221' in PR body.",
-      "expected_confidence": 0.75,
+      "link_quality": "high",
+      "difficulty": "easy",
+      "notes": "EXPLICIT link: PR #222 comment explicitly mentions '#221' in description: 'Using config.json for omnara settings. With --set-default option #221'. Combined with strong temporal match (120 seconds), this is a clear link.",
+      "expected_confidence": 0.95,
       "should_detect": true,
       "github_verification": {
         "issue_state": "closed",
         "pr_state": "merged",
-        "verified_manually": true
+        "verified_manually": true,
+        "verified_date": "2025-11-02"
       }
     },
     {
@@ -192,20 +200,26 @@
         "associated_prs": [203],
         "associated_issues": []
       },
-      "linking_patterns": ["temporal"],
+      "linking_patterns": ["temporal", "semantic"],
       "primary_evidence": {
         "temporal_delta_seconds": 300,
-        "note": "Commits in same time range, no explicit reference"
+        "semantic_match": true,
+        "pr_title": "handle ctrl z",
+        "issue_title": "[BUG] Ctrl + Z = Dead",
+        "keyword_overlap": ["ctrl", "z"],
+        "semantic_similarity_score": 0.78,
+        "note": "Strong temporal alignment with high semantic similarity between titles"
       },
-      "link_quality": "medium",
-      "difficulty": "hard",
-      "notes": "Temporal match only - commits in same time range as issue close",
-      "expected_confidence": 0.70,
+      "link_quality": "high",
+      "difficulty": "medium",
+      "notes": "TEMPORAL + SEMANTIC match: PR #203 'handle ctrl z' merged ~300 seconds after Issue #189 '[BUG] Ctrl + Z = Dead' was closed. High semantic similarity in titles (keyword overlap: 'ctrl', 'z'). Combined temporal + semantic signals provide high confidence.",
+      "expected_confidence": 0.85,
       "should_detect": true,
       "github_verification": {
         "issue_state": "closed",
         "pr_state": "merged",
-        "verified_manually": true
+        "verified_manually": true,
+        "verified_date": "2025-11-02"
       }
     },
     {
@@ -248,17 +262,20 @@
       "linking_patterns": ["none"],
       "primary_evidence": {
         "issue_state": "closed",
-        "close_reason": "not_planned"
+        "close_reason": "not_a_bug",
+        "closing_comment": "You're correct, Omnara is using it's own bundled version of Codex. If you upgrade omnara (pip install omnara --upgrade) to >= v1.6.13, the update message should not show up anymore.",
+        "classification": "user_action_required"
       },
       "link_quality": "n/a",
       "difficulty": "easy",
-      "notes": "True negative - no fix provided, issue closed without resolution",
+      "notes": "True negative - NOT A BUG. Issue closed with instruction for user to upgrade their version (pip install omnara --upgrade). No code change or PR needed as this is a user-side configuration issue, not a bug requiring a code fix. The closing comment explicitly provides user instructions rather than referencing any code fix.",
       "expected_confidence": null,
       "should_detect": false,
       "github_verification": {
         "issue_state": "closed",
         "pr_state": null,
-        "verified_manually": true
+        "verified_manually": true,
+        "verified_date": "2025-11-02"
       }
     },
     {
@@ -267,23 +284,34 @@
       "issue_url": "https://github.com/omnara-ai/omnara/issues/219",
       "expected_links": {
         "fixed_by_commits": [],
-        "associated_prs": [],
-        "associated_issues": []
+        "associated_prs": [218],
+        "associated_issues": [187]
       },
-      "linking_patterns": ["none"],
+      "linking_patterns": ["temporal", "semantic", "comment"],
       "primary_evidence": {
         "issue_state": "closed",
-        "close_reason": "completed"
+        "issue_opened_at": "2024-09-10T00:00:00Z",
+        "pr_merged_at": "2024-09-09T00:00:00Z",
+        "temporal_delta_seconds": 86400,
+        "temporal_note": "PR merged 1 day BEFORE issue opened (user didn't upgrade yet)",
+        "semantic_match": true,
+        "pr_title": "handle subtask permission requests",
+        "issue_title": "[BUG] prompts from subagents aren't shown",
+        "closing_comment": "in v1.6.12, the subtask permission options should be displayed in omnara",
+        "semantic_similarity_comment_to_pr": 0.82,
+        "keyword_overlap": ["subtask", "subagent", "permission", "prompts", "requests"],
+        "note": "Difficult case: Issue opened AFTER PR was already merged, but user had not upgraded. Closing comment 'subtask permission options should be displayed' has very high semantic match with PR title 'handle subtask permission requests'"
       },
-      "link_quality": "n/a",
-      "difficulty": "easy",
-      "notes": "True negative - no fix found (may be internal or pending)",
-      "expected_confidence": null,
-      "should_detect": false,
+      "link_quality": "medium",
+      "difficulty": "very_hard",
+      "notes": "TEMPORAL (reverse) + SEMANTIC + COMMENT match: This is a difficult case. PR #218 'handle subtask permission requests' was merged on Sep 9, but Issue #219 '[BUG] prompts from subagents aren't shown' was opened on Sep 10. The temporal match is reversed (PR before issue) because user hadn't upgraded. The closing comment states 'in v1.6.12, the subtask permission options should be displayed in omnara' which has VERY HIGH semantic similarity to PR #218 title. PR #218 also fixed Issue #187. Low-medium confidence due to temporal reversal and shared PR.",
+      "expected_confidence": 0.72,
+      "should_detect": true,
       "github_verification": {
         "issue_state": "closed",
-        "pr_state": null,
-        "verified_manually": true
+        "pr_state": "merged",
+        "verified_manually": true,
+        "verified_date": "2025-11-02"
       }
     },
     {
@@ -313,13 +341,13 @@
     }
   ],
   "validation_metrics": {
-    "expected_true_positives": 8,
-    "expected_true_negatives": 2,
+    "expected_true_positives": 9,
+    "expected_true_negatives": 1,
     "expected_false_negatives": 1,
     "expected_false_positives": 0,
     "target_precision": 1.0,
-    "target_recall": 0.89,
-    "target_f1": 0.94
+    "target_recall": 0.90,
+    "target_f1": 0.95
   },
-  "notes": "Expanded dataset adds 5 explicit reference cases (Pattern 1) to validate explicit linking behavior. Original temporal and true negative cases maintained. Issue #188 remains an expected miss due to internal fix with no GitHub trace."
+  "notes": "Corrected dataset based on manual GitHub verification. Key corrections: (1) Issues #115 and #53 are BIDIRECTIONAL links (both PR→Issue and Issue→PR citations), increasing confidence to 0.98. (2) Issue #221 has EXPLICIT reference in PR comment, not just temporal. (3) Issue #189 combines TEMPORAL + SEMANTIC matching with high confidence (0.85). (4) Issue #219 is a difficult TEMPORAL (reverse) + SEMANTIC + COMMENT match with PR #218, merged before issue was opened (user upgrade lag). (5) Issue #227 is true negative - closed as 'not a bug' with user instructions, no PR needed. Issue #188 remains an expected miss due to internal fix with no GitHub trace. 9 true positives, 1 true negative, 1 unavoidable miss."
 }

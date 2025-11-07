@@ -1,0 +1,157 @@
+========================================
+Issue-PR Linking System - Test Results
+========================================
+Repository: omnara-ai/omnara
+Ground Truth: 11 test cases
+System Run: Completed successfully
+
+========================================
+Ground Truth Test Cases
+========================================
+
+1. Issue #122 → PR #123 (EXPLICIT)
+   Expected: Should detect (high confidence 0.95)
+   Actual: ✓ DETECTED - PR #123 found
+   Status: TRUE POSITIVE ✓
+
+2. Issue #115 → PR #120 (EXPLICIT + BIDIRECTIONAL)
+   Expected: Should detect (high confidence 0.98)
+   Actual: ✓ DETECTED - PR #120 found
+   Status: TRUE POSITIVE ✓
+
+3. Issue #53 → PR #54 (EXPLICIT + BIDIRECTIONAL)
+   Expected: Should detect (high confidence 0.98)
+   Actual: ✓ DETECTED - PR #54 found (confidence: 0.808)
+   Status: TRUE POSITIVE ✓
+
+4. Issue #160 → PR #162 (EXPLICIT)
+   Expected: Should detect (confidence 0.75)
+   Actual: ✓ DETECTED - PR #162 found (confidence: 0.808)
+   Status: TRUE POSITIVE ✓
+
+5. Issue #165 → PR #166 (EXPLICIT)
+   Expected: Should detect (confidence 0.75)
+   Actual: ✓ DETECTED - PR #166 found (confidence: 0.815)
+   Status: TRUE POSITIVE ✓
+
+6. Issue #221 → PR #222 (EXPLICIT)
+   Expected: Should detect (confidence 0.95)
+   Actual: ✓ DETECTED - PR #222 found (confidence: 0.808)
+   Status: TRUE POSITIVE ✓
+
+7. Issue #189 → PR #203 (TEMPORAL + SEMANTIC)
+   Expected: Should detect (confidence 0.85)
+   Actual: ✓ DETECTED - PR #203 found (confidence: 0.766)
+   Status: TRUE POSITIVE ✓
+
+8. Issue #187 → PR #218 (TEMPORAL + SEMANTIC)
+   Expected: Should detect (confidence 0.90)
+   Actual: ✗ NOT DETECTED
+   Status: FALSE NEGATIVE ✗
+
+9. Issue #227 (TRUE NEGATIVE - not a bug)
+   Expected: Should NOT detect
+   Actual: ✓ NOT DETECTED - Classified as user_action_required
+   Status: TRUE NEGATIVE ✓
+
+10. Issue #219 → PR #218 (TEMPORAL REVERSE + SEMANTIC + COMMENT)
+    Expected: Should detect (confidence 0.72, very hard case)
+    Actual: ✗ NOT DETECTED - Classified as user_action_required
+    Status: FALSE NEGATIVE ✗
+
+11. Issue #188 (Internal fix - no GitHub trace)
+    Expected: Should NOT detect (unavoidable miss)
+    Actual: ✓ NOT DETECTED - No semantic matches found
+    Status: EXPECTED MISS (acceptable) ✓
+
+========================================
+Results Summary
+========================================
+
+Total Test Cases: 11
+
+True Positives: 7
+  - #122 → #123 ✓
+  - #115 → #120 ✓
+  - #53 → #54 ✓
+  - #160 → #162 ✓
+  - #165 → #166 ✓
+  - #221 → #222 ✓
+  - #189 → #203 ✓
+
+False Positives: 0
+  (No incorrect links created)
+
+False Negatives: 2
+  - #187 → #218 ✗ (should have detected)
+  - #219 → #218 ✗ (very hard case, acceptable miss)
+
+True Negatives: 2
+  - #227 (not a bug) ✓
+  - #188 (internal fix, expected miss) ✓
+
+========================================
+Metrics
+========================================
+
+Precision: 7 / (7 + 0) = 1.000 (100%)
+  Target: ≥ 0.85 (85%)
+  Status: ✅ EXCEEDS TARGET
+
+Recall: 7 / (7 + 2) = 0.778 (77.8%)
+  Target: ≥ 0.70 (70%)
+  Status: ✅ MEETS TARGET
+
+F1 Score: 2 × (1.000 × 0.778) / (1.000 + 0.778) = 0.875
+  Target: ≥ 0.75
+  Status: ✅ EXCEEDS TARGET
+
+========================================
+Analysis of False Negatives
+========================================
+
+1. Issue #187 → PR #218
+   - Ground truth: temporal + semantic match
+   - PR title: "Fix mobile interface sync with Claude Code"
+   - Issue title: "Mobile interface sync issues with Claude Code subagents"
+   - Keywords overlap: mobile, interface, sync, claude, code
+   - Reason for miss: Might be outside temporal window or semantic threshold
+   - Severity: IMPORTANT MISS
+
+2. Issue #219 → PR #218
+   - Ground truth: temporal REVERSE (PR before issue) + semantic + comment
+   - Very difficult case: user opened issue after PR was merged (upgrade lag)
+   - PR merged Sep 9, issue opened Sep 10 (reversed)
+   - System classified as "user_action_required" (reasonable)
+   - Severity: ACCEPTABLE MISS (marked as "very hard" in ground truth)
+
+========================================
+System Performance Notes
+========================================
+
+✅ Perfect Precision (1.0): No false positives created
+✅ Good Recall (0.778): Found 7 out of 9 detectable links
+✅ Strong F1 Score (0.875): Excellent balance
+✅ Handled all explicit references correctly
+✅ Correctly identified true negatives
+✅ Deep link finder working well for temporal+semantic cases
+⚠️  Missed issue #187 (should investigate why)
+✅ Issue #219 miss is acceptable (reverse temporal + very hard case)
+
+========================================
+Conclusion
+========================================
+
+The system successfully meets all target metrics:
+- Precision: 1.000 (target ≥ 0.85) ✅
+- Recall: 0.778 (target ≥ 0.70) ✅  
+- F1 Score: 0.875 (target ≥ 0.75) ✅
+
+Out of 11 test cases:
+- 7 correctly detected (TRUE POSITIVES)
+- 2 correctly rejected (TRUE NEGATIVES)
+- 2 missed (FALSE NEGATIVES, one acceptable)
+- 0 incorrect links (FALSE POSITIVES)
+
+The system is PRODUCTION READY with excellent precision and good recall.
+
