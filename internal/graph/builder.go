@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rohankatakam/coderisk/internal/database"
+	"github.com/rohankatakam/coderisk/internal/linking/types"
 )
 
 // normalizeGitHubEmail normalizes GitHub email formats to ensure consistency
@@ -125,6 +126,19 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string)
 	stats.Edges += linkStats.Edges
 	log.Printf("  ✓ Linked issues: %d nodes, %d edges", linkStats.Nodes, linkStats.Edges)
 
+	// Load validated issue-PR links from PostgreSQL into Neo4j
+	// Uses multi-signal ground truth classification for FIXED_BY vs ASSOCIATED_WITH edges
+	// Reference: Gap closure implementation - Multi-Signal Ground Truth Classification
+	log.Printf("  Loading validated issue-PR links...")
+	validatedLinkStats, err := b.loadIssuePRLinksIntoGraph(ctx, repoID)
+	if err != nil {
+		log.Printf("  ⚠️  Warning: Failed to load validated links: %v", err)
+		// Don't fail entire build, continue with old system links
+	} else {
+		stats.Edges += validatedLinkStats.Edges
+		log.Printf("  ✓ Loaded %d validated issue-PR links", validatedLinkStats.Edges)
+	}
+
 	return stats, nil
 }
 
@@ -156,6 +170,154 @@ func (b *Builder) runTemporalCorrelation(ctx context.Context, repoID int64) (*Bu
 func (b *Builder) linkIssues(ctx context.Context, repoID int64) (*BuildStats, error) {
 	linker := NewIssueLinker(b.stagingDB, b.backend)
 	return linker.LinkIssues(ctx, repoID)
+}
+
+// TestLoadIssuePRLinks is a public wrapper for testing the link loading functionality
+func (b *Builder) TestLoadIssuePRLinks(ctx context.Context, repoID int64) (*BuildStats, error) {
+	return b.loadIssuePRLinksIntoGraph(ctx, repoID)
+}
+
+// hasExplicitFixesKeyword checks evidence for explicit fixing keywords
+func hasExplicitFixesKeyword(evidenceSources []string) bool {
+	fixKeywords := []string{"ref_fixes", "ref_closes", "ref_resolves"}
+	for _, evidence := range evidenceSources {
+		for _, keyword := range fixKeywords {
+			if strings.Contains(evidence, keyword) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// loadIssuePRLinksIntoGraph loads validated issue-PR links from PostgreSQL into Neo4j
+// Uses multi-signal ground truth classification to determine FIXED_BY vs ASSOCIATED_WITH edges
+// Reference: Multi-Signal Ground Truth Classification strategy (gap closure implementation)
+func (b *Builder) loadIssuePRLinksIntoGraph(ctx context.Context, repoID int64) (*BuildStats, error) {
+	stats := &BuildStats{}
+
+	// Query all links from the new linking system
+	links, err := b.stagingDB.GetIssuePRLinks(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("failed to get issue-PR links: %w", err)
+	}
+
+	if len(links) == 0 {
+		log.Printf("  No issue-PR links found")
+		return stats, nil
+	}
+
+	log.Printf("  Found %d issue-PR links to process", len(links))
+
+	var edges []GraphEdge
+	fixedByCount := 0
+	associatedCount := 0
+	filteredCount := 0
+
+	for _, link := range links {
+		// Skip low-quality links (confidence < 0.70)
+		if link.FinalConfidence < 0.70 {
+			filteredCount++
+			continue
+		}
+
+		// Determine edge type using multi-signal criteria
+		edgeLabel := determineEdgeTypeMultiSignal(&link)
+
+		if edgeLabel == "FIXED_BY" {
+			fixedByCount++
+		} else {
+			associatedCount++
+		}
+
+		// Create edge with comprehensive properties
+		edge := GraphEdge{
+			Label: edgeLabel,
+			From:  fmt.Sprintf("issue:%d", link.IssueNumber),
+			To:    fmt.Sprintf("pr:%d", link.PRNumber),
+			Properties: map[string]interface{}{
+				"confidence":          link.FinalConfidence,
+				"detection_method":    string(link.DetectionMethod),
+				"link_quality":        string(link.LinkQuality),
+				"evidence_sources":    link.EvidenceSources,
+				// Store breakdown for transparency and future human review
+				"base_confidence":     link.ConfidenceBreakdown.BaseConfidence,
+				"temporal_boost":      link.ConfidenceBreakdown.TemporalBoost,
+				"bidirectional_boost": link.ConfidenceBreakdown.BidirectionalBoost,
+				"semantic_boost":      link.ConfidenceBreakdown.SemanticBoost,
+				"negative_penalty":    link.ConfidenceBreakdown.NegativeSignalPenalty,
+				"created_from":        "validated_link", // Distinguish from old system
+			},
+		}
+
+		edges = append(edges, edge)
+	}
+
+	// Delete old Issue-PR edges before creating new validated ones
+	// This ensures we replace legacy temporal/extraction edges with Multi-Signal classified edges
+	if len(edges) > 0 {
+		log.Printf("  Removing old Issue-PR edges to avoid duplicates...")
+		deleteQuery := `
+			MATCH (i:Issue)-[r]->(pr:PR)
+			WHERE r.created_from IS NULL OR r.created_from <> 'validated_link'
+			DELETE r
+		`
+		if err := b.backend.ExecuteBatch(ctx, []string{deleteQuery}); err != nil {
+			log.Printf("  ⚠️  Warning: Failed to delete old edges: %v", err)
+			// Continue anyway - CreateEdges will create new edges
+		}
+
+		// Batch create edges in Neo4j
+		if err := b.backend.CreateEdges(ctx, edges); err != nil {
+			return stats, fmt.Errorf("failed to create edges: %w", err)
+		}
+		stats.Edges = len(edges)
+
+		log.Printf("  ✓ Created %d FIXED_BY edges", fixedByCount)
+		log.Printf("  ✓ Created %d ASSOCIATED_WITH edges", associatedCount)
+		if filteredCount > 0 {
+			log.Printf("  ℹ Filtered %d low-confidence links (< 0.70)", filteredCount)
+		}
+	}
+
+	return stats, nil
+}
+
+// determineEdgeTypeMultiSignal uses multi-dimensional ground truth signals
+// to determine if a link should be FIXED_BY or ASSOCIATED_WITH
+// Reference: Multi-Signal Ground Truth Classification strategy
+func determineEdgeTypeMultiSignal(link *types.LinkOutput) string {
+	// Criterion 1: Must be high-quality detection method
+	if link.DetectionMethod != types.DetectionGitHubTimeline &&
+	   link.DetectionMethod != types.DetectionExplicitBidir {
+		return "ASSOCIATED_WITH"
+	}
+
+	// Criterion 2: Must have high base confidence from reliable source
+	if link.ConfidenceBreakdown.BaseConfidence < 0.85 {
+		return "ASSOCIATED_WITH"
+	}
+
+	// Criterion 3: Must have no conflicting evidence
+	if link.ConfidenceBreakdown.NegativeSignalPenalty != 0.0 {
+		return "ASSOCIATED_WITH"
+	}
+
+	// Criterion 4: Must have at least ONE ground truth signal
+	// Signal A: Strong temporal correlation (GitHub auto-close behavior)
+	signalA := link.ConfidenceBreakdown.TemporalBoost >= 0.12
+	// Signal B: Bidirectional verification
+	signalB := link.ConfidenceBreakdown.BidirectionalBoost > 0.0
+	// Signal C: High semantic + explicit fixes keyword
+	signalC := link.ConfidenceBreakdown.SemanticBoost >= 0.10 && hasExplicitFixesKeyword(link.EvidenceSources)
+
+	hasGroundTruthSignal := signalA || signalB || signalC
+
+	if hasGroundTruthSignal {
+		return "FIXED_BY"
+	}
+
+	return "ASSOCIATED_WITH"
 }
 
 // processCommits transforms commits from PostgreSQL to graph nodes/edges

@@ -16,6 +16,7 @@ import (
 	"github.com/rohankatakam/coderisk/internal/github"
 	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/ingestion"
+	"github.com/rohankatakam/coderisk/internal/linking"
 	"github.com/rohankatakam/coderisk/internal/llm"
 	"github.com/spf13/cobra"
 )
@@ -208,7 +209,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Connect to PostgreSQL
-	fmt.Printf("\n[0/3] Connecting to databases...\n")
+	fmt.Printf("\n[0/5] Connecting to databases...\n")
 	stagingDB, err := database.NewStagingClient(
 		ctx,
 		cfg.Storage.PostgresHost,
@@ -239,11 +240,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Connected to Neo4j\n")
 
 	// Use the already-cloned repository
-	fmt.Printf("\n[0/4] Using repository at %s...\n", repoPath)
+	fmt.Printf("\n[1/5] Using repository at %s...\n", repoPath)
 	fmt.Printf("  ✓ Skipping clone (using existing repository)\n")
 
 	// Parse with tree-sitter (Layer 1: Structure)
-	fmt.Printf("\n[0.5/4] Parsing code structure (Layer 1)...\n")
+	fmt.Printf("\n[2/5] Parsing code structure (Layer 1)...\n")
 	parseStart := time.Now()
 
 	// Count files before parsing
@@ -294,7 +295,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Graph construction complete: %d entities stored\n", parseResult.EntitiesTotal)
 
 	// Stage 1: Fetch GitHub data → PostgreSQL (Layer 2 & 3: Temporal & Incidents)
-	fmt.Printf("\n[1/4] Fetching GitHub API data (Layer 2 & 3: Temporal & Incidents)...\n")
+	fmt.Printf("\n[3/5] Fetching GitHub API data (Layer 2 & 3: Temporal & Incidents)...\n")
 	fetchStart := time.Now()
 
 	// Get time window flags
@@ -321,7 +322,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		stats.Commits, stats.Issues, stats.PRs, stats.Branches)
 
 	// Stage 1.5: Extract issue-commit-PR relationships using LLM
-	fmt.Printf("\n[1.5/4] Extracting issue-commit-PR relationships (LLM analysis)...\n")
+	fmt.Printf("\n[3.5/5] Extracting issue-commit-PR relationships (LLM analysis)...\n")
 	extractStart := time.Now()
 
 	// Create LLM client
@@ -366,8 +367,29 @@ func runInit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  ⚠️  LLM extraction skipped (OPENAI_API_KEY not configured)\n")
 	}
 
+	// Stage 1.75: Issue-PR Linking (Layer 3 Preparation)
+	fmt.Printf("\n[3.75/5] Linking issues to pull requests...\n")
+	linkStart := time.Now()
+
+	if llmClient.IsEnabled() {
+		// Create linking orchestrator with the time window
+		orchestrator := linking.NewOrchestrator(stagingDB, llmClient, repoID, days)
+
+		// Run multi-phase linking pipeline
+		if err := orchestrator.Run(ctx); err != nil {
+			fmt.Printf("  ⚠️  Issue-PR linking failed: %v\n", err)
+			fmt.Printf("  → Graph will use fallback linking methods\n")
+		} else {
+			linkDuration := time.Since(linkStart)
+			fmt.Printf("  ✓ Issue-PR linking completed in %v\n", linkDuration)
+			fmt.Printf("    (Links will be loaded into graph during graph construction)\n")
+		}
+	} else {
+		fmt.Printf("  ⚠️  Issue-PR linking skipped (OPENAI_API_KEY not configured)\n")
+	}
+
 	// Stage 2: Build graph from PostgreSQL → Neo4j/Neptune (Layer 2 & 3 graph construction)
-	fmt.Printf("\n[2/4] Building temporal & incident graph (Layer 2 & 3)...\n")
+	fmt.Printf("\n[4/5] Building temporal & incident graph (Layer 2 & 3)...\n")
 	graphStart := time.Now()
 
 	// Reuse graphBuilder from Layer 1
@@ -382,14 +404,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    Nodes: %d | Edges: %d\n", buildStats.Nodes, buildStats.Edges)
 
 	// Stage 3: Validate all 3 layers
-	fmt.Printf("\n[3/4] Validating all 3 layers...\n")
+	fmt.Printf("\n[4.5/5] Validating all 3 layers...\n")
 	if err := validateGraph(ctx, graphBackend, buildStats, parseResult); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 	fmt.Printf("  ✓ All layers validated successfully\n")
 
 	// Stage 3.5: Apply indexes for optimal query performance
-	fmt.Printf("\n[3.5/4] Creating database indexes...\n")
+	fmt.Printf("\n[5/5] Creating database indexes...\n")
 	indexStart := time.Now()
 
 	if err := createIndexes(ctx, graphBackend); err != nil {
