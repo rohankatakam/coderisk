@@ -552,6 +552,17 @@ func (p *Phase2PathB) createLinksFromCandidates(issue *types.IssueData, candidat
 		rationale += fmt.Sprintf("Semantic: Title=%.2f, Body=%.2f, Comment=%.2f\n", candidate.SemanticScores.TitleScore, candidate.SemanticScores.BodyScore, candidate.SemanticScores.CommentScore)
 		rationale += fmt.Sprintf("Ranking Score: %.2f\n", candidate.RankingScore)
 
+		// Determine temporal pattern based on delta and direction
+		temporalPattern := types.PatternNormal
+		absDelta := math.Abs(float64(candidate.TemporalDeltaSeconds))
+		if candidate.TemporalDirection == "reverse" {
+			temporalPattern = types.PatternReverse
+		} else if absDelta < 300 { // < 5 minutes
+			temporalPattern = types.PatternSimultaneous
+		} else if absDelta > 86400 { // > 24 hours
+			temporalPattern = types.PatternDelayed
+		}
+
 		link := types.LinkOutput{
 			IssueNumber:           issue.IssueNumber,
 			PRNumber:              candidate.PRNumber,
@@ -562,6 +573,13 @@ func (p *Phase2PathB) createLinksFromCandidates(issue *types.IssueData, candidat
 			EvidenceSources:       evidenceSources,
 			ComprehensiveRationale: rationale,
 			SemanticAnalysis:      &candidate.SemanticScores,
+			TemporalAnalysis: &types.TemporalAnalysis{
+				IssueClosedAt:        *issue.ClosedAt,
+				PRMergedAt:           candidate.PRMergedAt,
+				TemporalDeltaSeconds: candidate.TemporalDeltaSeconds,
+				TemporalPattern:      temporalPattern,
+				TemporalDirection:    candidate.TemporalDirection,
+			},
 			Flags: types.LinkFlags{
 				NeedsManualReview: classification.LowClassificationConfidence,
 				ReverseTemporal:   candidate.TemporalDirection == "reverse",
