@@ -87,7 +87,8 @@ func InvestigateFileChanges(
 	kickoffPrompt := promptBuilder.BuildKickoffPrompt()
 
 	// Step 4: Create investigator and run investigation
-	investigator := NewRiskInvestigator(llmClient, graphClient, pgClient)
+	// Note: This example doesn't set up hybrid client - would need database.NewHybridClient in real use
+	investigator := NewRiskInvestigator(llmClient, graphClient, pgClient, nil)
 	assessment, err := investigator.Investigate(ctx, kickoffPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("investigation failed: %w", err)

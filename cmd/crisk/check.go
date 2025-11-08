@@ -142,6 +142,13 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 	defer pgClient.Close()
 
+	// Create staging client for GitHub data queries
+	stagingClient, err := initStagingClient(ctx)
+	if err != nil {
+		return fmt.Errorf("staging client initialization failed: %w", err)
+	}
+	defer stagingClient.Close()
+
 	// Create sqlx connection for incidents database (Phase 2)
 	// Note: Using same connection config as pgClient but with sqlx for incidents API
 	sqlxDB, err := initPostgresSQLX()
@@ -152,6 +159,14 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Create incidents database for Phase 2
 	_ = incidents.NewDatabase(sqlxDB) // Not used in new agent system
+
+	// Create hybrid client for combined Neo4j + Postgres queries
+	hybridClient := database.NewHybridClient(neo4jClient, stagingClient)
+
+	// Load CLQS score for the repository (for confidence display)
+	// Note: repoID would need to be determined from the repository
+	// For now, we'll load it later when we have the repoID
+	var clqsScore *output.CLQSInfo
 
 	// Note: No longer using metrics.Registry - using adaptive config directly
 	// registry := metrics.NewRegistry(neo4jClient, redisClient, pgClient)
@@ -197,6 +212,17 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			slog.Warn("could not detect repository ID, using 'local'", "error", err)
 		}
 	}
+
+	// Load CLQS score for confidence display (if repository is in database)
+	if repoID != "local" && stagingClient != nil {
+		// Query database to get numeric repo ID
+		dbRepoID, err := stagingClient.GetRepositoryID(ctx, repoID)
+		if err == nil {
+			// Load CLQS score (gracefully handles missing scores)
+			clqsScore, _ = loadCLQSScore(ctx, stagingClient, dbRepoID)
+		}
+	}
+
 	hasHighRisk := false
 
 	// Select adaptive configuration based on repository characteristics
@@ -377,6 +403,22 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			// STEP 3: Build kickoff prompt
 			slog.Info("STEP 3: Building kickoff prompt")
 			promptBuilder := agent.NewKickoffPromptBuilder([]agent.FileChangeContext{fileContext})
+
+			// Add CLQS context if available
+			if clqsScore != nil {
+				agentCLQS := &agent.CLQSInfo{
+					Score:              clqsScore.Score,
+					Grade:              clqsScore.Grade,
+					Rank:               clqsScore.Rank,
+					LinkCoverage:       clqsScore.LinkCoverage,
+					ConfidenceQuality:  clqsScore.ConfidenceQuality,
+					EvidenceDiversity:  clqsScore.EvidenceDiversity,
+					TemporalPrecision:  clqsScore.TemporalPrecision,
+					SemanticStrength:   clqsScore.SemanticStrength,
+				}
+				promptBuilder.WithCLQS(agentCLQS)
+			}
+
 			kickoffPrompt := promptBuilder.BuildKickoffPrompt()
 			slog.Info("STEP 3 complete",
 				"prompt_length", len(kickoffPrompt),
@@ -392,10 +434,10 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			}
 
 			// Create Postgres adapter
-			pgAdapter := agent.NewPostgresAdapter(pgClient)
+			pgAdapter := agent.NewPostgresAdapter(stagingClient)
 
-			// Create RiskInvestigator with graph and postgres clients
-			investigator := agent.NewRiskInvestigator(llmClient, neo4jClient, pgAdapter)
+			// Create RiskInvestigator with graph, postgres, and hybrid clients
+			investigator := agent.NewRiskInvestigator(llmClient, neo4jClient, pgAdapter, hybridClient)
 			slog.Info("STEP 4 complete", "investigator_created", true)
 
 			// STEP 5: Run agent investigation
@@ -433,8 +475,34 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				// Explain Mode: Show full hop-by-hop trace
 				output.DisplayPhase2Trace(*assessment)
 			} else {
-				// Standard Mode: Show summary with recommendations
-				output.DisplayPhase2Summary(*assessment)
+				// Standard Mode: Query hybrid data and show Manager + Developer views
+				// Query hybrid client for enriched context data
+				incidents, _ := hybridClient.GetIncidentHistoryForFiles(ctx, queryPaths, 180)
+				ownership, _ := hybridClient.GetOwnershipHistoryForFiles(ctx, queryPaths)
+				cochange, _ := hybridClient.GetCoChangePartnersWithContext(ctx, queryPaths, 0.3)
+				blastRadius, _ := hybridClient.GetBlastRadiusWithIncidents(ctx, file)
+
+				// Build demo output data structure
+				demoData := &output.DemoOutputData{
+					Assessment:  assessment,
+					Incidents:   incidents,
+					Ownership:   ownership,
+					CoChange:    cochange,
+					BlastRadius: blastRadius,
+					CLQSScore:   clqsScore,
+					FilePath:    file,
+				}
+
+				// Display Manager View (business impact)
+				output.DisplayManagerView(demoData)
+
+				// Display Developer View (actionable insights)
+				output.DisplayDeveloperView(demoData)
+
+				// Display CLQS Confidence (data quality)
+				if clqsScore != nil {
+					output.DisplayCLQSConfidence(demoData)
+				}
 			}
 		}
 	}
@@ -544,6 +612,36 @@ func initPostgres(ctx context.Context) (*database.Client, error) {
 
 	slog.Info("successfully connected to PostgreSQL")
 	return client, nil
+}
+
+// initStagingClient creates a PostgreSQL staging client for GitHub data queries
+func initStagingClient(ctx context.Context) (*database.StagingClient, error) {
+	slog.Debug("initializing PostgreSQL staging client")
+
+	cfg, err := appconfig.Load("")
+	if err != nil {
+		slog.Error("failed to load config for PostgreSQL staging", "error", err)
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	slog.Info("connecting to PostgreSQL staging", "host", cfg.Storage.PostgresHost, "port", cfg.Storage.PostgresPort, "database", cfg.Storage.PostgresDB)
+
+	// Create staging client with same connection parameters
+	stagingClient, err := database.NewStagingClient(
+		ctx,
+		cfg.Storage.PostgresHost,
+		cfg.Storage.PostgresPort,
+		cfg.Storage.PostgresDB,
+		cfg.Storage.PostgresUser,
+		cfg.Storage.PostgresPassword,
+	)
+	if err != nil {
+		slog.Error("failed to connect to PostgreSQL staging", "error", err)
+		return nil, err
+	}
+
+	slog.Info("successfully connected to PostgreSQL staging")
+	return stagingClient, nil
 }
 
 // initPostgresSQLX creates a sqlx Postgres connection for incidents database
@@ -770,4 +868,61 @@ func getTopLevelDirectories(repoPath string) []string {
 	}
 
 	return dirs
+}
+
+// loadCLQSScore loads the CLQS score for the repository from database
+func loadCLQSScore(ctx context.Context, stagingClient *database.StagingClient, repoID int64) (*output.CLQSInfo, error) {
+	query := `
+		SELECT
+			final_score,
+			grade,
+			rank,
+			link_coverage_score,
+			confidence_quality_score,
+			evidence_diversity_score,
+			temporal_precision_score,
+			semantic_strength_score
+		FROM clqs_scores
+		WHERE repo_id = $1
+		ORDER BY calculated_at DESC
+		LIMIT 1
+	`
+
+	var (
+		score              int
+		grade              string
+		rank               string
+		linkCoverage       int
+		confidenceQuality  int
+		evidenceDiversity  int
+		temporalPrecision  int
+		semanticStrength   int
+	)
+
+	err := stagingClient.QueryRow(ctx, query, repoID).Scan(
+		&score,
+		&grade,
+		&rank,
+		&linkCoverage,
+		&confidenceQuality,
+		&evidenceDiversity,
+		&temporalPrecision,
+		&semanticStrength,
+	)
+
+	if err != nil {
+		// CLQS score not found - this is okay, just means it hasn't been calculated yet
+		return nil, nil
+	}
+
+	return &output.CLQSInfo{
+		Score:              score,
+		Grade:              grade,
+		Rank:               rank,
+		LinkCoverage:       linkCoverage,
+		ConfidenceQuality:  confidenceQuality,
+		EvidenceDiversity:  evidenceDiversity,
+		TemporalPrecision:  temporalPrecision,
+		SemanticStrength:   semanticStrength,
+	}, nil
 }

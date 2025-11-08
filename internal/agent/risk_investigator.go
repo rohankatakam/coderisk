@@ -7,15 +7,17 @@ import (
 	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/rohankatakam/coderisk/internal/database"
 )
 
 // RiskInvestigator performs agent-based risk investigation using LLM tool calling
 // Reference: dev_docs/mvp/AGENT_KICKOFF_PROMPT_DESIGN.md
 type RiskInvestigator struct {
-	llmClient   *LLMClient
-	graphClient GraphQueryExecutor
-	pgClient    PostgresQueryExecutor
-	maxHops     int
+	llmClient       *LLMClient
+	graphClient     GraphQueryExecutor
+	postgresAdapter PostgresQueryExecutor
+	hybridClient    *database.HybridClient
+	maxHops         int
 }
 
 // GraphQueryExecutor interface for Neo4j queries
@@ -33,13 +35,15 @@ type PostgresQueryExecutor interface {
 func NewRiskInvestigator(
 	llmClient *LLMClient,
 	graphClient GraphQueryExecutor,
-	pgClient PostgresQueryExecutor,
+	postgresAdapter PostgresQueryExecutor,
+	hybridClient *database.HybridClient,
 ) *RiskInvestigator {
 	return &RiskInvestigator{
-		llmClient:   llmClient,
-		graphClient: graphClient,
-		pgClient:    pgClient,
-		maxHops:     5, // Safety limit
+		llmClient:       llmClient,
+		graphClient:     graphClient,
+		postgresAdapter: postgresAdapter,
+		hybridClient:    hybridClient,
+		maxHops:         5, // Safety limit
 	}
 }
 
@@ -240,6 +244,93 @@ func (inv *RiskInvestigator) getToolDefinitions() []openai.ChatCompletionToolUni
 			},
 		}),
 		openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+			Name:        "get_incidents_with_context",
+			Description: openai.String("Get full incident history with issue details, link quality, and author roles. Returns comprehensive incident data including titles, bodies, confidence scores, and whether reporters were team members or external users."),
+			Parameters: openai.FunctionParameters{
+				"type": "object",
+				"properties": map[string]any{
+					"file_paths": map[string]any{
+						"type":        "array",
+						"description": "Array of file paths to query",
+						"items": map[string]any{
+							"type": "string",
+						},
+					},
+					"days_back": map[string]any{
+						"type":        "number",
+						"description": "How many days back to search. Default: 180",
+					},
+				},
+				"required": []string{"file_paths"},
+			},
+		}),
+		openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+			Name:        "get_ownership_timeline",
+			Description: openai.String("Get developer ownership history with activity status. Shows who owns the code, when they last contributed, and whether they're still active. Useful for detecting stale ownership and bus factor risks."),
+			Parameters: openai.FunctionParameters{
+				"type": "object",
+				"properties": map[string]any{
+					"file_paths": map[string]any{
+						"type":        "array",
+						"description": "Array of file paths to query",
+						"items": map[string]any{
+							"type": "string",
+						},
+					},
+				},
+				"required": []string{"file_paths"},
+			},
+		}),
+		openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+			Name:        "get_cochange_with_explanations",
+			Description: openai.String("Get files that frequently change together WITH sample commit messages explaining why. Useful for detecting incomplete changes and related file updates that were forgotten."),
+			Parameters: openai.FunctionParameters{
+				"type": "object",
+				"properties": map[string]any{
+					"file_paths": map[string]any{
+						"type":        "array",
+						"description": "Array of file paths to query",
+						"items": map[string]any{
+							"type": "string",
+						},
+					},
+					"threshold": map[string]any{
+						"type":        "number",
+						"description": "Minimum co-change frequency (0.0-1.0). Default: 0.5",
+					},
+				},
+				"required": []string{"file_paths"},
+			},
+		}),
+		openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+			Name:        "get_blast_radius_analysis",
+			Description: openai.String("Get downstream files that depend on this file AND their incident history. Shows potential impact of changes and which dependent files are fragile."),
+			Parameters: openai.FunctionParameters{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{
+						"type":        "string",
+						"description": "File path to analyze blast radius for",
+					},
+				},
+				"required": []string{"file_path"},
+			},
+		}),
+		openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+			Name:        "get_commit_patch",
+			Description: openai.String("Retrieve full code diff/patch for a specific commit. Use when you need to see actual code changes. Warning: can be large, only call when necessary."),
+			Parameters: openai.FunctionParameters{
+				"type": "object",
+				"properties": map[string]any{
+					"commit_sha": map[string]any{
+						"type":        "string",
+						"description": "Git commit SHA to retrieve patch for",
+					},
+				},
+				"required": []string{"commit_sha"},
+			},
+		}),
+		openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
 			Name:        "finish_investigation",
 			Description: openai.String("Complete the investigation and return final risk assessment with incident-focused reasoning."),
 			Parameters: openai.FunctionParameters{
@@ -291,6 +382,16 @@ func (inv *RiskInvestigator) executeTool(ctx context.Context, toolName string, a
 		return inv.queryBlastRadius(ctx, args)
 	case "query_recent_commits":
 		return inv.queryRecentCommits(ctx, args)
+	case "get_incidents_with_context":
+		return inv.getIncidentsWithContext(ctx, args)
+	case "get_ownership_timeline":
+		return inv.getOwnershipTimeline(ctx, args)
+	case "get_cochange_with_explanations":
+		return inv.getCoChangeWithExplanations(ctx, args)
+	case "get_blast_radius_analysis":
+		return inv.getBlastRadiusAnalysis(ctx, args)
+	case "get_commit_patch":
+		return inv.getCommitPatch(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
@@ -366,15 +467,23 @@ func (inv *RiskInvestigator) queryIncidentHistory(ctx context.Context, args map[
 	}
 
 	query := `
-		MATCH (issue:Issue)<-[:FIXES]-(c:Commit)-[:MODIFIED]->(f:File)
+		MATCH (issue:Issue)-[rel]->(pr:PR)<-[:IN_PR]-(c:Commit)-[:MODIFIED]->(f:File)
 		WHERE f.path IN $paths
+		  AND (type(rel) = 'FIXED_BY' OR type(rel) = 'ASSOCIATED_WITH')
 		  AND issue.created_at > datetime() - duration({days: $days_back})
-		  AND (issue.labels CONTAINS 'bug' OR issue.labels CONTAINS 'incident')
-		RETURN issue.id as incident_id,
+		RETURN issue.number as incident_number,
 		       issue.title as title,
+		       issue.body as body,
+		       issue.labels as labels,
 		       issue.created_at as created_at,
-		       c.sha as fix_commit
-		ORDER BY issue.created_at DESC
+		       issue.closed_at as closed_at,
+		       c.sha as fix_commit,
+		       pr.number as pr_number,
+		       type(rel) as link_type,
+		       rel.confidence as confidence,
+		       rel.detection_method as detection_method,
+		       rel.evidence_sources as evidence
+		ORDER BY rel.confidence DESC, issue.created_at DESC
 		LIMIT 10
 	`
 
@@ -439,6 +548,91 @@ func (inv *RiskInvestigator) queryRecentCommits(ctx context.Context, args map[st
 	}
 
 	return results, nil
+}
+
+func (inv *RiskInvestigator) getCommitPatch(ctx context.Context, args map[string]any) (any, error) {
+	commitSHA, ok := args["commit_sha"].(string)
+	if !ok || commitSHA == "" {
+		return nil, fmt.Errorf("commit_sha is required")
+	}
+
+	patch, err := inv.postgresAdapter.GetCommitPatch(ctx, commitSHA)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve patch: %w", err)
+	}
+
+	return map[string]any{
+		"commit_sha": commitSHA,
+		"patch":      patch,
+	}, nil
+}
+
+// Hybrid query tool handlers
+
+func (inv *RiskInvestigator) getIncidentsWithContext(ctx context.Context, args map[string]any) (any, error) {
+	filePaths := extractStringArray(args, "file_paths")
+	if len(filePaths) == 0 {
+		return nil, fmt.Errorf("file_paths is required")
+	}
+
+	daysBack := 180
+	if d, ok := args["days_back"].(float64); ok {
+		daysBack = int(d)
+	}
+
+	incidents, err := inv.hybridClient.GetIncidentHistoryForFiles(ctx, filePaths, daysBack)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get incidents: %w", err)
+	}
+
+	return incidents, nil
+}
+
+func (inv *RiskInvestigator) getOwnershipTimeline(ctx context.Context, args map[string]any) (any, error) {
+	filePaths := extractStringArray(args, "file_paths")
+	if len(filePaths) == 0 {
+		return nil, fmt.Errorf("file_paths is required")
+	}
+
+	ownership, err := inv.hybridClient.GetOwnershipHistoryForFiles(ctx, filePaths)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ownership: %w", err)
+	}
+
+	return ownership, nil
+}
+
+func (inv *RiskInvestigator) getCoChangeWithExplanations(ctx context.Context, args map[string]any) (any, error) {
+	filePaths := extractStringArray(args, "file_paths")
+	if len(filePaths) == 0 {
+		return nil, fmt.Errorf("file_paths is required")
+	}
+
+	threshold := 0.5
+	if t, ok := args["threshold"].(float64); ok {
+		threshold = t
+	}
+
+	partners, err := inv.hybridClient.GetCoChangePartnersWithContext(ctx, filePaths, threshold)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get co-change partners: %w", err)
+	}
+
+	return partners, nil
+}
+
+func (inv *RiskInvestigator) getBlastRadiusAnalysis(ctx context.Context, args map[string]any) (any, error) {
+	filePath, ok := args["file_path"].(string)
+	if !ok || filePath == "" {
+		return nil, fmt.Errorf("file_path is required")
+	}
+
+	blastRadius, err := inv.hybridClient.GetBlastRadiusWithIncidents(ctx, filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get blast radius: %w", err)
+	}
+
+	return blastRadius, nil
 }
 
 // handleFinishInvestigation processes the finish_investigation tool call

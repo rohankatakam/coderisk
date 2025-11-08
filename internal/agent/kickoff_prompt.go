@@ -9,11 +9,24 @@ import (
 	"github.com/rohankatakam/coderisk/internal/metrics"
 )
 
+// CLQSInfo holds CLQS confidence information
+type CLQSInfo struct {
+	Score              int
+	Grade              string
+	Rank               string
+	LinkCoverage       int
+	ConfidenceQuality  int
+	EvidenceDiversity  int
+	TemporalPrecision  int
+	SemanticStrength   int
+}
+
 // KickoffPromptBuilder creates the initial prompt for agent-based risk investigation
 // Bridges FileResolver output with Agent exploration
 // Reference: dev_docs/mvp/AGENT_KICKOFF_PROMPT_DESIGN.md
 type KickoffPromptBuilder struct {
 	fileChanges []FileChangeContext
+	clqsScore   *CLQSInfo // Optional CLQS confidence information
 }
 
 // FileChangeContext contains all metadata for a single file change
@@ -45,7 +58,14 @@ type FileChangeContext struct {
 func NewKickoffPromptBuilder(fileChanges []FileChangeContext) *KickoffPromptBuilder {
 	return &KickoffPromptBuilder{
 		fileChanges: fileChanges,
+		clqsScore:   nil,
 	}
+}
+
+// WithCLQS adds CLQS confidence information to the prompt
+func (b *KickoffPromptBuilder) WithCLQS(clqs *CLQSInfo) *KickoffPromptBuilder {
+	b.clqsScore = clqs
+	return b
 }
 
 // BuildKickoffPrompt creates the complete prompt for agent investigation
@@ -55,6 +75,12 @@ func (b *KickoffPromptBuilder) BuildKickoffPrompt() string {
 	// Part 1: System prompt (investigation principles)
 	prompt.WriteString(b.buildSystemPrompt())
 	prompt.WriteString("\n\n---\n\n")
+
+	// Part 1.5: CLQS context (if available)
+	if b.clqsScore != nil {
+		prompt.WriteString(b.buildCLQSContext())
+		prompt.WriteString("\n\n---\n\n")
+	}
 
 	// Part 2: File changes with resolution context
 	prompt.WriteString("# Changes to Investigate\n\n")
@@ -245,6 +271,42 @@ func (b *KickoffPromptBuilder) buildInvestigationGuidance() string {
 	guidance.WriteString("Note: This assessment focuses on incident risk. Run additional style, security, and linting checks as part of your normal development workflow.\n")
 
 	return guidance.String()
+}
+
+// buildCLQSContext adds data quality context from CLQS scores
+func (b *KickoffPromptBuilder) buildCLQSContext() string {
+	var clqs strings.Builder
+
+	clqs.WriteString("# Data Quality Context (CLQS)\n\n")
+	clqs.WriteString(fmt.Sprintf("This repository has a **CLQS Score of %d (%s - %s)**\n\n",
+		b.clqsScore.Score, b.clqsScore.Grade, b.clqsScore.Rank))
+
+	clqs.WriteString("**What this means:**\n")
+	clqs.WriteString(fmt.Sprintf("- Link Coverage: %d/100 (How many issues are linked to PRs)\n", b.clqsScore.LinkCoverage))
+	clqs.WriteString(fmt.Sprintf("- Confidence Quality: %d/100 (Strength of issue-PR links)\n", b.clqsScore.ConfidenceQuality))
+	clqs.WriteString(fmt.Sprintf("- Evidence Diversity: %d/100 (Variety of linking signals)\n", b.clqsScore.EvidenceDiversity))
+	clqs.WriteString(fmt.Sprintf("- Temporal Precision: %d/100 (Timing alignment of fixes)\n", b.clqsScore.TemporalPrecision))
+	clqs.WriteString(fmt.Sprintf("- Semantic Strength: %d/100 (Quality of commit messages)\n", b.clqsScore.SemanticStrength))
+
+	clqs.WriteString("\n**Impact on your investigation:**\n")
+
+	// Provide guidance based on CLQS grade
+	switch b.clqsScore.Grade {
+	case "A", "B":
+		clqs.WriteString("- ✅ High-quality incident data - trust the historical patterns you find\n")
+		clqs.WriteString("- ✅ Issue links are well-documented - follow the evidence trail\n")
+		clqs.WriteString("- ✅ Commit messages are informative - use them for context\n")
+	case "C":
+		clqs.WriteString("- ⚠️  Moderate data quality - verify critical findings with multiple signals\n")
+		clqs.WriteString("- ⚠️  Some incident links may be missing - don't rely on absence of evidence\n")
+		clqs.WriteString("- ⚠️  Cross-reference commit messages with other evidence\n")
+	case "D", "F":
+		clqs.WriteString("- ⚠️  Limited incident data - focus more on structural risks (coupling, complexity)\n")
+		clqs.WriteString("- ⚠️  Incident history may be incomplete - absence of incidents != low risk\n")
+		clqs.WriteString("- ⚠️  Rely more on code patterns and dependencies than historical data\n")
+	}
+
+	return clqs.String()
 }
 
 // Helper functions

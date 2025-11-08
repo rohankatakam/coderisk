@@ -94,12 +94,67 @@ func (c *CoChangeResult) ShouldEscalate() bool {
 }
 
 // CalculateCoChangeMultiple computes co-change across multiple file paths
+// This handles renamed files by querying ALL historical paths and aggregating results
 func CalculateCoChangeMultiple(ctx context.Context, neo4j *graph.Client, repoID string, filePaths []string) (*CoChangeResult, error) {
 	if len(filePaths) == 0 {
 		return &CoChangeResult{}, nil
 	}
-	// TODO: Implement proper multi-path query
-	// For now, use first path as proxy
-	return CalculateCoChange(ctx, neo4j, repoID, filePaths[0])
+
+	// Query Neo4j with ALL file paths (current + historical renames)
+	// This captures co-change history even after renames
+	query := `
+		MATCH (f1:File)<-[:MODIFIED]-(c:Commit)
+		WHERE f1.path IN $paths
+		WITH COUNT(DISTINCT c) as total_commits
+		MATCH (f1:File)<-[:MODIFIED]-(c:Commit)-[:MODIFIED]->(f2:File)
+		WHERE f1.path IN $paths AND f1.path <> f2.path
+		WITH f2.path as partner_file, COUNT(DISTINCT c) as cochange_count, total_commits
+		WITH partner_file, cochange_count, (cochange_count * 1.0 / total_commits) as frequency
+		ORDER BY cochange_count DESC
+		LIMIT 20
+		RETURN partner_file, cochange_count, frequency
+	`
+
+	results, err := neo4j.ExecuteQuery(ctx, query, map[string]any{
+		"paths": filePaths,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query co-change for paths %v: %w", filePaths, err)
+	}
+
+	// Parse results into partners
+	var partners []CoChangePartner
+	var maxFrequency float64
+
+	for _, row := range results {
+		partnerFile, _ := row["partner_file"].(string)
+		frequency, _ := row["frequency"].(float64)
+
+		if frequency > maxFrequency {
+			maxFrequency = frequency
+		}
+
+		partners = append(partners, CoChangePartner{
+			FilePath:  partnerFile,
+			Frequency: frequency,
+		})
+	}
+
+	// Determine risk level
+	riskLevel := classifyCoChangeRisk(maxFrequency)
+
+	// Take top 5 partners
+	if len(partners) > 5 {
+		partners = partners[:5]
+	}
+
+	result := &CoChangeResult{
+		FilePath:     filePaths[0], // Use current path as primary
+		MaxFrequency: maxFrequency,
+		RiskLevel:    riskLevel,
+		Partners:     partners,
+	}
+
+	return result, nil
 }
 
