@@ -282,12 +282,22 @@ func (hc *HybridClient) GetOwnershipHistoryForFiles(ctx context.Context, filePat
 
 		commitCount := int(row["commit_count"].(int64))
 
-		// Parse last_commit_date (Neo4j datetime string)
-		lastCommitStr, _ := row["last_commit_date"].(string)
-		lastCommitDate, err := time.Parse(time.RFC3339, lastCommitStr)
-		if err != nil {
-			// Try alternative format
-			lastCommitDate, _ = time.Parse("2006-01-02T15:04:05", lastCommitStr)
+		// Parse last_commit_date (can be Unix timestamp or ISO 8601 string)
+		var lastCommitDate time.Time
+		switch v := row["last_commit_date"].(type) {
+		case int64:
+			// Neo4j stores as Unix timestamp
+			lastCommitDate = time.Unix(v, 0)
+		case string:
+			// Try ISO 8601 format
+			lastCommitDate, err = time.Parse(time.RFC3339, v)
+			if err != nil {
+				// Try alternative format
+				lastCommitDate, _ = time.Parse("2006-01-02T15:04:05", v)
+			}
+		default:
+			// Fallback to current time if parsing fails
+			lastCommitDate = now
 		}
 
 		daysSince := int(now.Sub(lastCommitDate).Hours() / 24)
@@ -439,10 +449,18 @@ func (hc *HybridClient) GetBlastRadiusWithIncidents(ctx context.Context, filePat
 		}
 
 		var lastIncident *time.Time
-		if lastIncidentStr, ok := row["last_incident"].(string); ok && lastIncidentStr != "" {
-			t, err := time.Parse(time.RFC3339, lastIncidentStr)
-			if err == nil {
-				lastIncident = &t
+		switch v := row["last_incident"].(type) {
+		case int64:
+			// Neo4j stores as Unix timestamp
+			t := time.Unix(v, 0)
+			lastIncident = &t
+		case string:
+			// Try ISO 8601 format
+			if v != "" {
+				t, err := time.Parse(time.RFC3339, v)
+				if err == nil {
+					lastIncident = &t
+				}
 			}
 		}
 
