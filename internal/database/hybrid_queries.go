@@ -302,12 +302,11 @@ func (hc *HybridClient) GetOwnershipHistoryForFiles(ctx context.Context, filePat
 	query := `
 		MATCH (d:Developer)-[:AUTHORED]->(c:Commit)-[:MODIFIED]->(f:File)
 		WHERE f.path IN $paths
-		WITH d.email as email, d.name as developer, COUNT(c) as commit_count,
-		     MAX(c.committed_at) as last_commit_date
+		WITH d, COUNT(c) as commit_count, MAX(c.committed_at) as last_commit_date
 		WHERE commit_count >= $min_commits
+		RETURN d.email as email, d.name as developer, commit_count, last_commit_date
 		ORDER BY commit_count DESC
 		LIMIT 10
-		RETURN email, developer, commit_count, last_commit_date
 	`
 
 	results, err := hc.neo4jClient.ExecuteQuery(ctx, query, map[string]any{

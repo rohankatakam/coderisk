@@ -392,7 +392,6 @@ func (c *StagingClient) ComputeDORAMetrics(ctx context.Context, repoID int64, da
 			COUNT(*) as sample_size
 		FROM github_pull_requests
 		WHERE repo_id = $1
-		  AND merged = true
 		  AND merged_at IS NOT NULL
 		  AND merged_at >= $2
 	`

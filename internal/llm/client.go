@@ -54,24 +54,15 @@ func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
 		}, nil
 	}
 
-	// Determine provider (priority: env var > config > default to gemini)
+	// GEMINI ONLY: OpenAI support temporarily disabled
+	// Only Gemini provider is active. OpenAI code remains for future use.
 	provider := os.Getenv("LLM_PROVIDER")
-	if provider == "" {
-		provider = cfg.API.Provider
-	}
-	if provider == "" {
-		provider = "gemini" // Default to Gemini
+	if provider != "" && provider != "gemini" {
+		logger.Warn("only gemini provider supported currently, ignoring LLM_PROVIDER", "requested_provider", provider)
 	}
 
-	switch Provider(provider) {
-	case ProviderGemini:
-		return newGeminiClient(ctx, cfg, logger)
-	case ProviderOpenAI:
-		return newOpenAIClient(ctx, cfg, logger)
-	default:
-		logger.Warn("unknown provider, falling back to gemini", "provider", provider)
-		return newGeminiClient(ctx, cfg, logger)
-	}
+	// Always use Gemini
+	return newGeminiClient(ctx, cfg, logger)
 }
 
 // newGeminiClient initializes a Gemini provider client
@@ -83,7 +74,7 @@ func newGeminiClient(ctx context.Context, cfg *config.Config, logger *slog.Logge
 	}
 
 	if geminiKey == "" {
-		logger.Warn("phase 2 enabled but no Gemini API key configured")
+		logger.Warn("phase 2 enabled but no LLM API key configured")
 		logger.Info("set GEMINI_API_KEY environment variable or run 'crisk configure'")
 		return &Client{
 			provider:  ProviderNone,

@@ -415,17 +415,14 @@ func (inv *RiskInvestigator) queryCoChangePartners(ctx context.Context, args map
 		MATCH (f1:File)<-[:MODIFIED]-(c:Commit)-[:MODIFIED]->(f2:File)
 		WHERE f1.path IN $paths AND f1.path <> f2.path
 		WITH f1.path as file1, f2.path as file2, COUNT(c) as cochange_count
+		WITH file1, file2, cochange_count
 		MATCH (f1:File {path: file1})
-		MATCH (f2:File {path: file2})
-		WITH file1, file2, cochange_count,
-		     size((f1)<-[:MODIFIED]-()) as f1_total,
-		     size((f2)<-[:MODIFIED]-()) as f2_total
-		WITH file1, file2, cochange_count,
-		     toFloat(cochange_count) / toFloat(f1_total) as frequency
+		WITH file2 as partner_file, cochange_count, COUNT { (f1)<-[:MODIFIED]-() } as f1_total
+		WITH partner_file, cochange_count, toFloat(cochange_count) / toFloat(f1_total) as frequency
 		WHERE frequency >= $threshold
+		RETURN partner_file, frequency
 		ORDER BY frequency DESC
 		LIMIT 10
-		RETURN file2 as partner_file, frequency
 	`
 
 	slog.Info("calling graphClient.ExecuteQuery for co-change", "threshold", threshold)

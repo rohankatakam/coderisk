@@ -168,6 +168,36 @@ func (c *GeminiClient) CompleteWithTools(ctx context.Context, systemPrompt, user
 	return resp, nil
 }
 
+// CompleteWithToolsAndHistory sends a multi-turn conversation with function calling
+// Supports full conversation history for multi-hop agent interactions
+func (c *GeminiClient) CompleteWithToolsAndHistory(ctx context.Context, systemPrompt string, history []*genai.Content, tools []*genai.Tool) (*genai.GenerateContentResponse, error) {
+	// Build system instruction if provided
+	var systemInstruction *genai.Content
+	if systemPrompt != "" {
+		systemInstruction = genai.Text(systemPrompt)[0]
+	}
+
+	// Create generation config with tools
+	genConfig := &genai.GenerateContentConfig{
+		SystemInstruction: systemInstruction,
+		Temperature:       ptrFloat32(0.1),
+		Tools:             tools,
+	}
+
+	// Generate content with full history
+	resp, err := c.client.Models.GenerateContent(ctx, c.model, history, genConfig)
+	if err != nil {
+		return nil, fmt.Errorf("gemini tool completion with history failed: %w", err)
+	}
+
+	c.logger.Debug("gemini tool completion with history",
+		"history_length", len(history),
+		"num_candidates", len(resp.Candidates),
+	)
+
+	return resp, nil
+}
+
 // Close releases resources held by the Gemini client
 func (c *GeminiClient) Close() error {
 	// Gemini client doesn't require explicit cleanup in current SDK version

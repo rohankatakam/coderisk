@@ -35,7 +35,7 @@ Reference: test_data/docs/linking/Issue_Flow.md
 
 Requirements:
   - PostgreSQL database with staged GitHub data (issues, PRs, commits, timeline events)
-  - OpenAI API key (for LLM-based analysis)
+  - LLM API key (for AI-powered analysis)
   - Repository must be already ingested via 'crisk init'
 
 Example:

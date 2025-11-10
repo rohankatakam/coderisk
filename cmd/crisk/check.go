@@ -17,6 +17,7 @@ import (
 	"github.com/rohankatakam/coderisk/internal/git"
 	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/incidents"
+	"github.com/rohankatakam/coderisk/internal/llm"
 	"github.com/rohankatakam/coderisk/internal/metrics"
 	"github.com/rohankatakam/coderisk/internal/output"
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver for sqlx
@@ -56,7 +57,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// Detect deployment mode
 	mode := appconfig.DetectMode()
 
-	var openaiAPIKey string
+	var geminiAPIKey string
 	var authManager *auth.Manager
 	var err error
 
@@ -79,14 +80,18 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		}
 
 		if creds.OpenAIAPIKey == "" {
-			return fmt.Errorf("OpenAI API key not configured.\nVisit: https://coderisk.dev/dashboard/settings")
+			return fmt.Errorf("LLM API key not configured.\nVisit: https://coderisk.dev/dashboard/settings")
 		}
 
-		openaiAPIKey = creds.OpenAIAPIKey
+		// Use LLM API key (OpenAI field repurposed for LLM in cloud mode)
+		geminiAPIKey = os.Getenv("GEMINI_API_KEY")
+		if geminiAPIKey == "" {
+			geminiAPIKey = creds.OpenAIAPIKey // Legacy: repurpose OpenAI field for Gemini
+		}
 
 	} else {
-		// Development mode: Allow .env file
-		openaiAPIKey = os.Getenv("OPENAI_API_KEY")
+		// Development mode: Use Gemini from environment
+		geminiAPIKey = os.Getenv("GEMINI_API_KEY")
 
 		// Try to load auth manager for telemetry (optional in dev mode)
 		authManager, _ = auth.NewManager()
@@ -342,15 +347,15 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		if adaptiveResult.ShouldEscalate {
 			hasHighRisk = true
 
-			// Use OpenAI API key from cloud or environment
+			// Use Gemini API key from cloud or environment
 			// 12-factor: Factor 3 - Configuration from environment
-			if openaiAPIKey == "" {
+			if geminiAPIKey == "" {
 				// No API key - show message and continue
 				if !preCommit {
 					fmt.Println("\n⚠️  HIGH RISK detected")
 					fmt.Println("    Enable Phase 2 LLM investigation by either:")
 					fmt.Println("      1. Running 'crisk login' to use cloud credentials")
-					fmt.Println("      2. Setting OPENAI_API_KEY environment variable")
+					fmt.Println("      2. Setting GEMINI_API_KEY environment variable")
 				}
 				continue
 			}
@@ -425,8 +430,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				"estimated_tokens", len(kickoffPrompt)/4)
 
 			// STEP 4: Create LLM client and investigator
-			slog.Info("STEP 4: Creating investigator")
-			llmClient, err := agent.NewLLMClient(openaiAPIKey)
+			slog.Info("STEP 4: Creating LLM investigator")
+			geminiClient, err := llm.NewGeminiClient(ctx, geminiAPIKey, "gemini-2.0-flash-exp")
 			if err != nil {
 				fmt.Printf("❌ LLM client error: %v\n", err)
 				slog.Error("failed to create LLM client", "error", err)
@@ -436,8 +441,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			// Create Postgres adapter
 			pgAdapter := agent.NewPostgresAdapter(stagingClient)
 
-			// Create RiskInvestigator with graph, postgres, and hybrid clients
-			investigator := agent.NewRiskInvestigator(llmClient, neo4jClient, pgAdapter, hybridClient)
+			// Create GeminiInvestigator with graph, postgres, and hybrid clients
+			investigator := agent.NewGeminiInvestigator(geminiClient, neo4jClient, pgAdapter, hybridClient)
 			slog.Info("STEP 4 complete", "investigator_created", true)
 
 			// STEP 5: Run agent investigation
@@ -571,10 +576,10 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		estimatedTokens := 0
 		estimatedCost := 0.0
 
-		if hasHighRisk && openaiAPIKey != "" {
+		if hasHighRisk && geminiAPIKey != "" {
 			// Rough estimate: 1000 tokens per high-risk file with Phase 2
 			estimatedTokens = 1000 * totalFiles
-			// Estimate cost: $0.01 per 1000 tokens (rough GPT-4 pricing)
+			// Estimate cost: Much cheaper with Gemini (~$0.001 per 1000 tokens)
 			estimatedCost = float64(estimatedTokens) * 0.00001
 		}
 

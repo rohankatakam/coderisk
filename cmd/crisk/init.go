@@ -48,7 +48,7 @@ Examples:
 Requirements:
   • Must be run inside a cloned GitHub repository
   • GitHub Personal Access Token (for fetching issues, commits)
-  • OpenAI API key (optional, for Phase 2 LLM analysis)
+  • LLM API key (optional, for Phase 2 AI-powered analysis)
   • Docker with Neo4j, PostgreSQL, Redis running
 
 Configuration:
@@ -116,7 +116,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Detect deployment mode
 	mode := config.DetectMode()
 
-	var githubToken, openaiAPIKey string
+	var githubToken, geminiAPIKey string
 	var authManager *auth.Manager
 
 	// Production mode: REQUIRE cloud authentication
@@ -142,14 +142,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to fetch cloud credentials: %w\n\nTry running 'crisk logout' then 'crisk login' again.", err)
 		}
 
-		if creds.GitHubToken == "" || creds.OpenAIAPIKey == "" {
-			return fmt.Errorf("❌ Missing credentials.\n\n" +
+		if creds.GitHubToken == "" {
+			return fmt.Errorf("❌ Missing GitHub token.\n\n" +
 				"Please configure your API keys at:\n" +
 				"  → https://coderisk.dev/dashboard/settings\n")
 		}
 
 		githubToken = creds.GitHubToken
-		openaiAPIKey = creds.OpenAIAPIKey
+		// LLM key is optional - llm.NewClient will use Gemini by default if configured
+		geminiAPIKey = creds.OpenAIAPIKey // Legacy: repurpose OpenAI field for Gemini
 		fmt.Println("  ✓ Using credentials from cloud")
 
 	} else {
@@ -163,14 +164,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 
 		githubToken = os.Getenv("GITHUB_TOKEN")
-		openaiAPIKey = os.Getenv("OPENAI_API_KEY")
+		geminiAPIKey = os.Getenv("GEMINI_API_KEY")
+		if geminiAPIKey == "" {
+			geminiAPIKey = os.Getenv("OPENAI_API_KEY") // Fallback for legacy configs
+		}
 
 		if githubToken == "" {
 			return fmt.Errorf("GITHUB_TOKEN not set in .env file")
 		}
-		if openaiAPIKey == "" {
-			return fmt.Errorf("OPENAI_API_KEY not set in .env file")
-		}
+		// LLM API key is optional - Phase 2 will be disabled if not provided
 
 		fmt.Println("  ✓ Using credentials from .env file")
 
@@ -182,7 +184,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Set environment variables for downstream code that expects them
 	os.Setenv("GITHUB_TOKEN", githubToken)
-	os.Setenv("OPENAI_API_KEY", openaiAPIKey)
+	os.Setenv("GEMINI_API_KEY", geminiAPIKey)
 
 	// Detect current repository
 	fmt.Println("📁 Detecting repository from current directory...")

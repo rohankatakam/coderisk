@@ -98,8 +98,9 @@ Required variables in [.env](.env):
 # Required
 GITHUB_TOKEN=ghp_your_token_here
 
-# Optional (for Phase 2 features)
-OPENAI_API_KEY=sk_your_key_here
+# Optional (for Phase 2 LLM-powered analysis)
+GEMINI_API_KEY=your_gemini_api_key_here
+PHASE2_ENABLED=true
 ```
 
 Defaults are provided for database passwords and ports.
