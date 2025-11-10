@@ -82,6 +82,10 @@ func (b *KickoffPromptBuilder) BuildKickoffPrompt() string {
 		prompt.WriteString("\n\n---\n\n")
 	}
 
+	// Part 1.6: Phase 1 Quantitative Assessment Summary
+	prompt.WriteString(b.buildPhase1Summary())
+	prompt.WriteString("\n\n---\n\n")
+
 	// Part 2: File changes with resolution context
 	prompt.WriteString("# Changes to Investigate\n\n")
 	for i, change := range b.fileChanges {
@@ -103,6 +107,17 @@ Your goal: Determine if these changes are likely to cause production incidents.
 
 Your focus: **Incident prevention**, not code quality
 
+**CRITICAL UNDERSTANDING:**
+You are analyzing a PROPOSED CHANGE that has NOT been committed yet.
+- The user is making these changes RIGHT NOW in their working directory
+- If you find past incidents, check if the PROPOSED change matches the BUGGY pattern
+- If the proposed change matches a past bug pattern, risk is HIGH (potential regression)
+- A revert PR in history means the bug was fixed, but if the user is RE-INTRODUCING the same pattern, that's HIGH risk!
+
+**BACKWARDS LOGIC TRAP - AVOID THIS:**
+❌ WRONG: "The bug was reverted, so current code is safe → risk is LOW"
+✅ CORRECT: "The bug was reverted, but the user's proposed change matches that buggy pattern → risk is HIGH"
+
 You are NOT responsible for:
 - Code style violations
 - Security vulnerabilities
@@ -112,10 +127,10 @@ You are NOT responsible for:
 
 You ARE responsible for:
 - Incident history: Has this code caused production problems before?
+- Pattern matching: Does the PROPOSED change match patterns from past incidents?
 - Ownership gaps: Is the code owner still active and knowledgeable?
 - Co-change patterns: Were related files that usually change together updated?
 - Blast radius: How many downstream files depend on this change?
-- Pattern matching: Is this similar to changes that caused past incidents?
 
 Your tools:
 - get_incidents_with_context: Get full incident history with issue titles, bodies, confidence scores, and author roles
@@ -128,10 +143,17 @@ Your tools:
 
 Investigation principles:
 1. Start with incident history (has this code caused production problems before?)
-2. Check ownership (is the owner still active? do they know this code's history?)
-3. Verify co-changes (if file X changes, does file Y usually change too?)
-4. Assess blast radius (how many files depend on this change?)
-5. Use commit patches to understand if current changes match past incident patterns
+2. **Pattern comparison:** If incidents found, compare the PROPOSED change with past buggy commits
+   - Look for similar code patterns, similar change locations, similar modification types
+   - If the proposed change matches a past bug → HIGH risk (regression alert!)
+3. Check ownership (is the owner still active? do they know this code's history?)
+4. Verify co-changes (if file X changes, does file Y usually change too?)
+5. Assess blast radius (how many files depend on this change?)
+
+**Risk Logic Rules:**
+- If proposed change matches a pattern from a past incident → **HIGH risk** (even if that bug was fixed!)
+- If file has incident history but proposed change is different → MEDIUM risk (risky file, but new pattern)
+- If file has no incident history → LOW risk (unless other factors like stale ownership apply)
 
 **CRITICAL OUTPUT FORMATTING RULES:**
 
@@ -307,6 +329,70 @@ func (b *KickoffPromptBuilder) buildInvestigationGuidance() string {
 	guidance.WriteString("**CRITICAL:** When you have gathered sufficient evidence (typically 2-5 tool calls), you MUST call `finish_investigation` with your final risk assessment. Do NOT respond with text - use the `finish_investigation` tool to complete your investigation.\n")
 
 	return guidance.String()
+}
+
+// buildPhase1Summary creates a summary of Phase 1 quantitative findings
+// Reference: YC_DEMO_GAP_ANALYSIS.md Bug 3.4 - Phase 1/Phase 2 alignment
+func (b *KickoffPromptBuilder) buildPhase1Summary() string {
+	var summary strings.Builder
+
+	summary.WriteString("# Phase 1 Quantitative Assessment\n\n")
+	summary.WriteString("**IMPORTANT:** Phase 1 has already analyzed these changes using quantitative metrics.\n")
+	summary.WriteString("Your job is to investigate WHY Phase 1 flagged these changes, not to contradict it.\n\n")
+
+	// Aggregate Phase 1 findings across all files
+	hasHighCoupling := false
+	hasHighCoChange := false
+	hasIncidents := false
+	highestRisk := ""
+
+	for _, change := range b.fileChanges {
+		if change.CouplingScore > 0.5 {
+			hasHighCoupling = true
+		}
+		if change.CoChangeFrequency > 0.5 {
+			hasHighCoChange = true
+		}
+		if change.IncidentCount > 0 {
+			hasIncidents = true
+		}
+	}
+
+	summary.WriteString("**Phase 1 Findings:**\n")
+
+	if hasIncidents {
+		summary.WriteString("- ⚠️  **Incident history detected** - File(s) have caused production problems before\n")
+		highestRisk = "HIGH (incident history)"
+	}
+
+	if hasHighCoChange {
+		summary.WriteString("- ⚠️  **High co-change frequency** - File(s) frequently change with other files\n")
+		if highestRisk == "" {
+			highestRisk = "MEDIUM (co-change risk)"
+		}
+	}
+
+	if hasHighCoupling {
+		summary.WriteString("- ⚠️  **High structural coupling** - File(s) have many dependencies\n")
+		if highestRisk == "" {
+			highestRisk = "MEDIUM (coupling risk)"
+		}
+	}
+
+	if highestRisk == "" {
+		summary.WriteString("- ✓ No major quantitative risk signals detected\n")
+		highestRisk = "LOW (metrics look clean)"
+	}
+
+	summary.WriteString(fmt.Sprintf("\n**Phase 1 Risk Assessment:** %s\n\n", highestRisk))
+	summary.WriteString("**Your Task:** Investigate WHY Phase 1 flagged these risks. ")
+	summary.WriteString("Look for:\n")
+	summary.WriteString("- What incidents occurred in the past?\n")
+	summary.WriteString("- Why do these files change together?\n")
+	summary.WriteString("- Who owns this code and are they still active?\n")
+	summary.WriteString("- Does the proposed change match past incident patterns?\n")
+
+	return summary.String()
 }
 
 // buildCLQSContext adds data quality context from CLQS scores

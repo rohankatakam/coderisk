@@ -225,82 +225,223 @@ type CLQSInfo struct {
 }
 
 // DisplayManagerView outputs the business-focused Manager View
+// Enhanced per YC_DEMO_GAP_ANALYSIS.md - Business Impact Section
 func DisplayManagerView(data *DemoOutputData) {
-	fmt.Println("═══════════════════════════════════════════════════════════════")
-	fmt.Println("  MANAGER-VIEW: POTENTIAL BUSINESS IMPACT")
-	fmt.Println("═══════════════════════════════════════════════════════════════")
+	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("  📊 BUSINESS IMPACT ASSESSMENT")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
 
-	// Critical user flow detection
-	if strings.Contains(strings.ToLower(data.FilePath), "table") ||
-		strings.Contains(strings.ToLower(data.FilePath), "editor") {
-		fmt.Println("  • 🚨 Critical user flow: Database Table Editing")
+	// === INCIDENT HISTORY WITH COST ===
+	if len(data.Incidents) > 0 {
+		fmt.Printf("  🔥 PRODUCTION INCIDENT HISTORY\n")
+		fmt.Printf("  This file has caused %d production incident(s) in the last 180 days:\n\n", len(data.Incidents))
+
+		// Show top 3-5 incidents with full details
+		for i, inc := range data.Incidents {
+			if i >= 5 {
+				fmt.Printf("    ... and %d more incident(s)\n\n", len(data.Incidents)-5)
+				break
+			}
+
+			// Incident severity indicator
+			severityLabel := "SEV-?"
+			if strings.Contains(strings.ToLower(inc.IssueTitle), "critical") ||
+			   strings.Contains(strings.ToLower(inc.IssueTitle), "production") {
+				severityLabel = "SEV-1"
+			} else if strings.Contains(strings.ToLower(inc.IssueTitle), "urgent") {
+				severityLabel = "SEV-2"
+			}
+
+			fmt.Printf("    %s #%d: %s\n", getSeverityEmoji(severityLabel), inc.IssueNumber, inc.IssueTitle)
+
+			// Impact description
+			if inc.ClosedAt != nil {
+				mttr := inc.ClosedAt.Sub(inc.CreatedAt)
+				fmt.Printf("      └─ MTTR: %.1f hours\n", mttr.Hours())
+
+				// Cost estimate ($300K per hour is industry standard for SaaS downtime)
+				estimatedCost := mttr.Hours() * 300000 / 24 // Daily cost
+				if mttr.Hours() < 1 {
+					fmt.Printf("      └─ Estimated Impact: ~$%.0fK (%.0f min downtime)\n",
+						estimatedCost/1000, mttr.Minutes())
+				} else {
+					fmt.Printf("      └─ Estimated Impact: ~$%.0fK (%.1f hr downtime)\n",
+						estimatedCost/1000, mttr.Hours())
+				}
+			}
+
+			// Date and reporter
+			daysAgo := int(time.Since(inc.CreatedAt).Hours() / 24)
+			fmt.Printf("      └─ Occurred: %s (%d days ago)\n",
+				inc.CreatedAt.Format("2006-01-02"), daysAgo)
+
+			reporterType := "customer"
+			if inc.AuthorRole != "NONE" {
+				reporterType = "team member"
+			}
+			fmt.Printf("      └─ Reported by: %s\n", reporterType)
+			fmt.Println()
+		}
+
+		// Total cost estimate
+		totalMTTR := calculateAvgMTTR(data.Incidents)
+		totalCost := totalMTTR * float64(len(data.Incidents)) * 300000 / 24
+
+		fmt.Printf("  💰 TOTAL HISTORICAL COST: ~$%.0fK\n", totalCost/1000)
+		fmt.Printf("  ⏱️  AVERAGE MTTR: %.1f hours\n\n", totalMTTR)
+	} else {
+		fmt.Println("  ✅ PRODUCTION INCIDENT HISTORY")
+		fmt.Println("  No incidents found in the last 180 days\n")
 	}
 
-	// Historical incidents
-	if len(data.Incidents) > 0 {
-		highConfCount := 0
-		for _, inc := range data.Incidents {
-			if inc.LinkType == "FIXED_BY" {
-				highConfCount++
-			}
+	// === CRITICAL USER FLOW DETECTION ===
+	if strings.Contains(strings.ToLower(data.FilePath), "table") ||
+		strings.Contains(strings.ToLower(data.FilePath), "editor") ||
+		strings.Contains(strings.ToLower(data.FilePath), "auth") ||
+		strings.Contains(strings.ToLower(data.FilePath), "payment") {
+		fmt.Println("  ⚠️  CRITICAL USER FLOW IMPACT")
+
+		flowType := "Unknown"
+		if strings.Contains(strings.ToLower(data.FilePath), "table") ||
+		   strings.Contains(strings.ToLower(data.FilePath), "editor") {
+			flowType = "Database Table Editing (P0 functionality)"
+		} else if strings.Contains(strings.ToLower(data.FilePath), "auth") {
+			flowType = "Authentication (P0 functionality)"
+		} else if strings.Contains(strings.ToLower(data.FilePath), "payment") {
+			flowType = "Payment Processing (P0 revenue-critical)"
 		}
-		fmt.Printf("  • 🔥 Historical incidents: %d confirmed bugs", highConfCount)
-		if len(data.Incidents) > highConfCount {
-			fmt.Printf(" (%d possible)", len(data.Incidents)-highConfCount)
-		}
+
+		fmt.Printf("  Affected Flow: %s\n", flowType)
+		fmt.Println("  User Impact: All customers affected if this breaks")
 		fmt.Println()
 	}
 
-	// Code ownership status
+	// === CODE OWNERSHIP RISK ===
 	if len(data.Ownership) > 0 {
-		topOwner := data.Ownership[0]
-		if !topOwner.IsActive {
-			fmt.Printf("  • ⏳ Code ownership: Stale (original owner inactive %d days)\n", topOwner.DaysSinceCommit)
-		} else if topOwner.DaysSinceCommit > 30 {
-			fmt.Printf("  • ⏳ Code ownership: Aging (last commit %d days ago)\n", topOwner.DaysSinceCommit)
-		}
-	}
+		fmt.Println("  👤 CODE OWNERSHIP RISK")
 
-	// Bus factor (if only 1-2 active developers)
-	if len(data.Ownership) > 0 {
+		topOwner := data.Ownership[0]
+		fmt.Printf("  Primary Author: %s (%s)\n", topOwner.Developer, topOwner.Email)
+		fmt.Printf("  Last Commit: %d days ago\n", topOwner.DaysSinceCommit)
+
+		if !topOwner.IsActive {
+			fmt.Printf("  Status: ⚠️  STALE (no activity in last 30+ days)\n")
+			fmt.Println("  Risk: Knowledge loss, lack of familiarity with recent changes")
+		} else if topOwner.DaysSinceCommit > 30 {
+			fmt.Printf("  Status: ⚠️  AGING (last modified %d days ago)\n", topOwner.DaysSinceCommit)
+		} else {
+			fmt.Println("  Status: ✅ ACTIVE")
+		}
+
+		// Bus factor calculation
 		activeDevs := 0
 		for _, owner := range data.Ownership {
 			if owner.IsActive {
 				activeDevs++
 			}
 		}
-		if activeDevs <= 2 {
-			fmt.Printf("  • 👥 Bus factor: %d developer%s (HIGH concentration risk)\n",
-				activeDevs, pluralize(activeDevs))
+
+		fmt.Printf("\n  Bus Factor: %d developer%s familiar with this code\n",
+			activeDevs, pluralize(activeDevs))
+
+		if activeDevs <= 1 {
+			fmt.Println("  ⚠️  CRITICAL: Single point of failure (only 1 active developer)")
+		} else if activeDevs <= 2 {
+			fmt.Println("  ⚠️  HIGH: Low redundancy (only 2 active developers)")
+		}
+		fmt.Println()
+	}
+
+	// === CO-CHANGE RISK ===
+	if len(data.CoChange) > 0 {
+		fmt.Println("  🔗 CO-CHANGE PATTERN RISK")
+		fmt.Printf("  This file has %d co-change partner(s) - files that usually change together:\n\n", len(data.CoChange))
+
+		for i, partner := range data.CoChange {
+			if i >= 3 {
+				fmt.Printf("    ... and %d more co-change partner(s)\n", len(data.CoChange)-3)
+				break
+			}
+
+			fmt.Printf("    • %s\n", partner.PartnerFile)
+			// Calculate total commits from frequency and co-change count
+			// frequency = coChangeCount / totalCommits, so totalCommits = coChangeCount / frequency
+			totalCommits := int(float64(partner.CoChangeCount) / partner.Frequency)
+			if partner.Frequency > 0 {
+				fmt.Printf("      └─ Co-change Rate: %.0f%% (%d/%d commits)\n",
+					partner.Frequency*100,
+					partner.CoChangeCount,
+					totalCommits)
+			} else {
+				fmt.Printf("      └─ Co-change Rate: %.0f%% (%d commits)\n",
+					partner.Frequency*100,
+					partner.CoChangeCount)
+			}
+
+			if partner.Frequency > 0.7 {
+				fmt.Println("      └─ ⚠️  VERY HIGH - These files are tightly coupled")
+			} else if partner.Frequency > 0.5 {
+				fmt.Println("      └─ ⚠️  HIGH - Coordination failure risk")
+			}
+
+			// TODO: Check if partner file is in current diff
+			fmt.Println("      └─ ⚠️  NOT updated in current changes (potential incomplete change)")
+			fmt.Println()
 		}
 	}
 
-	fmt.Println()
-	fmt.Println("  📊 RISK ASSESSMENT:")
-	fmt.Printf("    Risk Level: %s\n", colorizeRiskLevel(string(data.Assessment.RiskLevel)))
+	// === FINAL RISK ASSESSMENT ===
+	fmt.Println("  🎯 FINAL RISK ASSESSMENT")
+	fmt.Printf("  Risk Level: %s\n", colorizeRiskLevel(string(data.Assessment.RiskLevel)))
 	if data.CLQSScore != nil {
-		fmt.Printf("    Confidence: %.0f%% (based on CLQS Score: %d - %s)\n",
+		fmt.Printf("  Confidence: %.0f%% (based on CLQS Score: %d - %s)\n",
 			data.Assessment.Confidence*100,
 			data.CLQSScore.Score,
 			data.CLQSScore.Rank)
 	} else {
-		fmt.Printf("    Confidence: %.0f%%\n", data.Assessment.Confidence*100)
-	}
-
-	// Impact estimation
-	if len(data.Incidents) > 0 {
-		fmt.Println()
-		fmt.Println("    If this breaks:")
-		avgMTTR := calculateAvgMTTR(data.Incidents)
-		if avgMTTR > 0 {
-			fmt.Printf("      • Estimated MTTR: %.1f hours (avg of past incidents)\n", avgMTTR)
-		}
-		fmt.Println("      • User impact: P0 flow (critical functionality)")
+		fmt.Printf("  Confidence: %.0f%%\n", data.Assessment.Confidence*100)
 	}
 
 	fmt.Println()
-	fmt.Println("    Recommendation: Require senior engineer review")
-	fmt.Println("═══════════════════════════════════════════════════════════════")
+
+	// === ESTIMATED COST IF THIS BREAKS ===
+	if len(data.Incidents) > 0 {
+		avgMTTR := calculateAvgMTTR(data.Incidents)
+		estimatedCost := avgMTTR * 300000 / 24 // Daily cost based on $300K/day industry standard
+
+		fmt.Println("  💰 ESTIMATED COST IF THIS BREAKS:")
+		if avgMTTR > 0 {
+			fmt.Printf("  MTTR Estimate: %.1f hours (based on past incident average)\n", avgMTTR)
+		}
+		fmt.Printf("  Cost Estimate: ~$%.0fK per incident\n", estimatedCost/1000)
+		fmt.Println("  Time Saved: ~%.0f hours if caught pre-commit vs. firefighting\n", avgMTTR)
+	} else {
+		fmt.Println("  💰 ESTIMATED COST IF THIS BREAKS:")
+		fmt.Println("  No past incident data - unable to estimate MTTR")
+		fmt.Println("  Default assumption: ~$300K/day downtime cost (industry standard)\n")
+	}
+
+	fmt.Println("  📋 RECOMMENDATION:")
+	riskLevel := string(data.Assessment.RiskLevel)
+	if riskLevel == "CRITICAL" || riskLevel == "HIGH" {
+		fmt.Println("  ⚠️  REQUIRE senior engineer review before merge")
+		if len(data.Ownership) > 0 && len(data.Ownership) > 1 {
+			fmt.Printf("  ⚠️  REQUIRE review from original author: %s\n", data.Ownership[0].Developer)
+		}
+		if len(data.Incidents) > 0 {
+			fmt.Println("  ⚠️  REQUIRE regression tests for past incident scenarios")
+		}
+	} else if riskLevel == "MEDIUM" {
+		fmt.Println("  ✓ Standard peer review recommended")
+		if len(data.Ownership) > 0 {
+			fmt.Printf("  ✓ Consider pinging %s for context\n", data.Ownership[0].Developer)
+		}
+	} else {
+		fmt.Println("  ✅ Standard review process is sufficient")
+	}
+
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 }
 
 // DisplayDeveloperView outputs the actionable Developer View
@@ -653,4 +794,17 @@ func pluralize(count int) string {
 		return ""
 	}
 	return "s"
+}
+
+func getSeverityEmoji(severity string) string {
+	switch severity {
+	case "SEV-1", "CRITICAL":
+		return "🔴"
+	case "SEV-2", "HIGH":
+		return "🟠"
+	case "SEV-3", "MEDIUM":
+		return "🟡"
+	default:
+		return "⚪"
+	}
 }

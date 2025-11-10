@@ -234,9 +234,13 @@ func ptrInt32(i int) *int32 {
 }
 
 // generateContentWithRetry wraps GenerateContent with exponential backoff retry logic for rate limits
+// Implements enhanced retry strategy per YC_DEMO_GAP_ANALYSIS.md Bug 3.1:
+// - Increased retries: 3 → 5
+// - Longer backoff: (2,4,8s) → (5,10,20,40,80s)
+// - Better 429-specific handling
 func (c *GeminiClient) generateContentWithRetry(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
-	maxRetries := 3
-	baseDelay := 2 * time.Second
+	maxRetries := 5  // Increased from 3 to 5 for better rate limit handling
+	baseDelay := 5 * time.Second  // Increased from 2s to 5s for more aggressive backoff
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		// Make the API call
@@ -248,12 +252,13 @@ func (c *GeminiClient) generateContentWithRetry(ctx context.Context, model strin
 			is429 := contains(errMsg, "429") || contains(errMsg, "Resource exhausted") || contains(errMsg, "RESOURCE_EXHAUSTED")
 
 			if is429 && attempt < maxRetries {
-				// Calculate exponential backoff: 2s, 4s, 8s
+				// Calculate exponential backoff: 5s, 10s, 20s, 40s, 80s
 				delay := baseDelay * (1 << uint(attempt))
-				c.logger.Warn("rate limit encountered, retrying",
+				c.logger.Warn("rate limit encountered, retrying with backoff",
 					"attempt", attempt+1,
 					"max_retries", maxRetries,
 					"delay_seconds", delay.Seconds(),
+					"error", errMsg,
 				)
 
 				// Wait before retrying
@@ -267,9 +272,14 @@ func (c *GeminiClient) generateContentWithRetry(ctx context.Context, model strin
 
 			// Non-429 error or exhausted retries
 			if is429 {
-				return nil, fmt.Errorf("rate limited after %d retries (waited %ds total): %w",
+				totalWaitTime := int((baseDelay * ((1 << uint(maxRetries)) - 1)).Seconds())
+				return nil, fmt.Errorf("RATE_LIMIT_EXHAUSTED: Resource exhausted after %d retries (waited %ds total). "+
+					"This indicates Gemini API quota limits. Consider: "+
+					"1) Using a different API key, "+
+					"2) Waiting a few minutes, or "+
+					"3) Using --no-ai flag for Phase 1 only: %w",
 					maxRetries,
-					int((baseDelay*(1<<uint(maxRetries))-baseDelay).Seconds()),
+					totalWaitTime,
 					err)
 			}
 			return nil, err

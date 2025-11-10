@@ -46,6 +46,7 @@ func init() {
 	checkCmd.Flags().Bool("explain", false, "Show full investigation trace")
 	checkCmd.Flags().Bool("ai-mode", false, "Output machine-readable JSON for AI assistants")
 	checkCmd.Flags().Bool("pre-commit", false, "Run in pre-commit hook mode (checks staged files)")
+	checkCmd.Flags().Bool("no-ai", false, "Skip Phase 2 LLM investigation (Phase 1 quantitative metrics only)")
 
 	// Mutually exclusive flags
 	checkCmd.MarkFlagsMutuallyExclusive("quiet", "explain", "ai-mode")
@@ -100,8 +101,9 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get pre-commit flag
+	// Get pre-commit and no-ai flags
 	preCommit, _ := cmd.Flags().GetBool("pre-commit")
+	noAI, _ := cmd.Flags().GetBool("no-ai")
 
 	// Get files to check (from args, staged files, or git status)
 	var files []string
@@ -347,6 +349,16 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		if adaptiveResult.ShouldEscalate {
 			hasHighRisk = true
 
+			// Skip Phase 2 if --no-ai flag is set
+			if noAI {
+				if !preCommit {
+					fmt.Printf("\n⚠️  HIGH RISK detected (Phase 1 metrics only, skipping Phase 2 investigation)\n")
+					fmt.Printf("    Risk Level: %s\n", adaptiveResult.OverallRisk)
+					fmt.Printf("    💡 Remove --no-ai flag to enable detailed LLM investigation\n")
+				}
+				continue
+			}
+
 			// Use Gemini API key from cloud or environment
 			// 12-factor: Factor 3 - Configuration from environment
 			if geminiAPIKey == "" {
@@ -356,6 +368,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 					fmt.Println("    Enable Phase 2 LLM investigation by either:")
 					fmt.Println("      1. Running 'crisk login' to use cloud credentials")
 					fmt.Println("      2. Setting GEMINI_API_KEY environment variable")
+					fmt.Println("      3. Using --no-ai flag to skip Phase 2")
 				}
 				continue
 			}
@@ -455,8 +468,24 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			investigationDuration := time.Since(investigationStart)
 
 			if err != nil {
-				fmt.Printf("⚠️  Investigation failed: %v\n", err)
-				slog.Error("investigation failed", "error", err, "duration", investigationDuration)
+				// Graceful degradation: If Phase 2 fails, fall back to Phase 1 results
+				// Reference: YC_DEMO_GAP_ANALYSIS.md Bug 3.1 - Graceful degradation
+				errMsg := err.Error()
+				isRateLimited := strings.Contains(errMsg, "RATE_LIMIT_EXHAUSTED") ||
+								strings.Contains(errMsg, "429") ||
+								strings.Contains(errMsg, "Resource exhausted")
+
+				if isRateLimited {
+					fmt.Printf("\n⚠️  Phase 2 investigation rate limited. Showing Phase 1 results:\n")
+					fmt.Printf("    Risk Level: %s (based on quantitative metrics)\n", adaptiveResult.OverallRisk)
+					fmt.Printf("    💡 Tip: Wait a few minutes and try again, or use --no-ai flag\n")
+					slog.Warn("phase 2 rate limited, using phase 1 results",
+						"duration", investigationDuration,
+						"phase1_risk", adaptiveResult.OverallRisk)
+				} else {
+					fmt.Printf("⚠️  Investigation failed: %v\n", err)
+					slog.Error("investigation failed", "error", err, "duration", investigationDuration)
+				}
 				continue
 			}
 
