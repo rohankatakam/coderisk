@@ -33,7 +33,7 @@ func NewGeminiInvestigator(
 		graphClient:     graphClient,
 		postgresAdapter: postgresAdapter,
 		hybridClient:    hybridClient,
-		maxHops:         5, // Safety limit
+		maxHops:         30, // High safety limit - agent should call finish_investigation when done (12 Factor Agents principle)
 	}
 }
 

@@ -431,7 +431,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 			// STEP 4: Create LLM client and investigator
 			slog.Info("STEP 4: Creating LLM investigator")
-			geminiClient, err := llm.NewGeminiClient(ctx, geminiAPIKey, "gemini-2.0-flash-exp")
+			geminiClient, err := llm.NewGeminiClient(ctx, geminiAPIKey, "gemini-2.0-flash")
 			if err != nil {
 				fmt.Printf("❌ LLM client error: %v\n", err)
 				slog.Error("failed to create LLM client", "error", err)
