@@ -314,15 +314,12 @@ func (inv *GeminiInvestigator) getGeminiTools() []*genai.Tool {
 					Parameters: &genai.Schema{
 						Type: genai.TypeObject,
 						Properties: map[string]*genai.Schema{
-							"file_paths": {
-								Type:        genai.TypeArray,
-								Description: "Array of file paths to analyze",
-								Items: &genai.Schema{
-									Type: genai.TypeString,
-								},
+							"file_path": {
+								Type:        genai.TypeString,
+								Description: "File path to analyze blast radius for",
 							},
 						},
-						Required: []string{"file_paths"},
+						Required: []string{"file_path"},
 					},
 				},
 				{
