@@ -333,6 +333,12 @@ func (hc *HybridClient) GetOwnershipHistoryForFiles(ctx context.Context, filePat
 // GetCoChangePartnersWithContext retrieves co-change files with commit message context
 func (hc *HybridClient) GetCoChangePartnersWithContext(ctx context.Context, filePaths []string, threshold float64) ([]CoChangePartnerContext, error) {
 	// Step 1: Query Neo4j for co-change patterns
+	// Strategy: Use minimum absolute co-change count (scales with codebase size) OR frequency threshold (for low-commit files)
+	// This ensures we get meaningful results for both:
+	// - Seed stage codebases (few commits, need frequency-based)
+	// - Series C codebases (many commits, need count-based)
+	minCochangeCount := 3 // Minimum 3 co-changes to be considered (filters noise)
+
 	query := `
 		MATCH (f1:File)<-[:MODIFIED]-(c:Commit)
 		WHERE f1.path IN $paths
@@ -343,16 +349,17 @@ func (hc *HybridClient) GetCoChangePartnersWithContext(ctx context.Context, file
 		     COLLECT(DISTINCT c.sha)[0..3] as sample_commits,
 		     COUNT(DISTINCT c) as cochange_count,
 		     total_commits
-		WHERE (cochange_count * 1.0 / total_commits) >= $threshold
+		WHERE cochange_count >= $min_count OR (cochange_count * 1.0 / total_commits) >= $threshold
 		RETURN partner_file, sample_commits, cochange_count,
 		       (cochange_count * 1.0 / total_commits) as frequency
-		ORDER BY frequency DESC
+		ORDER BY cochange_count DESC, frequency DESC
 		LIMIT 10
 	`
 
 	results, err := hc.neo4jClient.ExecuteQuery(ctx, query, map[string]any{
 		"paths":     filePaths,
 		"threshold": threshold,
+		"min_count": minCochangeCount,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("neo4j query failed: %w", err)
