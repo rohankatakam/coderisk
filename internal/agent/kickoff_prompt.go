@@ -133,6 +133,21 @@ Investigation principles:
 4. Assess blast radius (how many files depend on this change?)
 5. Use commit patches to understand if current changes match past incident patterns
 
+**CRITICAL OUTPUT FORMATTING RULES:**
+
+When reporting incident history, you MUST list specific incidents with full details:
+- Show top 3-5 most relevant incidents (highest confidence scores first)
+- For each incident include: issue number, title, and date
+- Format: "• #123: [BUG] Description here (2025-01-15, confidence: 85%)"
+- If NO incidents found, explicitly state: "No production incidents found in the last 180 days"
+- NEVER use vague summaries like "multiple incidents" - always enumerate them
+
+Example incident reporting:
+"Incident History:
+• #87: [BUG] Signing up with apple gives localhost link (2025-08-16, confidence: 83%)
+• #94: [BUG] Not showing all options for edit file (2025-08-17, confidence: 83%)
+• #122: [BUG] Dashboard does not show claude code output (2025-08-15, confidence: 80%)"
+
 Risk escalation triggers:
 - HIGH: Incident history + large change + stale ownership
 - CRITICAL: Multiple incidents + incomplete co-change + high blast radius`
@@ -268,6 +283,23 @@ func (b *KickoffPromptBuilder) buildInvestigationGuidance() string {
 	}
 
 	guidance.WriteString("\nStart your investigation. Call tools in a logical order based on risk signals.\n\n")
+
+	guidance.WriteString("**OUTPUT FORMATTING REQUIREMENTS:**\n\n")
+	guidance.WriteString("Structure your final assessment with these sections:\n\n")
+	guidance.WriteString("1. **Incident History** - List top 3-5 specific incidents with details:\n")
+	guidance.WriteString("   • #123: [BUG] Title here (2025-01-15, confidence: 85%)\n")
+	guidance.WriteString("   • State \"No incidents found\" if none exist\n\n")
+	guidance.WriteString("2. **Ownership Status** - List current owners with activity:\n")
+	guidance.WriteString("   • user@email.com: 15 commits (last activity: 2 days ago) ✓ Active\n")
+	guidance.WriteString("   • old@email.com: 3 commits (last activity: 180 days ago) ⚠️ Stale\n\n")
+	guidance.WriteString("3. **Co-change Partners** - List files that change together:\n")
+	guidance.WriteString("   • file/path.py (75% co-change frequency)\n")
+	guidance.WriteString("   • State \"No co-change partners\" if none\n\n")
+	guidance.WriteString("4. **Blast Radius** - List downstream dependencies:\n")
+	guidance.WriteString("   • 5 files depend on this change\n")
+	guidance.WriteString("   • State \"No downstream dependencies\" if none\n\n")
+	guidance.WriteString("5. **Risk Summary** - Synthesize all findings into clear risk assessment\n\n")
+
 	guidance.WriteString("Note: This assessment focuses on incident risk. Run additional style, security, and linting checks as part of your normal development workflow.\n\n")
 	guidance.WriteString("**CRITICAL:** When you have gathered sufficient evidence (typically 2-5 tool calls), you MUST call `finish_investigation` with your final risk assessment. Do NOT respond with text - use the `finish_investigation` tool to complete your investigation.\n")
 
