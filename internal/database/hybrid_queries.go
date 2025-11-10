@@ -30,6 +30,45 @@ func NewHybridClient(neo4j GraphQueryExecutor, postgres *StagingClient) *HybridC
 	}
 }
 
+// getAdaptiveActivityThreshold calculates activity threshold based on DORA metrics
+// Returns number of days for "active" developer classification
+func (hc *HybridClient) getAdaptiveActivityThreshold(ctx context.Context) int {
+	// Query latest DORA metrics
+	query := `
+		SELECT median_lead_time_hours, median_pr_lifespan_hours, sample_size
+		FROM github_dora_metrics
+		ORDER BY computed_at DESC
+		LIMIT 1
+	`
+
+	var leadTime, prLifespan float64
+	var sampleSize int
+
+	err := hc.postgresClient.QueryRow(ctx, query).Scan(&leadTime, &prLifespan, &sampleSize)
+	if err != nil || sampleSize == 0 {
+		// No DORA metrics available or insufficient data - use conservative default
+		fmt.Printf("INFO: Using default 90-day activity threshold (no DORA metrics, err=%v, sample_size=%d)\n", err, sampleSize)
+		return 90
+	}
+
+	// Adaptive threshold based on development velocity
+	// Lead time is a proxy for how fast the team moves
+	var threshold int
+	switch {
+	case leadTime < 24: // Less than 1 day - very high velocity (AI vibe coding)
+		threshold = 30 // Active if committed within 30 days
+	case leadTime < 72: // Less than 3 days - high velocity
+		threshold = 45
+	case leadTime < 168: // Less than 1 week - medium velocity
+		threshold = 60
+	default: // Low velocity (traditional development)
+		threshold = 90
+	}
+
+	fmt.Printf("INFO: Adaptive activity threshold: %d days (based on DORA lead_time=%.1f hours, sample_size=%d)\n", threshold, leadTime, sampleSize)
+	return threshold
+}
+
 // IncidentWithContext combines graph and PostgreSQL data for incidents
 type IncidentWithContext struct {
 	// Graph data
@@ -253,19 +292,27 @@ func (hc *HybridClient) getIssueDetails(ctx context.Context, issueNumbers []int)
 
 // GetOwnershipHistoryForFiles retrieves developer ownership with activity status
 func (hc *HybridClient) GetOwnershipHistoryForFiles(ctx context.Context, filePaths []string) ([]OwnershipHistory, error) {
-	// Step 1: Query Neo4j for commit ownership
+	// Step 1: Get adaptive activity threshold based on DORA metrics
+	activityThreshold := hc.getAdaptiveActivityThreshold(ctx)
+
+	// Step 2: Query Neo4j for commit ownership with minimum commit filter
+	// Minimum 2 commits to avoid "drive-by" contributions
+	minCommitCount := 2
+
 	query := `
 		MATCH (d:Developer)-[:AUTHORED]->(c:Commit)-[:MODIFIED]->(f:File)
 		WHERE f.path IN $paths
 		WITH d.email as email, d.name as developer, COUNT(c) as commit_count,
 		     MAX(c.committed_at) as last_commit_date
+		WHERE commit_count >= $min_commits
 		ORDER BY commit_count DESC
 		LIMIT 10
 		RETURN email, developer, commit_count, last_commit_date
 	`
 
 	results, err := hc.neo4jClient.ExecuteQuery(ctx, query, map[string]any{
-		"paths": filePaths,
+		"paths":       filePaths,
+		"min_commits": minCommitCount,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("neo4j query failed: %w", err)
@@ -310,7 +357,11 @@ func (hc *HybridClient) GetOwnershipHistoryForFiles(ctx context.Context, filePat
 		}
 
 		daysSince := int(now.Sub(lastCommitDate).Hours() / 24)
-		isActive := daysSince < 90 // Active if committed within 90 days
+
+		// Use adaptive threshold based on codebase velocity (DORA metrics)
+		// High velocity codebases (AI coding) use shorter thresholds (30 days)
+		// Low velocity codebases use longer thresholds (90 days)
+		isActive := daysSince < activityThreshold
 
 		// TODO: Query PostgreSQL for author_association from recent PRs to determine role
 		// For now, infer from email domain or set as "unknown"
