@@ -268,7 +268,8 @@ func (b *KickoffPromptBuilder) buildInvestigationGuidance() string {
 	}
 
 	guidance.WriteString("\nStart your investigation. Call tools in a logical order based on risk signals.\n\n")
-	guidance.WriteString("Note: This assessment focuses on incident risk. Run additional style, security, and linting checks as part of your normal development workflow.\n")
+	guidance.WriteString("Note: This assessment focuses on incident risk. Run additional style, security, and linting checks as part of your normal development workflow.\n\n")
+	guidance.WriteString("**CRITICAL:** When you have gathered sufficient evidence (typically 2-5 tool calls), you MUST call `finish_investigation` with your final risk assessment. Do NOT respond with text - use the `finish_investigation` tool to complete your investigation.\n")
 
 	return guidance.String()
 }
