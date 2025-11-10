@@ -334,12 +334,11 @@ func (hc *HybridClient) GetCoChangePartnersWithContext(ctx context.Context, file
 		     COLLECT(DISTINCT c.sha)[0..3] as sample_commits,
 		     COUNT(DISTINCT c) as cochange_count,
 		     total_commits
-		WITH partner_file, sample_commits, cochange_count,
-		     (cochange_count * 1.0 / total_commits) as frequency
-		WHERE frequency >= $threshold
+		WHERE (cochange_count * 1.0 / total_commits) >= $threshold
+		RETURN partner_file, sample_commits, cochange_count,
+		       (cochange_count * 1.0 / total_commits) as frequency
 		ORDER BY frequency DESC
 		LIMIT 10
-		RETURN partner_file, sample_commits, cochange_count, frequency
 	`
 
 	results, err := hc.neo4jClient.ExecuteQuery(ctx, query, map[string]any{

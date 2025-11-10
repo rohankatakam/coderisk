@@ -462,6 +462,62 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				"hops", len(assessment.Investigation.Hops),
 				"total_tokens", assessment.Investigation.TotalTokens)
 
+			// STEP 6: Check for directive decision points (12-factor agent: Factor #6 and #7)
+			// This implements human-in-the-loop workflow for uncertain or high-risk cases
+			slog.Info("STEP 6: Checking for directive decision points")
+
+			// Check if any tools failed (indicates missing data)
+			missingData := make(map[string]bool)
+			// TODO: Track tool failures during investigation to detect missing co-change data
+			// For now, we check if confidence is low which might indicate data issues
+
+			directiveDecision := agent.CheckForDirectiveNeeded(assessment, file, missingData)
+
+			if directiveDecision.ShouldPause {
+				slog.Info("directive decision point identified",
+					"type", directiveDecision.Directive.Action.Type,
+					"reason", directiveDecision.Directive.Reasoning)
+
+				// In non-interactive modes (preCommit, quiet), log but don't pause
+				if !preCommit && !quiet {
+					// Display directive to user
+					agent.DisplayDirective(directiveDecision.Directive, directiveDecision.DecisionNum)
+
+					// Prompt for user choice
+					shortcuts := make([]string, len(directiveDecision.Directive.UserOptions))
+					for i, opt := range directiveDecision.Directive.UserOptions {
+						shortcuts[i] = opt.Shortcut
+					}
+
+					var userChoice string
+					for {
+						userChoice = agent.PromptForChoice("a", shortcuts)
+						shouldContinue, shouldAbort := agent.HandleUserChoice(userChoice, directiveDecision.Directive)
+
+						if shouldAbort {
+							fmt.Println("\n❌ Investigation aborted by user")
+							return nil
+						}
+
+						if shouldContinue {
+							break
+						}
+
+						// Invalid choice - loop again
+						fmt.Println("Invalid choice. Please try again.")
+					}
+
+					slog.Info("user decision recorded", "choice", userChoice)
+
+					// If user chose to skip or abort high risk, warn them
+					if (directiveDecision.Directive.Action.Type == agent.DirectiveTypeEscalate) && userChoice != "a" {
+						fmt.Println("\n⚠️  WARNING: Proceeding with HIGH/CRITICAL risk change without addressing concerns")
+					}
+				}
+			} else {
+				slog.Info("no directive needed - investigation complete")
+			}
+
 			slog.Info("=== PHASE 2 PIPELINE COMPLETE ===",
 				"file", file,
 				"risk", assessment.RiskLevel,
