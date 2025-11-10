@@ -118,10 +118,10 @@ You ARE responsible for:
 - Pattern matching: Is this similar to changes that caused past incidents?
 
 Your tools:
-- query_ownership: Find if code owner is still active (stale ownership = incident risk)
-- query_cochange_partners: Find files that usually change together (incomplete changes = incident risk)
-- query_incident_history: Find production incidents that originated from this code
-- query_blast_radius: Find downstream files that depend on changed code
+- get_incidents_with_context: Get full incident history with issue titles, bodies, confidence scores, and author roles
+- get_ownership_timeline: Get developer ownership history with activity status
+- get_cochange_with_explanations: Get files that frequently change together WITH sample commit messages explaining why
+- get_blast_radius_analysis: Get downstream files that depend on changed code with impact analysis
 - get_commit_patch: Read code changes from past incidents to compare patterns
 - query_recent_commits: See recent modification patterns and ownership trends
 - finish_investigation: Return final risk assessment with incident-focused reasoning

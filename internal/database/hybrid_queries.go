@@ -82,7 +82,7 @@ func (hc *HybridClient) GetIncidentHistoryForFiles(ctx context.Context, filePath
 		MATCH (issue:Issue)-[rel]->(pr:PR)<-[:IN_PR]-(c:Commit)-[:MODIFIED]->(f:File)
 		WHERE f.path IN $paths
 		  AND (type(rel) = 'FIXED_BY' OR type(rel) = 'ASSOCIATED_WITH')
-		  AND issue.created_at > datetime() - duration({days: $days_back})
+		  AND issue.created_at * 1000 > timestamp() - ($days_back * 86400 * 1000)
 		RETURN
 		  issue.number as issue_number,
 		  pr.number as pr_number,

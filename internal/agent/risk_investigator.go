@@ -188,27 +188,6 @@ func (inv *RiskInvestigator) getToolDefinitions() []openai.ChatCompletionToolUni
 			},
 		}),
 		openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
-			Name:        "query_incident_history",
-			Description: openai.String("Find production incidents that originated from this code. Returns past bugs and issues."),
-			Parameters: openai.FunctionParameters{
-				"type": "object",
-				"properties": map[string]any{
-					"file_paths": map[string]any{
-						"type":        "array",
-						"description": "Array of file paths to query",
-						"items": map[string]any{
-							"type": "string",
-						},
-					},
-					"days_back": map[string]any{
-						"type":        "number",
-						"description": "How many days back to search. Default: 180",
-					},
-				},
-				"required": []string{"file_paths"},
-			},
-		}),
-		openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
 			Name:        "query_blast_radius",
 			Description: openai.String("Find downstream files that depend on the target file. Shows potential impact of changes."),
 			Parameters: openai.FunctionParameters{
@@ -376,8 +355,6 @@ func (inv *RiskInvestigator) executeTool(ctx context.Context, toolName string, a
 		return inv.queryOwnership(ctx, args)
 	case "query_cochange_partners":
 		return inv.queryCoChangePartners(ctx, args)
-	case "query_incident_history":
-		return inv.queryIncidentHistory(ctx, args)
 	case "query_blast_radius":
 		return inv.queryBlastRadius(ctx, args)
 	case "query_recent_commits":
