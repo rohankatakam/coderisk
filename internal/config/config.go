@@ -81,8 +81,18 @@ type CacheConfig struct {
 }
 
 type APIConfig struct {
-	OpenAIKey    string `yaml:"openai_key"`
-	OpenAIModel  string `yaml:"openai_model"`
+	// Provider selection
+	Provider string `yaml:"provider"` // "openai" or "gemini" (default: gemini)
+
+	// OpenAI configuration
+	OpenAIKey   string `yaml:"openai_key"`
+	OpenAIModel string `yaml:"openai_model"`
+
+	// Gemini configuration
+	GeminiKey   string `yaml:"gemini_key"`
+	GeminiModel string `yaml:"gemini_model"`
+
+	// General settings
 	UseKeychain  bool   `yaml:"use_keychain"`  // Prefer keychain over config file
 	CustomLLMURL string `yaml:"custom_llm_url"`
 	CustomLLMKey string `yaml:"custom_llm_key"`
@@ -275,6 +285,12 @@ func applyEnvOverrides(cfg *Config) {
 	// API configuration - UPDATED FOR KEYCHAIN SUPPORT
 	// Precedence: 1. Env var (highest) 2. Keychain 3. Config file (lowest)
 
+	// Provider selection
+	if provider := os.Getenv("LLM_PROVIDER"); provider != "" {
+		cfg.API.Provider = provider
+	}
+
+	// OpenAI configuration
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 		// Environment variable has highest precedence (for CI/CD)
 		cfg.API.OpenAIKey = key
@@ -292,6 +308,16 @@ func applyEnvOverrides(cfg *Config) {
 	if model := os.Getenv("OPENAI_MODEL"); model != "" {
 		cfg.API.OpenAIModel = model
 	}
+
+	// Gemini configuration
+	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
+		cfg.API.GeminiKey = key
+	}
+	if model := os.Getenv("GEMINI_MODEL"); model != "" {
+		cfg.API.GeminiModel = model
+	}
+
+	// Custom LLM configuration
 	if url := os.Getenv("CUSTOM_LLM_URL"); url != "" {
 		cfg.API.CustomLLMURL = url
 	}

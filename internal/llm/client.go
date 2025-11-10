@@ -10,32 +10,34 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// Provider represents the LLM provider (OpenAI only for MVP)
+// Provider represents the LLM provider
 type Provider string
 
 const (
 	ProviderOpenAI Provider = "openai"
+	ProviderGemini Provider = "gemini"
 	ProviderNone   Provider = "none" // Phase 2 disabled
 )
 
-// Client provides interface for OpenAI LLM
+// Client provides multi-provider LLM interface
 // Reference: agentic_design.md §2.2 - LLM investigation flow
 // Reference: spec.md §1.3 - BYOK (Bring Your Own Key) model
-// MVP: OpenAI only (matches coderisk-frontend implementation)
+// Supports OpenAI and Gemini providers
 type Client struct {
 	provider     Provider
 	openaiClient *openai.Client
+	geminiClient *GeminiClient
 	logger       *slog.Logger
 	enabled      bool
-	fastModel    string // GPT-4o-mini for Agents 1-6
-	deepModel    string // GPT-4o for Agents 7-8
+	fastModel    string // GPT-4o-mini for Agents 1-6 | gemini-2.0-flash
+	deepModel    string // GPT-4o for Agents 7-8 | gemini-1.5-pro
 }
 
-// NewClient creates an OpenAI LLM client
+// NewClient creates a multi-provider LLM client (OpenAI or Gemini)
 // Security: NEVER hardcode API keys (DEVELOPMENT_WORKFLOW.md §3.3)
 // Reference: local_deployment.md - LLM configuration
 // Now uses config system with OS keychain support
-// MVP: OpenAI only (matches coderisk-frontend implementation)
+// Supports OpenAI and Gemini providers
 func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
 	logger := slog.Default().With("component", "llm")
 
@@ -52,6 +54,72 @@ func NewClient(ctx context.Context, cfg *config.Config) (*Client, error) {
 		}, nil
 	}
 
+	// Determine provider (priority: env var > config > default to gemini)
+	provider := os.Getenv("LLM_PROVIDER")
+	if provider == "" {
+		provider = cfg.API.Provider
+	}
+	if provider == "" {
+		provider = "gemini" // Default to Gemini
+	}
+
+	switch Provider(provider) {
+	case ProviderGemini:
+		return newGeminiClient(ctx, cfg, logger)
+	case ProviderOpenAI:
+		return newOpenAIClient(ctx, cfg, logger)
+	default:
+		logger.Warn("unknown provider, falling back to gemini", "provider", provider)
+		return newGeminiClient(ctx, cfg, logger)
+	}
+}
+
+// newGeminiClient initializes a Gemini provider client
+func newGeminiClient(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Client, error) {
+	// Get Gemini API key from config or environment
+	geminiKey := cfg.API.GeminiKey
+	if geminiKey == "" {
+		geminiKey = os.Getenv("GEMINI_API_KEY")
+	}
+
+	if geminiKey == "" {
+		logger.Warn("phase 2 enabled but no Gemini API key configured")
+		logger.Info("set GEMINI_API_KEY environment variable or run 'crisk configure'")
+		return &Client{
+			provider:  ProviderNone,
+			logger:    logger,
+			enabled:   false,
+			fastModel: "gemini-2.0-flash",
+			deepModel: "gemini-1.5-pro",
+		}, nil
+	}
+
+	// Determine model (from config or use defaults)
+	model := cfg.API.GeminiModel
+	if model == "" {
+		model = "gemini-2.0-flash" // Default to production flash for speed and higher rate limits
+	}
+
+	geminiClient, err := NewGeminiClient(ctx, geminiKey, model)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gemini client: %w", err)
+	}
+
+	keySource := getGeminiKeySource(cfg)
+	logger.Info("gemini client initialized", "key_source", keySource, "model", model)
+
+	return &Client{
+		provider:     ProviderGemini,
+		geminiClient: geminiClient,
+		logger:       logger,
+		enabled:      true,
+		fastModel:    model,
+		deepModel:    "gemini-1.5-pro", // Use Pro for deep analysis
+	}, nil
+}
+
+// newOpenAIClient initializes an OpenAI provider client
+func newOpenAIClient(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Client, error) {
 	// Get OpenAI API key from config (which already checked env var and keychain)
 	openaiKey := cfg.API.OpenAIKey
 	if openaiKey == "" {
@@ -92,6 +160,17 @@ func getKeySource(cfg *config.Config) string {
 	return "config_file"
 }
 
+// getGeminiKeySource returns a string indicating where the Gemini API key came from
+func getGeminiKeySource(cfg *config.Config) string {
+	if os.Getenv("GEMINI_API_KEY") != "" {
+		return "environment"
+	}
+	if cfg.API.GeminiKey != "" {
+		return "config_file"
+	}
+	return "unknown"
+}
+
 // IsEnabled returns true if an LLM client is configured and ready
 func (c *Client) IsEnabled() bool {
 	return c.enabled
@@ -104,31 +183,43 @@ func (c *Client) GetProvider() Provider {
 
 // Complete sends a prompt to the LLM and returns the response
 // Reference: agentic_design.md §2.2 - Investigation decisions
-// Uses fastModel (GPT-4o-mini) by default
+// Uses fastModel (GPT-4o-mini or gemini-2.0-flash) by default
 func (c *Client) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	if !c.enabled {
-		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and OPENAI_API_KEY)")
+		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and API key)")
 	}
 
-	if c.provider != ProviderOpenAI {
-		return "", fmt.Errorf("no openai provider configured")
+	switch c.provider {
+	case ProviderGemini:
+		return c.geminiClient.Complete(ctx, systemPrompt, userPrompt)
+	case ProviderOpenAI:
+		return c.completeOpenAI(ctx, systemPrompt, userPrompt, c.fastModel)
+	default:
+		return "", fmt.Errorf("no provider configured")
 	}
-
-	return c.completeOpenAI(ctx, systemPrompt, userPrompt, c.fastModel)
 }
 
-// CompleteWithDeepModel sends a prompt using the deep model (GPT-4o)
+// CompleteWithDeepModel sends a prompt using the deep model (GPT-4o or gemini-1.5-pro)
 // Use for complex synthesis and validation tasks (Agents 7-8)
 func (c *Client) CompleteWithDeepModel(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	if !c.enabled {
-		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and OPENAI_API_KEY)")
+		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and API key)")
 	}
 
-	if c.provider != ProviderOpenAI {
-		return "", fmt.Errorf("no openai provider configured")
+	switch c.provider {
+	case ProviderGemini:
+		// For Gemini, create a new client with the deep model
+		geminiDeep, err := NewGeminiClient(context.Background(), os.Getenv("GEMINI_API_KEY"), c.deepModel)
+		if err != nil {
+			return "", fmt.Errorf("failed to create deep model client: %w", err)
+		}
+		defer geminiDeep.Close()
+		return geminiDeep.Complete(ctx, systemPrompt, userPrompt)
+	case ProviderOpenAI:
+		return c.completeOpenAI(ctx, systemPrompt, userPrompt, c.deepModel)
+	default:
+		return "", fmt.Errorf("no provider configured")
 	}
-
-	return c.completeOpenAI(ctx, systemPrompt, userPrompt, c.deepModel)
 }
 
 // completeOpenAI handles OpenAI chat completion with configurable model
@@ -195,17 +286,26 @@ func (c *Client) ShouldEscalateToPhase2(couplingScore, coChangeScore, testRatio 
 }
 
 // CompleteJSON sends a prompt to the LLM and returns JSON response
-// Uses response_format: json_object for structured outputs
+// Uses response_format: json_object for structured outputs (OpenAI)
+// Uses ResponseMIMEType: application/json for Gemini
 // Reference: REVISED_MVP_STRATEGY.md - Two-way extraction with structured outputs
 func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	if !c.enabled {
-		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and OPENAI_API_KEY)")
+		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and API key)")
 	}
 
-	if c.provider != ProviderOpenAI {
-		return "", fmt.Errorf("no openai provider configured")
+	switch c.provider {
+	case ProviderGemini:
+		return c.geminiClient.CompleteJSON(ctx, systemPrompt, userPrompt)
+	case ProviderOpenAI:
+		return c.completeOpenAIJSON(ctx, systemPrompt, userPrompt)
+	default:
+		return "", fmt.Errorf("no provider configured")
 	}
+}
 
+// completeOpenAIJSON handles OpenAI JSON completion
+func (c *Client) completeOpenAIJSON(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	resp, err := c.openaiClient.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: c.fastModel, // Use fast model (gpt-4o-mini) for extraction
 		Messages: []openai.ChatCompletionMessage{
