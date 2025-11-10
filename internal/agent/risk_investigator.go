@@ -404,7 +404,9 @@ func (inv *RiskInvestigator) queryOwnership(ctx context.Context, args map[string
 
 func (inv *RiskInvestigator) queryCoChangePartners(ctx context.Context, args map[string]any) (any, error) {
 	filePaths := extractStringArray(args, "file_paths")
-	threshold := 0.5
+	slog.Info("query_cochange_partners called", "file_paths", filePaths)
+
+	threshold := 0.2 // 20% co-change frequency threshold (lowered from 0.5 which was too strict)
 	if t, ok := args["frequency_threshold"].(float64); ok {
 		threshold = t
 	}
@@ -426,14 +428,20 @@ func (inv *RiskInvestigator) queryCoChangePartners(ctx context.Context, args map
 		RETURN file2 as partner_file, frequency
 	`
 
+	slog.Info("calling graphClient.ExecuteQuery for co-change", "threshold", threshold)
 	results, err := inv.graphClient.ExecuteQuery(ctx, query, map[string]any{
 		"paths":     filePaths,
 		"threshold": threshold,
 	})
 	if err != nil {
+		slog.Error("query_cochange_partners failed", "error", err)
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
 
+	slog.Info("query_cochange_partners result", "file_paths", filePaths, "result_count", len(results))
+	if len(results) > 0 {
+		slog.Info("sample result", "partner_file", results[0]["partner_file"], "frequency", results[0]["frequency"])
+	}
 	return results, nil
 }
 
@@ -593,20 +601,26 @@ func (inv *RiskInvestigator) getOwnershipTimeline(ctx context.Context, args map[
 
 func (inv *RiskInvestigator) getCoChangeWithExplanations(ctx context.Context, args map[string]any) (any, error) {
 	filePaths := extractStringArray(args, "file_paths")
+	slog.Info("get_cochange_with_explanations called", "file_paths", filePaths)
+
 	if len(filePaths) == 0 {
+		slog.Warn("get_cochange_with_explanations: no file paths provided")
 		return nil, fmt.Errorf("file_paths is required")
 	}
 
-	threshold := 0.5
+	threshold := 0.2 // 20% co-change frequency threshold (lowered from 0.5 which was too strict)
 	if t, ok := args["threshold"].(float64); ok {
 		threshold = t
 	}
 
+	slog.Info("calling hybridClient.GetCoChangePartnersWithContext", "threshold", threshold)
 	partners, err := inv.hybridClient.GetCoChangePartnersWithContext(ctx, filePaths, threshold)
 	if err != nil {
+		slog.Error("get_cochange_with_explanations failed", "error", err)
 		return nil, fmt.Errorf("failed to get co-change partners: %w", err)
 	}
 
+	slog.Info("get_cochange_with_explanations result", "file_paths", filePaths, "partner_count", len(partners))
 	return partners, nil
 }
 
