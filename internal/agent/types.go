@@ -56,17 +56,26 @@ type Investigation struct {
 	TotalTokens       int
 }
 
+// ToolResult represents the result of a single tool execution
+type ToolResult struct {
+	ToolName string      `json:"tool_name"`
+	Args     interface{} `json:"args"`
+	Result   interface{} `json:"result"`
+	Error    string      `json:"error,omitempty"`
+}
+
 // HopResult represents the result of a single hop
 type HopResult struct {
 	HopNumber      int
-	Query          string   // LLM query sent
-	Response       string   // LLM response
-	NodesVisited   []string // Node IDs visited
-	EdgesTraversed []string // Edge types traversed
+	Query          string       // LLM query sent
+	Response       string       // LLM response
+	ToolResults    []ToolResult // Results from tool executions
+	NodesVisited   []string     // Node IDs visited (tool names)
+	EdgesTraversed []string     // Edge types traversed
 	TokensUsed     int
 	Duration       time.Duration
-	Confidence     float64  // Confidence after this hop (0.0-1.0)
-	NextAction     string   // FINALIZE, GATHER_MORE_EVIDENCE, EXPAND_GRAPH
+	Confidence     float64 // Confidence after this hop (0.0-1.0)
+	NextAction     string  // FINALIZE, GATHER_MORE_EVIDENCE, EXPAND_GRAPH
 }
 
 // ConfidencePoint tracks confidence at a specific hop

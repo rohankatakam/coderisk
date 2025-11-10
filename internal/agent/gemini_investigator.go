@@ -18,6 +18,7 @@ type GeminiInvestigator struct {
 	graphClient     GraphQueryExecutor
 	postgresAdapter PostgresQueryExecutor
 	hybridClient    *database.HybridClient
+	historyManager  *HistoryManager
 	maxHops         int
 }
 
@@ -33,6 +34,7 @@ func NewGeminiInvestigator(
 		graphClient:     graphClient,
 		postgresAdapter: postgresAdapter,
 		hybridClient:    hybridClient,
+		historyManager:  NewHistoryManager(),
 		maxHops:         30, // High safety limit - agent should call finish_investigation when done (12 Factor Agents principle)
 	}
 }
@@ -146,6 +148,17 @@ func (inv *GeminiInvestigator) Investigate(ctx context.Context, kickoffPrompt st
 			// Execute tool
 			result, err := inv.executeToolGemini(ctx, toolCall.Name, toolCall.Args)
 
+			// Store tool result in hop for transparency
+			toolResult := ToolResult{
+				ToolName: toolCall.Name,
+				Args:     toolCall.Args,
+				Result:   result,
+			}
+			if err != nil {
+				toolResult.Error = err.Error()
+			}
+			hopResult.ToolResults = append(hopResult.ToolResults, toolResult)
+
 			// Create function response
 			functionResponses = append(functionResponses, &genai.FunctionResponse{
 				Name:     toolCall.Name,
@@ -161,6 +174,9 @@ func (inv *GeminiInvestigator) Investigate(ctx context.Context, kickoffPrompt st
 			Role:  "user",
 			Parts: convertFunctionResponsesToParts(functionResponses),
 		})
+
+		// Prune history to stay within token budget
+		history = inv.historyManager.PruneHistory(history)
 
 		investigation.Hops = append(investigation.Hops, hopResult)
 	}

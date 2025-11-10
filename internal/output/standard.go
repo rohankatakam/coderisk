@@ -108,52 +108,8 @@ func DisplayPhase2Summary(assessment agent.RiskAssessment) {
 // DisplayPhase2Trace shows full hop-by-hop investigation (explain mode)
 // 12-factor: Factor 4 - Tools are structured outputs (detailed trace for debugging)
 func DisplayPhase2Trace(assessment agent.RiskAssessment) {
-	if assessment.Investigation == nil {
-		DisplayPhase2Summary(assessment)
-		return
-	}
-
-	investigation := assessment.Investigation
-
-	fmt.Println("\n🔍 CodeRisk Investigation Report")
-	fmt.Printf("Started: %s\n", investigation.Request.StartedAt.Format("2006-01-02 15:04:05"))
-	fmt.Printf("Completed: %s (%.1fs)\n",
-		investigation.CompletedAt.Format("2006-01-02 15:04:05"),
-		investigation.CompletedAt.Sub(investigation.Request.StartedAt).Seconds())
-	fmt.Printf("Agent hops: %d\n", len(investigation.Hops))
-
-	// Show each hop
-	for _, hop := range investigation.Hops {
-		fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		fmt.Printf("Hop %d\n", hop.HopNumber)
-		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-		if len(hop.NodesVisited) > 0 {
-			fmt.Printf("\nNodes visited: %v\n", hop.NodesVisited)
-		}
-
-		if len(hop.EdgesTraversed) > 0 {
-			fmt.Printf("Edges traversed: %v\n", hop.EdgesTraversed)
-		}
-
-		if hop.Query != "" {
-			fmt.Printf("\nQuery: %s\n", hop.Query)
-		}
-
-		if hop.Response != "" {
-			// Show full response (no truncation)
-			fmt.Printf("Response: %s\n", hop.Response)
-		}
-
-		fmt.Printf("\nTokens: %d | Duration: %dms\n", hop.TokensUsed, hop.Duration.Milliseconds())
-	}
-
-	// Show final assessment
-	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println("Final Assessment")
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-	DisplayPhase2Summary(assessment)
+	// Use rich narrative format for transparency and observability
+	DisplayRichNarrativeTrace(assessment)
 }
 
 // DisplayPhase2JSON outputs investigation trace in AI mode JSON format

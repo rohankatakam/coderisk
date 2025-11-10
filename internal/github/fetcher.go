@@ -290,6 +290,8 @@ func (f *Fetcher) fetchFullCommit(ctx context.Context, repoID int64, owner, repo
 
 // FetchIssues fetches issues with time filtering
 // days: number of days to fetch (0 = all history)
+// For repos with >10K issues, GitHub's pagination limit prevents full fetch
+// We fetch what we can and log a warning if we hit the limit
 func (f *Fetcher) FetchIssues(ctx context.Context, repoID int64, owner, repo string, days int) (int, error) {
 	opts := &github.IssueListByRepoOptions{
 		State: "all",
@@ -305,6 +307,9 @@ func (f *Fetcher) FetchIssues(ctx context.Context, repoID int64, owner, repo str
 	}
 	// If days == 0, cutoff will be zero value (fetch all)
 
+	maxPages := 100 // GitHub's maximum page limit for offset pagination
+	pagesProcessed := 0
+
 	for {
 		if err := f.rateLimiter.Wait(ctx); err != nil {
 			return count, err
@@ -312,7 +317,17 @@ func (f *Fetcher) FetchIssues(ctx context.Context, repoID int64, owner, repo str
 
 		issues, resp, err := f.client.Issues.ListByRepo(ctx, owner, repo, opts)
 		if err != nil {
+			// If we hit pagination limit, log warning and return what we have
+			if resp != nil && resp.StatusCode == 422 {
+				log.Printf("  ⚠️  Hit GitHub pagination limit after %d pages (%d issues). Large repos may not have complete issue data.", pagesProcessed, count)
+				return count, nil
+			}
 			return count, fmt.Errorf("list issues failed: %w", err)
+		}
+
+		// If we got no issues, we're done
+		if len(issues) == 0 {
+			break
 		}
 
 		for _, issue := range issues {
@@ -342,6 +357,14 @@ func (f *Fetcher) FetchIssues(ctx context.Context, repoID int64, owner, repo str
 		}
 
 		f.logRateLimit(resp)
+
+		pagesProcessed++
+
+		// Stop if we've hit the pagination limit
+		if pagesProcessed >= maxPages {
+			log.Printf("  ⚠️  Reached GitHub pagination limit (%d pages, %d issues). Large repos may not have complete issue data.", maxPages, count)
+			break
+		}
 
 		if resp.NextPage == 0 {
 			break
