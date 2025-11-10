@@ -141,12 +141,8 @@ func DisplayPhase2Trace(assessment agent.RiskAssessment) {
 		}
 
 		if hop.Response != "" {
-			// Truncate long responses
-			response := hop.Response
-			if len(response) > 200 {
-				response = response[:200] + "..."
-			}
-			fmt.Printf("Response: %s\n", response)
+			// Show full response (no truncation)
+			fmt.Printf("Response: %s\n", hop.Response)
 		}
 
 		fmt.Printf("\nTokens: %d | Duration: %dms\n", hop.TokensUsed, hop.Duration.Milliseconds())

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"google.golang.org/genai"
 )
@@ -154,9 +155,17 @@ func (c *GeminiClient) CompleteWithTools(ctx context.Context, systemPrompt, user
 		Tools:             tools,
 	}
 
-	// Generate content
-	resp, err := c.client.Models.GenerateContent(ctx, c.model, genai.Text(userPrompt), genConfig)
+	// Generate content with retry logic for rate limits
+	resp, err := c.generateContentWithRetry(ctx, c.model, genai.Text(userPrompt), genConfig)
 	if err != nil {
+		// Provide helpful error message for API key issues
+		errMsg := err.Error()
+		if contains(errMsg, "PERMISSION_DENIED") || contains(errMsg, "403") {
+			if contains(errMsg, "leaked") {
+				return nil, fmt.Errorf("gemini API key was reported as leaked - please use a different API key (set GEMINI_API_KEY environment variable)")
+			}
+			return nil, fmt.Errorf("gemini API key is invalid or lacks permissions - please check GEMINI_API_KEY environment variable")
+		}
 		return nil, fmt.Errorf("gemini tool completion failed: %w", err)
 	}
 
@@ -184,9 +193,17 @@ func (c *GeminiClient) CompleteWithToolsAndHistory(ctx context.Context, systemPr
 		Tools:             tools,
 	}
 
-	// Generate content with full history
-	resp, err := c.client.Models.GenerateContent(ctx, c.model, history, genConfig)
+	// Generate content with full history and retry logic
+	resp, err := c.generateContentWithRetry(ctx, c.model, history, genConfig)
 	if err != nil {
+		// Provide helpful error message for API key issues
+		errMsg := err.Error()
+		if contains(errMsg, "PERMISSION_DENIED") || contains(errMsg, "403") {
+			if contains(errMsg, "leaked") {
+				return nil, fmt.Errorf("gemini API key was reported as leaked - please use a different API key (set GEMINI_API_KEY environment variable)")
+			}
+			return nil, fmt.Errorf("gemini API key is invalid or lacks permissions - please check GEMINI_API_KEY environment variable")
+		}
 		return nil, fmt.Errorf("gemini tool completion with history failed: %w", err)
 	}
 
@@ -214,4 +231,70 @@ func ptrFloat32(f float64) *float32 {
 func ptrInt32(i int) *int32 {
 	i32 := int32(i)
 	return &i32
+}
+
+// generateContentWithRetry wraps GenerateContent with exponential backoff retry logic for rate limits
+func (c *GeminiClient) generateContentWithRetry(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+	maxRetries := 3
+	baseDelay := 2 * time.Second
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Make the API call
+		resp, err := c.client.Models.GenerateContent(ctx, model, contents, config)
+
+		// Check for rate limit errors (429)
+		if err != nil {
+			errMsg := err.Error()
+			is429 := contains(errMsg, "429") || contains(errMsg, "Resource exhausted") || contains(errMsg, "RESOURCE_EXHAUSTED")
+
+			if is429 && attempt < maxRetries {
+				// Calculate exponential backoff: 2s, 4s, 8s
+				delay := baseDelay * (1 << uint(attempt))
+				c.logger.Warn("rate limit encountered, retrying",
+					"attempt", attempt+1,
+					"max_retries", maxRetries,
+					"delay_seconds", delay.Seconds(),
+				)
+
+				// Wait before retrying
+				select {
+				case <-time.After(delay):
+					continue
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+
+			// Non-429 error or exhausted retries
+			if is429 {
+				return nil, fmt.Errorf("rate limited after %d retries (waited %ds total): %w",
+					maxRetries,
+					int((baseDelay*(1<<uint(maxRetries))-baseDelay).Seconds()),
+					err)
+			}
+			return nil, err
+		}
+
+		// Success
+		if attempt > 0 {
+			c.logger.Info("request succeeded after retry", "attempt", attempt+1)
+		}
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("unexpected retry loop exit")
+}
+
+// contains checks if a string contains a substring (case-insensitive helper)
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
