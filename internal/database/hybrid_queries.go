@@ -2,9 +2,12 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // GraphQueryExecutor is an interface for executing Neo4j queries
@@ -194,7 +197,7 @@ func (hc *HybridClient) getIssueDetails(ctx context.Context, issueNumbers []int)
 		WHERE number = ANY($1)
 	`
 
-	rows, err := hc.postgresClient.Query(ctx, query, issueNumbers)
+	rows, err := hc.postgresClient.Query(ctx, query, pq.Array(issueNumbers))
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +213,7 @@ func (hc *HybridClient) getIssueDetails(ctx context.Context, issueNumbers []int)
 			createdAt      time.Time
 			closedAt       *time.Time
 			authorLogin    string
-			authorRole     string
+			authorRole     sql.NullString // Can be NULL in database
 		)
 
 		if err := rows.Scan(&number, &title, &body, &labelsJSON, &createdAt, &closedAt, &authorLogin, &authorRole); err != nil {
@@ -228,6 +231,12 @@ func (hc *HybridClient) getIssueDetails(ctx context.Context, issueNumbers []int)
 			}
 		}
 
+		// Use empty string if author_association is NULL
+		role := ""
+		if authorRole.Valid {
+			role = authorRole.String
+		}
+
 		details[number] = issueDetail{
 			Title:       title,
 			Body:        body,
@@ -235,7 +244,7 @@ func (hc *HybridClient) getIssueDetails(ctx context.Context, issueNumbers []int)
 			CreatedAt:   createdAt,
 			ClosedAt:    closedAt,
 			AuthorLogin: authorLogin,
-			AuthorRole:  authorRole,
+			AuthorRole:  role,
 		}
 	}
 
@@ -399,7 +408,7 @@ func (hc *HybridClient) getCommitMessages(ctx context.Context, shas []string) ([
 		ORDER BY author_date DESC
 	`
 
-	rows, err := hc.postgresClient.Query(ctx, query, shas)
+	rows, err := hc.postgresClient.Query(ctx, query, pq.Array(shas))
 	if err != nil {
 		return nil, err
 	}

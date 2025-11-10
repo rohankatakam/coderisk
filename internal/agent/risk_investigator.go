@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/openai/openai-go/v3"
@@ -548,7 +549,10 @@ func (inv *RiskInvestigator) getCommitPatch(ctx context.Context, args map[string
 
 func (inv *RiskInvestigator) getIncidentsWithContext(ctx context.Context, args map[string]any) (any, error) {
 	filePaths := extractStringArray(args, "file_paths")
+	slog.Info("get_incidents_with_context called", "file_paths", filePaths)
+
 	if len(filePaths) == 0 {
+		slog.Warn("get_incidents_with_context: no file paths provided")
 		return nil, fmt.Errorf("file_paths is required")
 	}
 
@@ -557,9 +561,17 @@ func (inv *RiskInvestigator) getIncidentsWithContext(ctx context.Context, args m
 		daysBack = int(d)
 	}
 
+	slog.Info("calling hybridClient.GetIncidentHistoryForFiles", "days_back", daysBack)
 	incidents, err := inv.hybridClient.GetIncidentHistoryForFiles(ctx, filePaths, daysBack)
 	if err != nil {
+		slog.Error("get_incidents_with_context failed", "error", err)
 		return nil, fmt.Errorf("failed to get incidents: %w", err)
+	}
+
+	// Log incident count for debugging
+	slog.Info("get_incidents_with_context result", "file_paths", filePaths, "incident_count", len(incidents), "days_back", daysBack)
+	if len(incidents) > 0 {
+		slog.Info("sample incident", "issue_number", incidents[0].IssueNumber, "issue_title", incidents[0].IssueTitle)
 	}
 
 	return incidents, nil
