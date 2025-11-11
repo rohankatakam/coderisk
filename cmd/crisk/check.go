@@ -562,7 +562,36 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				// AI Mode: Include investigation trace in JSON
 				output.DisplayPhase2JSON(*assessment)
 			} else if explain {
-				// Explain Mode: Show full hop-by-hop trace
+				// Explain Mode: Show Manager + Developer views + detailed investigation trace
+				// Query hybrid client for enriched context data
+				incidents, _ := hybridClient.GetIncidentHistoryForFiles(ctx, queryPaths, 180)
+				ownership, _ := hybridClient.GetOwnershipHistoryForFiles(ctx, queryPaths)
+				cochange, _ := hybridClient.GetCoChangePartnersWithContext(ctx, queryPaths, 0.3)
+				blastRadius, _ := hybridClient.GetBlastRadiusWithIncidents(ctx, file)
+
+				// Build demo output data structure
+				demoData := &output.DemoOutputData{
+					Assessment:  assessment,
+					Incidents:   incidents,
+					Ownership:   ownership,
+					CoChange:    cochange,
+					BlastRadius: blastRadius,
+					CLQSScore:   clqsScore,
+					FilePath:    file,
+				}
+
+				// Display Manager View (business impact)
+				output.DisplayManagerView(demoData)
+
+				// Display Developer View (actionable insights)
+				output.DisplayDeveloperView(demoData)
+
+				// Display CLQS Confidence (data quality)
+				if clqsScore != nil {
+					output.DisplayCLQSConfidence(demoData)
+				}
+
+				// Show detailed hop-by-hop investigation trace
 				output.DisplayPhase2Trace(*assessment)
 			} else {
 				// Standard Mode: Query hybrid data and show Manager + Developer views

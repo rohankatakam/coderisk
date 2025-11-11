@@ -258,17 +258,21 @@ func DisplayManagerView(data *DemoOutputData) {
 			// Impact description
 			if inc.ClosedAt != nil {
 				mttr := inc.ClosedAt.Sub(inc.CreatedAt)
-				fmt.Printf("      └─ MTTR: %.1f hours\n", mttr.Hours())
-
-				// Cost estimate ($300K per hour is industry standard for SaaS downtime)
-				estimatedCost := mttr.Hours() * 300000 / 24 // Daily cost
 				if mttr.Hours() < 1 {
-					fmt.Printf("      └─ Estimated Impact: ~$%.0fK (%.0f min downtime)\n",
-						estimatedCost/1000, mttr.Minutes())
+					fmt.Printf("      └─ MTTR: %.0f minutes\n", mttr.Minutes())
 				} else {
-					fmt.Printf("      └─ Estimated Impact: ~$%.0fK (%.1f hr downtime)\n",
-						estimatedCost/1000, mttr.Hours())
+					fmt.Printf("      └─ MTTR: %.1f hours\n", mttr.Hours())
 				}
+
+				// Cost estimate removed - too speculative for demo
+				// estimatedCost := mttr.Hours() * 300000 / 24 // Daily cost
+				// if mttr.Hours() < 1 {
+				// 	fmt.Printf("      └─ Estimated Impact: ~$%.0fK (%.0f min downtime)\n",
+				// 		estimatedCost/1000, mttr.Minutes())
+				// } else {
+				// 	fmt.Printf("      └─ Estimated Impact: ~$%.0fK (%.1f hr downtime)\n",
+				// 		estimatedCost/1000, mttr.Hours())
+				// }
 			}
 
 			// Date and reporter
@@ -284,12 +288,13 @@ func DisplayManagerView(data *DemoOutputData) {
 			fmt.Println()
 		}
 
-		// Total cost estimate
+		// Total cost estimate - removed for demo (too speculative)
 		totalMTTR := calculateAvgMTTR(data.Incidents)
-		totalCost := totalMTTR * float64(len(data.Incidents)) * 300000 / 24
+		// totalCost := totalMTTR * float64(len(data.Incidents)) * 300000 / 24
+		// fmt.Printf("  💰 TOTAL HISTORICAL COST: ~$%.0fK\n", totalCost/1000)
 
-		fmt.Printf("  💰 TOTAL HISTORICAL COST: ~$%.0fK\n", totalCost/1000)
-		fmt.Printf("  ⏱️  AVERAGE MTTR: %.1f hours\n\n", totalMTTR)
+		fmt.Printf("  ⏱️  AVERAGE MTTR: %.1f hours\n", totalMTTR)
+		fmt.Printf("  🔥 TOTAL INCIDENTS: %d production fires\n\n", len(data.Incidents))
 	} else {
 		fmt.Println("  ✅ PRODUCTION INCIDENT HISTORY")
 		fmt.Println("  No incidents found in the last 180 days\n")
@@ -405,21 +410,22 @@ func DisplayManagerView(data *DemoOutputData) {
 
 	fmt.Println()
 
-	// === ESTIMATED COST IF THIS BREAKS ===
+	// === ESTIMATED IMPACT IF THIS BREAKS ===
 	if len(data.Incidents) > 0 {
 		avgMTTR := calculateAvgMTTR(data.Incidents)
-		estimatedCost := avgMTTR * 300000 / 24 // Daily cost based on $300K/day industry standard
+		// Cost estimates removed - too speculative for demo
+		// estimatedCost := avgMTTR * 300000 / 24 // Daily cost based on $300K/day industry standard
 
-		fmt.Println("  💰 ESTIMATED COST IF THIS BREAKS:")
+		fmt.Println("  ⏱️  ESTIMATED IMPACT IF THIS BREAKS:")
 		if avgMTTR > 0 {
 			fmt.Printf("  MTTR Estimate: %.1f hours (based on past incident average)\n", avgMTTR)
+			fmt.Printf("  Time Saved: ~%.0f hours if caught pre-commit vs. firefighting\n\n", avgMTTR)
 		}
-		fmt.Printf("  Cost Estimate: ~$%.0fK per incident\n", estimatedCost/1000)
-		fmt.Println("  Time Saved: ~%.0f hours if caught pre-commit vs. firefighting\n", avgMTTR)
+		// fmt.Printf("  Cost Estimate: ~$%.0fK per incident\n", estimatedCost/1000)
 	} else {
-		fmt.Println("  💰 ESTIMATED COST IF THIS BREAKS:")
-		fmt.Println("  No past incident data - unable to estimate MTTR")
-		fmt.Println("  Default assumption: ~$300K/day downtime cost (industry standard)\n")
+		fmt.Println("  ⏱️  ESTIMATED IMPACT IF THIS BREAKS:")
+		fmt.Println("  No past incident data - unable to estimate MTTR\n")
+		// fmt.Println("  Default assumption: ~$300K/day downtime cost (industry standard)\n")
 	}
 
 	fmt.Println("  📋 RECOMMENDATION:")

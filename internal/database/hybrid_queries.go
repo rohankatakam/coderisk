@@ -182,13 +182,39 @@ func (hc *HybridClient) GetIncidentHistoryForFiles(ctx context.Context, filePath
 			}
 		}
 
+		// Safely extract fields with nil checks
+		var prNumber int
+		if val, ok := row["pr_number"].(int64); ok {
+			prNumber = int(val)
+		}
+
+		var commitSHA string
+		if val, ok := row["commit_sha"].(string); ok {
+			commitSHA = val
+		}
+
+		var linkType string
+		if val, ok := row["link_type"].(string); ok {
+			linkType = val
+		}
+
+		var confidence float64
+		if val, ok := row["confidence"].(float64); ok {
+			confidence = val
+		}
+
+		var detectionMethod string
+		if val, ok := row["detection_method"].(string); ok {
+			detectionMethod = val
+		}
+
 		incident := IncidentWithContext{
 			IssueNumber:     issueNum,
-			PRNumber:        int(row["pr_number"].(int64)),
-			CommitSHA:       row["commit_sha"].(string),
-			LinkType:        row["link_type"].(string),
-			Confidence:      row["confidence"].(float64),
-			DetectionMethod: row["detection_method"].(string),
+			PRNumber:        prNumber,
+			CommitSHA:       commitSHA,
+			LinkType:        linkType,
+			Confidence:      confidence,
+			DetectionMethod: detectionMethod,
 			Evidence:        evidence,
 			IssueTitle:      details.Title,
 			IssueBody:       details.Body,

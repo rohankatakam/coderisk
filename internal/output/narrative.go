@@ -58,6 +58,68 @@ func DisplayRichNarrativeTrace(assessment agent.RiskAssessment) {
 		fmt.Printf("\n💡 Summary:\n%s\n", wrapText(assessment.Summary, 70, "   "))
 	}
 
+	// Collect incident details for action items
+	incidentNumbers := []string{}
+	for _, hop := range inv.Hops {
+		for _, toolResult := range hop.ToolResults {
+			if toolResult.ToolName == "get_incidents_with_context" && toolResult.Result != nil {
+				if incidents, ok := toolResult.Result.([]interface{}); ok {
+					for _, inc := range incidents {
+						if incMap, ok := inc.(map[string]interface{}); ok {
+							if issueNum, ok := incMap["issue_number"].(float64); ok {
+								incidentNumbers = append(incidentNumbers, fmt.Sprintf("#%.0f", issueNum))
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Developer-focused action items (what to do before committing)
+	if len(incidentNumbers) > 0 || assessment.RiskLevel >= agent.RiskMedium {
+		fmt.Println("\n" + strings.Repeat("─", 74))
+		fmt.Println("🎯 WHAT SHOULD YOU DO?")
+		fmt.Println(strings.Repeat("─", 74))
+		fmt.Println("\nBefore committing this change, consider:")
+
+		actionNum := 1
+		if len(incidentNumbers) > 0 {
+			incidentList := strings.Join(incidentNumbers, ", ")
+			fmt.Printf("   %d. 📖 Review past incidents: %s\n", actionNum, incidentList)
+			fmt.Printf("      Understand what went wrong before to avoid repeating it\n")
+			actionNum++
+		}
+
+		fmt.Printf("   %d. ✅ Add test coverage for this file\n", actionNum)
+		fmt.Printf("      This file has %s risk - tests will catch regressions\n", strings.ToLower(string(assessment.RiskLevel)))
+		actionNum++
+
+		fmt.Printf("   %d. 👥 Get a second pair of eyes\n", actionNum)
+		fmt.Printf("      Consider asking someone familiar with this code to review\n")
+		actionNum++
+
+		// Check for co-change patterns in tool results
+		hasCoChangeWarning := false
+		for _, hop := range inv.Hops {
+			for _, toolResult := range hop.ToolResults {
+				if (toolResult.ToolName == "query_cochange_partners" || toolResult.ToolName == "get_cochange_with_explanations") &&
+					toolResult.Result != nil {
+					if partners, ok := toolResult.Result.([]interface{}); ok && len(partners) > 0 {
+						hasCoChangeWarning = true
+						break
+					}
+				}
+			}
+		}
+
+		if hasCoChangeWarning {
+			fmt.Printf("   %d. 🔗 Check co-change files\n", actionNum)
+			fmt.Printf("      Files that usually change together were found - verify they're updated too\n")
+			actionNum++
+		}
+	}
+
 	// Recommendations
 	if len(assessment.Recommendations) > 0 {
 		fmt.Println("\n✅ Recommended Actions:")
@@ -187,7 +249,10 @@ func displayIncidents(result interface{}) {
 		return
 	}
 
-	fmt.Printf("│    ⚠️  Found %d incident(s) linked to this file:\n", len(incidents))
+	fmt.Printf("│    🚨 FOUND %d PRODUCTION INCIDENT(S) linked to this file:\n", len(incidents))
+	fmt.Println("│")
+	fmt.Println("│    This file has a history of causing problems in production.")
+	fmt.Println("│    Review these incidents before making changes:")
 	fmt.Println("│")
 
 	for i, inc := range incidents {
@@ -196,19 +261,32 @@ func displayIncidents(result interface{}) {
 			continue
 		}
 
-		fmt.Printf("│    Incident #%d:\n", i+1)
+		// More prominent incident display
+		fmt.Printf("│    ┌─ Incident #%d ", i+1)
+		fmt.Println(strings.Repeat("─", 52-len(fmt.Sprintf("Incident #%d", i+1))))
+
 		if issueNum, ok := incMap["issue_number"].(float64); ok {
-			fmt.Printf("│      🔗 Issue #%.0f\n", issueNum)
+			fmt.Printf("│    │ 🔗 Issue #%.0f\n", issueNum)
 		}
 		if title, ok := incMap["issue_title"].(string); ok {
-			fmt.Printf("│      📝 %s\n", wrapText(title, 61, "│         "))
+			fmt.Printf("│    │ 📝 Title: %s\n", wrapText(title, 57, "│    │         "))
 		}
 		if created, ok := incMap["created_at"].(string); ok {
-			fmt.Printf("│      📅 Occurred: %s\n", created)
+			// Parse and format date nicely
+			fmt.Printf("│    │ 📅 Date: %s\n", created[:10]) // Just show YYYY-MM-DD
 		}
 		if confidence, ok := incMap["link_confidence"].(float64); ok {
-			fmt.Printf("│      🎯 Link Confidence: %.0f%%\n", confidence*100)
+			confidencePct := confidence * 100
+			confidenceIcon := "🎯"
+			if confidencePct >= 90 {
+				confidenceIcon = "✅"
+			} else if confidencePct < 70 {
+				confidenceIcon = "⚠️"
+			}
+			fmt.Printf("│    │ %s Link Confidence: %.0f%%\n", confidenceIcon, confidencePct)
 		}
+		fmt.Println("│    └" + strings.Repeat("─", 61))
+
 		if i < len(incidents)-1 {
 			fmt.Println("│")
 		}
