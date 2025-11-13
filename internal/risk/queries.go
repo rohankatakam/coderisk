@@ -16,8 +16,10 @@ const (
 	// Query 2: Dependency Count (Blast Radius - depth 1-2)
 	// Returns: Count of files that depend on this file
 	// FIXED: Removed CALLS edge (deferred to post-MVP), only use DEPENDS_ON
+	// Multi-repo safety: Filter by repo_id to prevent cross-repository data leakage
 	QueryDependencyCount = `
-		MATCH (f:File {path: $filePath})<-[:DEPENDS_ON*1..2]-(dependent:File)
+		MATCH (f:File {path: $filePath, repo_id: $repoId})<-[:DEPENDS_ON*1..2]-(dependent:File)
+		WHERE dependent.repo_id = $repoId
 		RETURN count(DISTINCT dependent) as dependent_count,
 		       collect(DISTINCT dependent.path)[0..10] as sample_dependents
 	`
@@ -27,14 +29,17 @@ const (
 	// FIXED: Removed ON_BRANCH filtering (not needed - all commits from GitHub are main branch)
 	// FIXED: Changed MODIFIES to MODIFIED (correct edge name)
 	// FIXED: Lowered threshold to 50% (70% was too restrictive)
+	// Multi-repo safety: Filter by repo_id to prevent cross-repository data leakage
 	QueryCoChangePartners = `
-		MATCH (f:File {path: $filePath})<-[:MODIFIED]-(c:Commit)
+		MATCH (f:File {path: $filePath, repo_id: $repoId})<-[:MODIFIED]-(c:Commit)
 		WHERE c.committed_at > datetime().epochSeconds - (90 * 24 * 60 * 60)
+		  AND c.repo_id = $repoId
 		WITH f, collect(c) as target_commits
 		WITH f, target_commits, size(target_commits) as total_commits
 		UNWIND target_commits as commit
 		MATCH (commit)-[:MODIFIED]->(other:File)
 		WHERE other.path <> $filePath
+		  AND other.repo_id = $repoId
 		WITH other, count(commit) as co_changes, total_commits
 		WITH other, co_changes, toFloat(co_changes)/toFloat(total_commits) as frequency
 		WHERE frequency > 0.5
@@ -47,8 +52,10 @@ const (
 	// Returns: Top 3 owners by commit count with ownership percentages
 	// FIXED: Removed ON_BRANCH filtering (not needed), removed OWNS edge
 	// FIXED: Changed MODIFIES to MODIFIED, returns top 3 instead of 1
+	// Multi-repo safety: Filter by repo_id to prevent cross-repository data leakage
 	QueryOwnership = `
-		MATCH (d:Developer)-[:AUTHORED]->(c:Commit)-[:MODIFIED]->(f:File {path: $filePath})
+		MATCH (d:Developer)-[:AUTHORED]->(c:Commit)-[:MODIFIED]->(f:File {path: $filePath, repo_id: $repoId})
+		WHERE c.repo_id = $repoId
 		WITH d, count(c) as commit_count, max(c.committed_at) as last_commit_date
 		WITH d, commit_count, last_commit_date, sum(commit_count) OVER () as total_file_commits
 		RETURN d.email, d.name, commit_count, last_commit_date,
@@ -60,8 +67,10 @@ const (
 	// Query 5: Blast Radius (full dependency graph, depth 3)
 	// Returns: All files depending on this file with sample list
 	// FIXED: Removed CALLS edge (deferred to post-MVP), only use DEPENDS_ON
+	// Multi-repo safety: Filter by repo_id to prevent cross-repository data leakage
 	QueryBlastRadius = `
-		MATCH (f:File {path: $filePath})<-[:DEPENDS_ON*1..3]-(dependent:File)
+		MATCH (f:File {path: $filePath, repo_id: $repoId})<-[:DEPENDS_ON*1..3]-(dependent:File)
+		WHERE dependent.repo_id = $repoId
 		RETURN count(DISTINCT dependent) as dependent_count,
 		       collect(DISTINCT dependent.path)[0..20] as sample_dependents
 	`
@@ -70,10 +79,12 @@ const (
 	// Returns: Bug-fix commits via commit message regex
 	// FIXED: Removed LINKED_TO edge (requires Issue nodes, deferred to post-MVP)
 	// Now uses commit message pattern matching for "fix", "bug", "hotfix", "patch"
+	// Multi-repo safety: Filter by repo_id to prevent cross-repository data leakage
 	QueryIncidentHistory = `
-		MATCH (f:File {path: $filePath})<-[:MODIFIED]-(c:Commit)
+		MATCH (f:File {path: $filePath, repo_id: $repoId})<-[:MODIFIED]-(c:Commit)
 		WHERE c.message =~ '(?i).*(fix|bug|hotfix|patch).*'
 		  AND c.committed_at > datetime().epochSeconds - (180 * 24 * 60 * 60)
+		  AND c.repo_id = $repoId
 		RETURN c.sha, c.message, c.committed_at
 		ORDER BY c.committed_at DESC
 		LIMIT 10
@@ -83,8 +94,10 @@ const (
 	// Returns: Recent commit history with authors and changes
 	// FIXED: Removed ON_BRANCH filtering (not needed), changed MODIFIES to MODIFIED
 	// FIXED: Use committed_at instead of author_date for consistency
+	// Multi-repo safety: Filter by repo_id to prevent cross-repository data leakage
 	QueryRecentCommits = `
-		MATCH (f:File {path: $filePath})<-[:MODIFIED]-(c:Commit)
+		MATCH (f:File {path: $filePath, repo_id: $repoId})<-[:MODIFIED]-(c:Commit)
+		WHERE c.repo_id = $repoId
 		MATCH (c)<-[:AUTHORED]-(d:Developer)
 		RETURN c.sha, c.message, d.email, c.committed_at, c.additions, c.deletions
 		ORDER BY c.committed_at DESC
@@ -161,10 +174,13 @@ var QueryDescription = map[string]string{
 //   git log --follow returns both paths
 //   This query finds commits that modified either path
 //
+// Multi-repo safety: Filter by repo_id to prevent cross-repository data leakage
 // Reference: issue_ingestion_implementation_plan.md Phase 1.3
 const QueryCommitsForPaths = `
 	MATCH (c:Commit)-[:MODIFIED]->(f:File)
 	WHERE f.path IN $paths
+	  AND f.repo_id = $repoId
+	  AND c.repo_id = $repoId
 	WITH c, f
 	ORDER BY c.committed_at DESC
 	LIMIT $limit

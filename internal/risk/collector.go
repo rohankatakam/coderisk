@@ -3,6 +3,7 @@ package risk
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,12 +24,19 @@ func NewCollector(backend graph.Backend) *Collector {
 
 // CollectPhase1Data executes all Phase 1 queries and returns consolidated data
 // Per IMPLEMENTATION_GAP_ANALYSIS.md: Now executes actual graph queries
+// Multi-repo safety: Converts RepoID to int64 and passes to all queries
 func (c *Collector) CollectPhase1Data(ctx context.Context, req *AnalysisRequest) (*Phase1Data, error) {
 	if len(req.FilePaths) == 0 {
 		return nil, fmt.Errorf("no file paths provided")
 	}
 
 	filePath := req.FilePaths[0] // Primary file being analyzed
+
+	// Convert RepoID from string to int64 for Neo4j queries
+	repoID, err := strconv.ParseInt(req.RepoID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid repo_id %q: %w", req.RepoID, err)
+	}
 
 	data := &Phase1Data{
 		QueryDurations: make(map[string]time.Duration),
@@ -41,28 +49,28 @@ func (c *Collector) CollectPhase1Data(ctx context.Context, req *AnalysisRequest)
 	}
 
 	// Query 2: Ownership (dynamic from AUTHORED + MODIFIED edges)
-	if err := c.queryOwnership(ctx, filePath, data); err != nil {
+	if err := c.queryOwnership(ctx, filePath, repoID, data); err != nil {
 		// Non-fatal: log warning and continue
 		fmt.Printf("  ⚠️  Ownership query failed: %v\n", err)
 	}
 
 	// Query 3: Blast Radius (DEPENDS_ON traversal)
-	if err := c.queryBlastRadius(ctx, filePath, data); err != nil {
+	if err := c.queryBlastRadius(ctx, filePath, repoID, data); err != nil {
 		fmt.Printf("  ⚠️  Blast radius query failed: %v\n", err)
 	}
 
 	// Query 4: Co-Change Partners (dynamic from MODIFIED edges)
-	if err := c.queryCoChangePartners(ctx, filePath, data); err != nil {
+	if err := c.queryCoChangePartners(ctx, filePath, repoID, data); err != nil {
 		fmt.Printf("  ⚠️  Co-change query failed: %v\n", err)
 	}
 
 	// Query 5: Incident History (commit message regex)
-	if err := c.queryIncidentHistory(ctx, filePath, data); err != nil {
+	if err := c.queryIncidentHistory(ctx, filePath, repoID, data); err != nil {
 		fmt.Printf("  ⚠️  Incident history query failed: %v\n", err)
 	}
 
 	// Query 6: Recent Commits (last 5 commits via MODIFIED)
-	if err := c.queryRecentCommits(ctx, filePath, data); err != nil {
+	if err := c.queryRecentCommits(ctx, filePath, repoID, data); err != nil {
 		fmt.Printf("  ⚠️  Recent commits query failed: %v\n", err)
 	}
 
@@ -102,7 +110,7 @@ func (c *Collector) analyzeChangeComplexity(gitDiff string, data *Phase1Data) er
 }
 
 // queryOwnership executes the ownership query and populates Phase1Data
-func (c *Collector) queryOwnership(ctx context.Context, filePath string, data *Phase1Data) error {
+func (c *Collector) queryOwnership(ctx context.Context, filePath string, repoID int64, data *Phase1Data) error {
 	start := time.Now()
 	defer func() {
 		data.QueryDurations["ownership"] = time.Since(start)
@@ -110,6 +118,7 @@ func (c *Collector) queryOwnership(ctx context.Context, filePath string, data *P
 
 	results, err := c.graphBackend.QueryWithParams(ctx, QueryOwnership, map[string]interface{}{
 		"filePath": filePath,
+		"repoId":   repoID,
 	})
 	if err != nil {
 		return fmt.Errorf("ownership query failed: %w", err)
@@ -151,7 +160,7 @@ func (c *Collector) queryOwnership(ctx context.Context, filePath string, data *P
 }
 
 // queryBlastRadius executes the blast radius query
-func (c *Collector) queryBlastRadius(ctx context.Context, filePath string, data *Phase1Data) error {
+func (c *Collector) queryBlastRadius(ctx context.Context, filePath string, repoID int64, data *Phase1Data) error {
 	start := time.Now()
 	defer func() {
 		data.QueryDurations["blast_radius"] = time.Since(start)
@@ -159,6 +168,7 @@ func (c *Collector) queryBlastRadius(ctx context.Context, filePath string, data 
 
 	results, err := c.graphBackend.QueryWithParams(ctx, QueryBlastRadius, map[string]interface{}{
 		"filePath": filePath,
+		"repoId":   repoID,
 	})
 	if err != nil {
 		return fmt.Errorf("blast radius query failed: %w", err)
@@ -182,7 +192,7 @@ func (c *Collector) queryBlastRadius(ctx context.Context, filePath string, data 
 }
 
 // queryCoChangePartners executes the co-change partners query
-func (c *Collector) queryCoChangePartners(ctx context.Context, filePath string, data *Phase1Data) error {
+func (c *Collector) queryCoChangePartners(ctx context.Context, filePath string, repoID int64, data *Phase1Data) error {
 	start := time.Now()
 	defer func() {
 		data.QueryDurations["co_change"] = time.Since(start)
@@ -190,6 +200,7 @@ func (c *Collector) queryCoChangePartners(ctx context.Context, filePath string, 
 
 	results, err := c.graphBackend.QueryWithParams(ctx, QueryCoChangePartners, map[string]interface{}{
 		"filePath": filePath,
+		"repoId":   repoID,
 	})
 	if err != nil {
 		return fmt.Errorf("co-change query failed: %w", err)
@@ -213,7 +224,7 @@ func (c *Collector) queryCoChangePartners(ctx context.Context, filePath string, 
 }
 
 // queryIncidentHistory executes the incident history query
-func (c *Collector) queryIncidentHistory(ctx context.Context, filePath string, data *Phase1Data) error {
+func (c *Collector) queryIncidentHistory(ctx context.Context, filePath string, repoID int64, data *Phase1Data) error {
 	start := time.Now()
 	defer func() {
 		data.QueryDurations["incident_history"] = time.Since(start)
@@ -221,6 +232,7 @@ func (c *Collector) queryIncidentHistory(ctx context.Context, filePath string, d
 
 	results, err := c.graphBackend.QueryWithParams(ctx, QueryIncidentHistory, map[string]interface{}{
 		"filePath": filePath,
+		"repoId":   repoID,
 	})
 	if err != nil {
 		return fmt.Errorf("incident history query failed: %w", err)
@@ -243,7 +255,7 @@ func (c *Collector) queryIncidentHistory(ctx context.Context, filePath string, d
 }
 
 // queryRecentCommits executes the recent commits query
-func (c *Collector) queryRecentCommits(ctx context.Context, filePath string, data *Phase1Data) error {
+func (c *Collector) queryRecentCommits(ctx context.Context, filePath string, repoID int64, data *Phase1Data) error {
 	start := time.Now()
 	defer func() {
 		data.QueryDurations["recent_commits"] = time.Since(start)
@@ -251,6 +263,7 @@ func (c *Collector) queryRecentCommits(ctx context.Context, filePath string, dat
 
 	results, err := c.graphBackend.QueryWithParams(ctx, QueryRecentCommits, map[string]interface{}{
 		"filePath": filePath,
+		"repoId":   repoID,
 	})
 	if err != nil {
 		return fmt.Errorf("recent commits query failed: %w", err)
@@ -289,6 +302,7 @@ func (c *Collector) queryRecentCommits(ctx context.Context, filePath string, dat
 // Parameters:
 //   - ctx: Context for cancellation
 //   - filePaths: Array of file paths (current + historical)
+//   - repoID: Repository ID for multi-repo safety
 //   - limit: Maximum number of commits to return
 //
 // Returns:
@@ -296,14 +310,15 @@ func (c *Collector) queryRecentCommits(ctx context.Context, filePath string, dat
 //   - error: If query fails
 //
 // Reference: issue_ingestion_implementation_plan.md Phase 1.3
-func (c *Collector) QueryCommitsForFilePaths(ctx context.Context, filePaths []string, limit int) ([]map[string]interface{}, error) {
+func (c *Collector) QueryCommitsForFilePaths(ctx context.Context, filePaths []string, repoID int64, limit int) ([]map[string]interface{}, error) {
 	if len(filePaths) == 0 {
 		return nil, fmt.Errorf("no file paths provided")
 	}
 
 	results, err := c.graphBackend.QueryWithParams(ctx, QueryCommitsForPaths, map[string]interface{}{
-		"paths": filePaths,
-		"limit": limit,
+		"paths":  filePaths,
+		"repoId": repoID,
+		"limit":  limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("commits for paths query failed: %w", err)
