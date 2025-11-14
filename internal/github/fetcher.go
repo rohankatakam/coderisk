@@ -651,7 +651,9 @@ func (f *Fetcher) FetchContributors(ctx context.Context, repoID int64, owner, re
 // FetchIssueTimelines fetches timeline events for all closed issues
 // Reference: GITHUB_API_ANALYSIS.md - Timeline API contains cross-references
 func (f *Fetcher) FetchIssueTimelines(ctx context.Context, repoID int64, owner, repo string) (int, error) {
-	// First, get all closed issues from the database
+	// Fetch all issues from the database
+	// Timeline events (especially cross-references) can occur on any issue, not just closed ones
+	// Reference: EDGE_CONFIDENCE_HIERARCHY.md - REFERENCES edges from cross-reference events
 	issues, err := f.stagingDB.FetchUnprocessedIssues(ctx, repoID, 1000)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch issues: %w", err)
@@ -659,14 +661,14 @@ func (f *Fetcher) FetchIssueTimelines(ctx context.Context, repoID int64, owner, 
 
 	issueCount := 0
 	for _, issue := range issues {
-		// Only fetch timelines for closed issues (where timeline data is most useful)
-		if issue.State == "closed" || issue.ClosedAt != nil {
-			if err := f.fetchIssueTimeline(ctx, repoID, owner, repo, issue.Number); err != nil {
-				log.Printf("  ⚠️  Failed to fetch timeline for issue #%d: %v", issue.Number, err)
-				continue
-			}
-			issueCount++
+		// Fetch timelines for ALL issues to capture:
+		// - closed events with commit_id → CLOSED_BY edges
+		// - cross-referenced events → REFERENCES edges (can happen on open issues)
+		if err := f.fetchIssueTimeline(ctx, repoID, owner, repo, issue.Number); err != nil {
+			log.Printf("  ⚠️  Failed to fetch timeline for issue #%d: %v", issue.Number, err)
+			continue
 		}
+		issueCount++
 	}
 
 	return issueCount, nil
@@ -802,6 +804,15 @@ func (f *Fetcher) storeTimelineEvent(ctx context.Context, issueID int64, rawEven
 					}
 				}
 			}
+		}
+	}
+
+	// Extract commit SHA for closed events
+	// This enables CLOSED_BY edges (100% confidence) when issue was closed via commit
+	// Reference: EDGE_CONFIDENCE_HIERARCHY.md - Timeline edges are 100% confidence
+	if eventType == "closed" {
+		if commitID, ok := rawEvent["commit_id"].(string); ok && commitID != "" {
+			event.SourceSHA = &commitID
 		}
 	}
 
