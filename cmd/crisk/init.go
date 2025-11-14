@@ -15,7 +15,6 @@ import (
 	"github.com/rohankatakam/coderisk/internal/database"
 	"github.com/rohankatakam/coderisk/internal/github"
 	"github.com/rohankatakam/coderisk/internal/graph"
-	"github.com/rohankatakam/coderisk/internal/ingestion"
 	"github.com/rohankatakam/coderisk/internal/linking"
 	"github.com/rohankatakam/coderisk/internal/llm"
 	"github.com/spf13/cobra"
@@ -24,32 +23,33 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize CodeRisk analysis for current repository",
-	Long: `Initialize CodeRisk by building the complete 3-layer knowledge graph.
+	Long: `Initialize CodeRisk by building the 100% confidence knowledge graph from GitHub data.
 
 This command must be run inside a cloned GitHub repository.
 
 What it does:
-  • Layer 1 (Structure): Tree-sitter parsing of code structure
-  • Layer 2 (Temporal): GitHub commit history, co-changes, ownership
-  • Layer 3 (Incidents): GitHub issues, PRs, incident tracking
+  • Fetch GitHub commit history, ownership, and temporal data
+  • Fetch GitHub issues and PRs
+  • Build 100% confidence graph with REFERENCES and CLOSED_BY edges from timeline events
 
 Usage:
   git clone https://github.com/owner/repo
   cd repo
-  crisk init [--days N]
+  crisk init [--days N] [--llm]
 
 Examples:
   cd ~/projects/my-repo
-  crisk init                  # Default: last 90 days
+  crisk init                  # Default: last 90 days, 100% confidence graph only
   crisk init --days 30        # Last 30 days
   crisk init --days 180       # Last 180 days
   crisk init --all            # Full repository history
+  crisk init --llm            # Include LLM-based ASSOCIATED_WITH extraction (requires API key)
 
 Requirements:
   • Must be run inside a cloned GitHub repository
   • GitHub Personal Access Token (for fetching issues, commits)
-  • LLM API key (optional, for Phase 2 AI-powered analysis)
-  • Docker with Neo4j, PostgreSQL, Redis running
+  • LLM API key (optional, only needed with --llm flag)
+  • Docker with Neo4j and PostgreSQL running
 
 Configuration:
   Development: Use .env file (copy from .env.example)
@@ -62,6 +62,7 @@ func init() {
 	// Add time window flags per IMPLEMENTATION_GAP_ANALYSIS.md
 	initCmd.Flags().Int("days", 90, "Ingest PRs merged in last N days (default: 90)")
 	initCmd.Flags().Bool("all", false, "Ingest entire repository history")
+	initCmd.Flags().Bool("llm", false, "Enable LLM-based ASSOCIATED_WITH edge extraction (requires API key)")
 }
 
 // detectCurrentRepo detects the git repository in the current directory
@@ -242,62 +243,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Connected to Neo4j\n")
 
 	// Use the already-cloned repository
-	fmt.Printf("\n[1/5] Using repository at %s...\n", repoPath)
+	fmt.Printf("\n[1/4] Using repository at %s...\n", repoPath)
 	fmt.Printf("  ✓ Skipping clone (using existing repository)\n")
 
-	// Parse with tree-sitter (Layer 1: Structure)
-	fmt.Printf("\n[2/5] Parsing code structure (Layer 1)...\n")
-	parseStart := time.Now()
-
-	// Count files before parsing
-	fileStats, err := ingestion.CountFiles(repoPath)
-	if err != nil {
-		return fmt.Errorf("file analysis failed: %w", err)
-	}
-
-	languages := []string{}
-	if fileStats.JavaScript > 0 {
-		languages = append(languages, fmt.Sprintf("JavaScript (%d files)", fileStats.JavaScript))
-	}
-	if fileStats.TypeScript > 0 {
-		languages = append(languages, fmt.Sprintf("TypeScript (%d files)", fileStats.TypeScript))
-	}
-	if fileStats.Python > 0 {
-		languages = append(languages, fmt.Sprintf("Python (%d files)", fileStats.Python))
-	}
-
-	fmt.Printf("  ✓ Found %d source files: %s\n",
-		fileStats.JavaScript+fileStats.TypeScript+fileStats.Python,
-		strings.Join(languages, ", "))
-
-	// Parse with tree-sitter (Layer 1 only, disable temporal analysis)
-	// IMPORTANT: Use the same repoPath (-full) for both Layer 1 and Layer 2 to ensure file path consistency
-	processorConfig := ingestion.DefaultProcessorConfig()
-	processorConfig.EnableTemporal = false // Disable git history analysis (Layer 2 & 3 come from GitHub API)
-	graphBuilder := graph.NewBuilder(stagingDB, graphBackend)
-	processor := ingestion.NewProcessor(processorConfig, graphBackend, graphBuilder)
-
-	parseResult, err := processor.ProcessRepositoryFromPath(ctx, repoPath)
-	if err != nil {
-		return fmt.Errorf("repository processing failed: %w", err)
-	}
-
-	parseDuration := time.Since(parseStart)
-	fmt.Printf("  ✓ Parsed %d files in %v (%d functions, %d classes, %d imports)\n",
-		parseResult.FilesParsed,
-		parseDuration,
-		parseResult.Functions,
-		parseResult.Classes,
-		parseResult.Imports)
-
-	if parseResult.FilesFailed > 0 {
-		fmt.Printf("  ⚠️  %d files failed to parse (errors logged)\n", parseResult.FilesFailed)
-	}
-
-	fmt.Printf("  ✓ Graph construction complete: %d entities stored\n", parseResult.EntitiesTotal)
-
-	// Stage 1: Fetch GitHub data → PostgreSQL (Layer 2 & 3: Temporal & Incidents)
-	fmt.Printf("\n[3/5] Fetching GitHub API data (Layer 2 & 3: Temporal & Incidents)...\n")
+	// Fetch GitHub data → PostgreSQL
+	fmt.Printf("\n[2/4] Fetching GitHub API data...\n")
 	fetchStart := time.Now()
 
 	// Get time window flags
@@ -323,78 +273,82 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    Commits: %d | Issues: %d | PRs: %d | Branches: %d\n",
 		stats.Commits, stats.Issues, stats.PRs, stats.Branches)
 
-	// Stage 1.5: Extract issue-commit-PR relationships using LLM
-	fmt.Printf("\n[3.5/5] Extracting issue-commit-PR relationships (LLM analysis)...\n")
-	extractStart := time.Now()
+	// Check if --llm flag is enabled
+	enableLLM, _ := cmd.Flags().GetBool("llm")
 
-	// Create LLM client
-	llmClient, err := llm.NewClient(ctx, cfg)
-	if err != nil {
-		return fmt.Errorf("failed to create LLM client: %w", err)
-	}
+	// Stage: Extract issue-commit-PR relationships using LLM (only if --llm flag is set)
+	if enableLLM {
+		fmt.Printf("\n[3/4] Extracting issue-commit-PR relationships (LLM analysis)...\n")
+		extractStart := time.Now()
 
-	if llmClient.IsEnabled() {
-		// Create extractors
-		issueExtractor := github.NewIssueExtractor(llmClient, stagingDB)
-		commitExtractor := github.NewCommitExtractor(llmClient, stagingDB)
-
-		// Extract from Issues
-		issueRefs, err := issueExtractor.ExtractReferences(ctx, repoID)
+		// Create LLM client
+		llmClient, err := llm.NewClient(ctx, cfg)
 		if err != nil {
-			fmt.Printf("  ⚠️  Issue extraction failed: %v\n", err)
-		} else {
-			fmt.Printf("  ✓ Extracted %d references from issues\n", issueRefs)
-		}
+			fmt.Printf("  ⚠️  LLM client creation failed: %v\n", err)
+			fmt.Printf("  → Continuing without LLM extraction\n")
+		} else if llmClient.IsEnabled() {
+			// Create extractors
+			issueExtractor := github.NewIssueExtractor(llmClient, stagingDB)
+			commitExtractor := github.NewCommitExtractor(llmClient, stagingDB)
 
-		// Extract from Commits
-		commitRefs, err := commitExtractor.ExtractCommitReferences(ctx, repoID)
-		if err != nil {
-			fmt.Printf("  ⚠️  Commit extraction failed: %v\n", err)
-		} else {
-			fmt.Printf("  ✓ Extracted %d references from commits\n", commitRefs)
-		}
+			// Extract from Issues
+			issueRefs, err := issueExtractor.ExtractReferences(ctx, repoID)
+			if err != nil {
+				fmt.Printf("  ⚠️  Issue extraction failed: %v\n", err)
+			} else {
+				fmt.Printf("  ✓ Extracted %d references from issues\n", issueRefs)
+			}
 
-		// Extract from PRs
-		prRefs, err := commitExtractor.ExtractPRReferences(ctx, repoID)
-		if err != nil {
-			fmt.Printf("  ⚠️  PR extraction failed: %v\n", err)
-		} else {
-			fmt.Printf("  ✓ Extracted %d references from PRs\n", prRefs)
-		}
+			// Extract from Commits
+			commitRefs, err := commitExtractor.ExtractCommitReferences(ctx, repoID)
+			if err != nil {
+				fmt.Printf("  ⚠️  Commit extraction failed: %v\n", err)
+			} else {
+				fmt.Printf("  ✓ Extracted %d references from commits\n", commitRefs)
+			}
 
-		extractDuration := time.Since(extractStart)
-		totalRefs := issueRefs + commitRefs + prRefs
-		fmt.Printf("  ✓ Extracted %d total references in %v\n", totalRefs, extractDuration)
+			// Extract from PRs
+			prRefs, err := commitExtractor.ExtractPRReferences(ctx, repoID)
+			if err != nil {
+				fmt.Printf("  ⚠️  PR extraction failed: %v\n", err)
+			} else {
+				fmt.Printf("  ✓ Extracted %d references from PRs\n", prRefs)
+			}
+
+			extractDuration := time.Since(extractStart)
+			totalRefs := issueRefs + commitRefs + prRefs
+			fmt.Printf("  ✓ Extracted %d total references in %v\n", totalRefs, extractDuration)
+
+			// Stage: Issue-PR Linking
+			fmt.Printf("\n  Linking issues to pull requests...\n")
+			linkStart := time.Now()
+
+			// Create linking orchestrator with the time window
+			orchestrator := linking.NewOrchestrator(stagingDB, llmClient, repoID, days)
+
+			// Run multi-phase linking pipeline
+			if err := orchestrator.Run(ctx); err != nil {
+				fmt.Printf("  ⚠️  Issue-PR linking failed: %v\n", err)
+				fmt.Printf("  → Graph will use fallback linking methods\n")
+			} else {
+				linkDuration := time.Since(linkStart)
+				fmt.Printf("  ✓ Issue-PR linking completed in %v\n", linkDuration)
+				fmt.Printf("    (Links will be loaded into graph during graph construction)\n")
+			}
+		} else {
+			fmt.Printf("  ⚠️  LLM extraction skipped (API key not configured)\n")
+		}
 	} else {
-		fmt.Printf("  ⚠️  LLM extraction skipped (OPENAI_API_KEY not configured)\n")
+		fmt.Printf("\n[3/4] LLM extraction skipped (use --llm flag to enable)\n")
 	}
 
-	// Stage 1.75: Issue-PR Linking (Layer 3 Preparation)
-	fmt.Printf("\n[3.75/5] Linking issues to pull requests...\n")
-	linkStart := time.Now()
-
-	if llmClient.IsEnabled() {
-		// Create linking orchestrator with the time window
-		orchestrator := linking.NewOrchestrator(stagingDB, llmClient, repoID, days)
-
-		// Run multi-phase linking pipeline
-		if err := orchestrator.Run(ctx); err != nil {
-			fmt.Printf("  ⚠️  Issue-PR linking failed: %v\n", err)
-			fmt.Printf("  → Graph will use fallback linking methods\n")
-		} else {
-			linkDuration := time.Since(linkStart)
-			fmt.Printf("  ✓ Issue-PR linking completed in %v\n", linkDuration)
-			fmt.Printf("    (Links will be loaded into graph during graph construction)\n")
-		}
-	} else {
-		fmt.Printf("  ⚠️  Issue-PR linking skipped (OPENAI_API_KEY not configured)\n")
-	}
-
-	// Stage 2: Build graph from PostgreSQL → Neo4j/Neptune (Layer 2 & 3 graph construction)
-	fmt.Printf("\n[4/5] Building temporal & incident graph (Layer 2 & 3)...\n")
+	// Stage: Build graph from PostgreSQL → Neo4j (100% confidence graph)
+	fmt.Printf("\n[4/4] Building 100%% confidence graph from GitHub data...\n")
 	graphStart := time.Now()
 
-	// Reuse graphBuilder from Layer 1
+	// Create graph builder
+	graphBuilder := graph.NewBuilder(stagingDB, graphBackend)
+
 	// Pass repoPath to resolve file paths from GitHub commits
 	buildStats, err := graphBuilder.BuildGraph(ctx, repoID, repoPath)
 	if err != nil {
@@ -405,15 +359,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Graph built in %v\n", graphDuration)
 	fmt.Printf("    Nodes: %d | Edges: %d\n", buildStats.Nodes, buildStats.Edges)
 
-	// Stage 3: Validate all 3 layers
-	fmt.Printf("\n[4.5/5] Validating all 3 layers...\n")
-	if err := validateGraph(ctx, graphBackend, buildStats, parseResult); err != nil {
+	// Stage: Validate graph
+	fmt.Printf("\n  Validating graph structure...\n")
+	if err := validateGraph(ctx, graphBackend, buildStats); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
-	fmt.Printf("  ✓ All layers validated successfully\n")
+	fmt.Printf("  ✓ Graph validated successfully\n")
 
-	// Stage 3.5: Apply indexes for optimal query performance
-	fmt.Printf("\n[5/5] Creating database indexes...\n")
+	// Stage: Apply indexes for optimal query performance
+	fmt.Printf("\n  Creating database indexes...\n")
 	indexStart := time.Now()
 
 	if err := createIndexes(ctx, graphBackend); err != nil {
@@ -433,15 +387,18 @@ func runInit(cmd *cobra.Command, args []string) error {
 		developerCount = result.(int64)
 	}
 
-	fmt.Printf("\n✅ CodeRisk initialized for %s/%s (All 3 Layers)\n", owner, repo)
+	fmt.Printf("\n✅ CodeRisk initialized for %s/%s (100%% Confidence Graph)\n", owner, repo)
 	fmt.Printf("\n📊 Summary:\n")
 	fmt.Printf("   Total time: %v\n", totalDuration)
-	fmt.Printf("   Layer 1 (Structure): %d files, %d functions, %d classes\n",
-		parseResult.FilesParsed, parseResult.Functions, parseResult.Classes)
-	fmt.Printf("   Layer 2 (Temporal): %d commits, %d developers\n",
-		stats.Commits, developerCount)
-	fmt.Printf("   Layer 3 (Incidents): %d issues, %d PRs\n",
-		stats.Issues, stats.PRs)
+	fmt.Printf("   GitHub Data: %d commits, %d issues, %d PRs\n",
+		stats.Commits, stats.Issues, stats.PRs)
+	fmt.Printf("   Graph: %d nodes, %d edges (%d developers)\n",
+		buildStats.Nodes, buildStats.Edges, developerCount)
+	if enableLLM {
+		fmt.Printf("   LLM Extraction: Enabled\n")
+	} else {
+		fmt.Printf("   LLM Extraction: Disabled (use --llm to enable)\n")
+	}
 	fmt.Printf("\n🚀 Next steps:\n")
 	fmt.Printf("   • Test: crisk check <file>\n")
 	fmt.Printf("   • Browse graph: http://localhost:7475 (Neo4j Browser)\n")
@@ -449,12 +406,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Post usage telemetry if authenticated
 	if authManager != nil {
-		// Estimate cost: rough estimate based on parsing complexity
-		// Actual OpenAI costs would need to be tracked during LLM usage
-		estimatedCost := 0.0 // No LLM usage in init
+		estimatedCost := 0.0 // No LLM usage in init without --llm flag
 		totalNodes := buildStats.Nodes
 
-		if err := authManager.PostUsage("init", parseResult.FilesParsed, totalNodes, 0, estimatedCost); err != nil {
+		if err := authManager.PostUsage("init", 0, totalNodes, 0, estimatedCost); err != nil {
 			// Silently fail - telemetry shouldn't block the command
 			fmt.Printf("   (telemetry skipped: %v)\n", err)
 		}
@@ -472,14 +427,48 @@ func createIndexes(ctx context.Context, backend graph.Backend) error {
 		name  string
 		query string
 	}{
+		// ===== Multi-repo composite constraints (PRIMARY KEYS) =====
+		// These ensure uniqueness within a repository (repo_id + unique property)
 		{
-			"file_path_unique",
-			"CREATE CONSTRAINT file_path_unique IF NOT EXISTS FOR (f:File) REQUIRE f.path IS UNIQUE",
+			"file_repo_path_unique",
+			"CREATE CONSTRAINT file_repo_path_unique IF NOT EXISTS FOR (f:File) REQUIRE (f.repo_id, f.path) IS UNIQUE",
 		},
 		{
-			"file_file_path_idx",
-			"CREATE INDEX file_file_path_idx IF NOT EXISTS FOR (f:File) ON (f.file_path)",
+			"commit_repo_sha_unique",
+			"CREATE CONSTRAINT commit_repo_sha_unique IF NOT EXISTS FOR (c:Commit) REQUIRE (c.repo_id, c.sha) IS UNIQUE",
 		},
+		{
+			"pr_repo_number_unique",
+			"CREATE CONSTRAINT pr_repo_number_unique IF NOT EXISTS FOR (pr:PR) REQUIRE (pr.repo_id, pr.number) IS UNIQUE",
+		},
+		{
+			"issue_repo_number_unique",
+			"CREATE CONSTRAINT issue_repo_number_unique IF NOT EXISTS FOR (i:Issue) REQUIRE (i.repo_id, i.number) IS UNIQUE",
+		},
+
+		// ===== Multi-repo composite indexes (PERFORMANCE) =====
+		// These speed up lookups filtered by repo_id
+		{
+			"file_repo_path_idx",
+			"CREATE INDEX file_repo_path_idx IF NOT EXISTS FOR (f:File) ON (f.repo_id, f.path)",
+		},
+		{
+			"commit_repo_sha_idx",
+			"CREATE INDEX commit_repo_sha_idx IF NOT EXISTS FOR (c:Commit) ON (c.repo_id, c.sha)",
+		},
+		{
+			"commit_repo_date_idx",
+			"CREATE INDEX commit_repo_date_idx IF NOT EXISTS FOR (c:Commit) ON (c.repo_id, c.committed_at)",
+		},
+
+		// ===== Global constraints (no repo_id) =====
+		// Developer emails are shared across repositories
+		{
+			"developer_email_unique",
+			"CREATE CONSTRAINT developer_email_unique IF NOT EXISTS FOR (d:Developer) REQUIRE d.email IS UNIQUE",
+		},
+
+		// ===== Deprecated node types (backward compatibility) =====
 		{
 			"function_unique_id_unique",
 			"CREATE CONSTRAINT function_unique_id_unique IF NOT EXISTS FOR (f:Function) REQUIRE f.unique_id IS UNIQUE",
@@ -489,32 +478,8 @@ func createIndexes(ctx context.Context, backend graph.Backend) error {
 			"CREATE CONSTRAINT class_unique_id_unique IF NOT EXISTS FOR (c:Class) REQUIRE c.unique_id IS UNIQUE",
 		},
 		{
-			"commit_sha_unique",
-			"CREATE CONSTRAINT commit_sha_unique IF NOT EXISTS FOR (c:Commit) REQUIRE c.sha IS UNIQUE",
-		},
-		{
-			"developer_email_unique",
-			"CREATE CONSTRAINT developer_email_unique IF NOT EXISTS FOR (d:Developer) REQUIRE d.email IS UNIQUE",
-		},
-		{
-			"commit_date_idx",
-			"CREATE INDEX commit_date_idx IF NOT EXISTS FOR (c:Commit) ON (c.author_date)",
-		},
-		{
-			"pr_number_unique",
-			"CREATE CONSTRAINT pr_number_unique IF NOT EXISTS FOR (pr:PullRequest) REQUIRE pr.number IS UNIQUE",
-		},
-		{
 			"incident_id_unique",
 			"CREATE CONSTRAINT incident_id_unique IF NOT EXISTS FOR (i:Incident) REQUIRE i.id IS UNIQUE",
-		},
-		{
-			"issue_number_unique",
-			"CREATE CONSTRAINT issue_number_unique IF NOT EXISTS FOR (i:Issue) REQUIRE i.number IS UNIQUE",
-		},
-		{
-			"incident_severity_idx",
-			"CREATE INDEX incident_severity_idx IF NOT EXISTS FOR (i:Incident) ON (i.severity)",
 		},
 	}
 
@@ -536,20 +501,20 @@ func parseRepoName(repoName string) (owner, repo string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// validateGraph performs basic sanity checks on all 3 layers
-func validateGraph(ctx context.Context, backend graph.Backend, stats *graph.BuildStats, parseResult *ingestion.ProcessResult) error {
+// validateGraph performs basic sanity checks on the 100% confidence graph
+func validateGraph(ctx context.Context, backend graph.Backend, stats *graph.BuildStats) error {
 	// Check graph stats
-	if stats.Nodes == 0 && parseResult.EntitiesTotal == 0 {
+	if stats.Nodes == 0 {
 		return fmt.Errorf("no nodes created in graph")
 	}
 
-	// Verify required node types exist for all 3 layers
+	// Verify required node types exist
 	requiredLabels := map[string]string{
-		"File":      "Layer 1 (Structure)",
-		"Function":  "Layer 1 (Structure)",
-		"Commit":    "Layer 2 (Temporal)",
-		"Developer": "Layer 2 (Temporal)",
-		"Issue":     "Layer 3 (Incidents)",
+		"File":      "GitHub commits",
+		"Commit":    "GitHub commits",
+		"Developer": "GitHub commits",
+		"Issue":     "GitHub issues",
+		"PR":        "GitHub pull requests",
 	}
 
 	fmt.Printf("  Checking node types:\n")
