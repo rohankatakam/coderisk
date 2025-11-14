@@ -81,7 +81,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Printf("🤖 Starting issue-commit-PR extraction...")
-	log.Printf("   Model: GPT-4o-mini")
+	log.Printf("   Model: Auto-detected (OpenAI/Gemini based on LLM_PROVIDER)")
 	log.Printf("   Batch size: 20 per API call")
 
 	// Connect to PostgreSQL

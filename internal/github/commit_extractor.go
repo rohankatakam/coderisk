@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/rohankatakam/coderisk/internal/database"
 	"github.com/rohankatakam/coderisk/internal/llm"
@@ -161,12 +162,75 @@ Rules:
 	}
 
 	// Store extracted references
+	// CRITICAL FIX: Match by SHA instead of array index to prevent misattribution
+	// See: EXTRACTION_BUG_ROOT_CAUSE.md - Bug discovered 2025-11-13
 	var allRefs []database.IssueCommitRef
-	for i, output := range result.Results {
-		commit := commits[i]
+
+	// Create a map of SHA → commit for O(1) lookup
+	commitMap := make(map[string]database.CommitData)
+	for _, commit := range commits {
+		// Use first 10 chars of SHA as key to match LLM output format
+		key := commit.SHA
+		if len(key) > 10 {
+			key = key[:10]
+		}
+		commitMap[key] = commit
+		// Also store full SHA for backward compatibility
+		commitMap[commit.SHA] = commit
+	}
+
+	// Match LLM results by ID (commit SHA), not array index
+	validationStats := struct {
+		matched   int
+		notFound  int
+		validated int
+		failed    int
+	}{}
+
+	for _, output := range result.Results {
+		// Look up commit by SHA
+		commit, found := commitMap[output.ID]
+		if !found {
+			log.Printf("  ⚠️  LLM returned unknown commit ID %s - skipping", output.ID)
+			validationStats.notFound++
+			continue
+		}
+		validationStats.matched++
 
 		for _, ref := range output.References {
 			commitSHA := commit.SHA
+
+			// VALIDATION: Verify the reference actually exists in the commit message
+			// This catches LLM hallucinations and cross-contamination bugs
+			messageText := strings.ToLower(commit.Message)
+			targetStr := fmt.Sprintf("#%d", ref.TargetID)
+			targetStrLower := strings.ToLower(targetStr)
+
+			validated := strings.Contains(messageText, targetStrLower) ||
+				strings.Contains(messageText, fmt.Sprintf("pr %d", ref.TargetID)) ||
+				strings.Contains(messageText, fmt.Sprintf("pr#%d", ref.TargetID)) ||
+				strings.Contains(messageText, fmt.Sprintf("issue %d", ref.TargetID)) ||
+				strings.Contains(messageText, fmt.Sprintf("issue#%d", ref.TargetID))
+
+			if validated {
+				validationStats.validated++
+			} else {
+				// Lower confidence for unvalidated references
+				log.Printf("  ⚠️  Validation failed: Commit %.7s doesn't contain %s (message: %q)",
+					commit.SHA, targetStr, truncateText(commit.Message, 60))
+
+				// Reduce confidence significantly but don't discard entirely
+				// (might be legitimate reference in non-standard format)
+				ref.Confidence = ref.Confidence * 0.3
+				validationStats.failed++
+
+				// Skip if confidence drops too low
+				if ref.Confidence < 0.2 {
+					log.Printf("  ⚠️  Skipping low-confidence reference after validation failure")
+					continue
+				}
+			}
+
 			dbRef := database.IssueCommitRef{
 				RepoID:          repoID,
 				IssueNumber:     ref.TargetID, // Will be resolved to Issue or PR later
@@ -179,6 +243,13 @@ Rules:
 
 			allRefs = append(allRefs, dbRef)
 		}
+	}
+
+	// Log validation statistics
+	if validationStats.matched > 0 {
+		log.Printf("  📊 Validation: %d matched, %d validated, %d failed, %d not found",
+			validationStats.matched, validationStats.validated,
+			validationStats.failed, validationStats.notFound)
 	}
 
 	// Store all references in batch
@@ -247,12 +318,70 @@ Rules:
 	}
 
 	// Store extracted references
+	// CRITICAL FIX: Match by PR number instead of array index to prevent misattribution
+	// See: EXTRACTION_BUG_ROOT_CAUSE.md - Bug discovered 2025-11-13
 	var allRefs []database.IssueCommitRef
-	for i, output := range result.Results {
-		pr := prs[i]
+
+	// Create a map of PR number → PR data for O(1) lookup
+	prMap := make(map[string]database.PRData)
+	for _, pr := range prs {
+		// LLM returns PR number as string in the "id" field
+		prMap[fmt.Sprintf("%d", pr.Number)] = pr
+	}
+
+	// Match LLM results by ID (PR number), not array index
+	validationStats := struct {
+		matched   int
+		notFound  int
+		validated int
+		failed    int
+	}{}
+
+	for _, output := range result.Results {
+		// Look up PR by number
+		pr, found := prMap[output.ID]
+		if !found {
+			log.Printf("  ⚠️  LLM returned unknown PR ID %s - skipping", output.ID)
+			validationStats.notFound++
+			continue
+		}
+		validationStats.matched++
 
 		for _, ref := range output.References {
 			prNumber := pr.Number
+
+			// VALIDATION: Verify the reference actually exists in PR title or body
+			// This catches LLM hallucinations and cross-contamination bugs
+			titleText := strings.ToLower(pr.Title)
+			bodyText := strings.ToLower(pr.Body)
+			combinedText := titleText + " " + bodyText
+			targetStr := fmt.Sprintf("#%d", ref.TargetID)
+			targetStrLower := strings.ToLower(targetStr)
+
+			validated := strings.Contains(combinedText, targetStrLower) ||
+				strings.Contains(combinedText, fmt.Sprintf("pr %d", ref.TargetID)) ||
+				strings.Contains(combinedText, fmt.Sprintf("pr#%d", ref.TargetID)) ||
+				strings.Contains(combinedText, fmt.Sprintf("issue %d", ref.TargetID)) ||
+				strings.Contains(combinedText, fmt.Sprintf("issue#%d", ref.TargetID))
+
+			if validated {
+				validationStats.validated++
+			} else {
+				// Lower confidence for unvalidated references
+				log.Printf("  ⚠️  Validation failed: PR #%d doesn't contain %s (title: %q)",
+					pr.Number, targetStr, truncateText(pr.Title, 60))
+
+				// Reduce confidence significantly but don't discard entirely
+				ref.Confidence = ref.Confidence * 0.3
+				validationStats.failed++
+
+				// Skip if confidence drops too low
+				if ref.Confidence < 0.2 {
+					log.Printf("  ⚠️  Skipping low-confidence reference after validation failure")
+					continue
+				}
+			}
+
 			dbRef := database.IssueCommitRef{
 				RepoID:          repoID,
 				IssueNumber:     ref.TargetID, // Will be resolved to Issue or PR later
@@ -270,6 +399,13 @@ Rules:
 
 			allRefs = append(allRefs, dbRef)
 		}
+	}
+
+	// Log validation statistics
+	if validationStats.matched > 0 {
+		log.Printf("  📊 Validation: %d matched, %d validated, %d failed, %d not found",
+			validationStats.matched, validationStats.validated,
+			validationStats.failed, validationStats.notFound)
 	}
 
 	// Store all references in batch
