@@ -40,12 +40,12 @@ type DataSummary struct {
 }
 
 type EdgeMetrics struct {
-	ModifiedEdges      int // Commit->File
-	AuthoredEdges      int // Developer->Commit
-	CreatedEdges       int // Developer->PR
-	DependsOnEdges     int // File->File
+	ModifiedEdges       int // Commit->File
+	AuthoredEdges       int // Developer->Commit
+	CreatedEdges        int // Developer->PR
+	DependsOnEdges      int // File->File
 	AssociatedWithEdges int // Issue->Commit, Issue->PR
-	InPREdges          int // Commit->PR
+	MergedAsEdges       int // PR->Commit
 }
 
 type CompletenessMetrics struct {
@@ -414,18 +414,18 @@ func validateEdges(ctx context.Context, backend graph.Backend, repoID int64, rep
 		}
 	}
 
-	// IN_PR edges (Commit->PR)
+	// MERGED_AS edges (PR->Commit)
 	results, err = backend.QueryWithParams(ctx, `
-		MATCH (c:Commit)-[r:IN_PR]->(p:PR)
-		WHERE c.repo_id = $repoId AND p.repo_id = $repoId
+		MATCH (pr:PR)-[r:MERGED_AS]->(c:Commit)
+		WHERE pr.repo_id = $repoId AND c.repo_id = $repoId
 		RETURN count(r) as count
 	`, map[string]interface{}{"repoId": repoID})
 	if err != nil {
-		return fmt.Errorf("failed to count IN_PR edges: %w", err)
+		return fmt.Errorf("failed to count MERGED_AS edges: %w", err)
 	}
 	if len(results) > 0 {
 		if count, ok := results[0]["count"].(int64); ok {
-			report.Edges.InPREdges = int(count)
+			report.Edges.MergedAsEdges = int(count)
 		}
 	}
 
@@ -503,7 +503,7 @@ func printReport(report *ValidationReport, jsonOutput bool) {
 	fmt.Printf("  MODIFIED (Commit->File):        %d\n", report.Edges.ModifiedEdges)
 	fmt.Printf("  AUTHORED (Developer->Commit):   %d\n", report.Edges.AuthoredEdges)
 	fmt.Printf("  CREATED (Developer->PR):        %d\n", report.Edges.CreatedEdges)
-	fmt.Printf("  IN_PR (Commit->PR):             %d\n", report.Edges.InPREdges)
+	fmt.Printf("  MERGED_AS (PR->Commit):             %d\n", report.Edges.MergedAsEdges)
 	fmt.Printf("  ASSOCIATED_WITH (Issue/PR->Commit): %d\n", report.Edges.AssociatedWithEdges)
 	fmt.Printf("  DEPENDS_ON (File->File):        %d\n", report.Edges.DependsOnEdges)
 	fmt.Println()
