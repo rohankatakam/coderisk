@@ -24,9 +24,10 @@ type Fetcher struct {
 func NewFetcher(githubToken string, stagingDB *database.StagingClient) *Fetcher {
 	client := github.NewClient(nil).WithAuthToken(githubToken)
 
-	// GitHub allows 5,000 requests/hour = 1.4 req/sec
-	// Use conservative 1 req/sec to avoid rate limits
-	limiter := rate.NewLimiter(rate.Every(1*time.Second), 1)
+	// GitHub allows 5,000 requests/hour with personal access token
+	// Optimal rate: 1.18 req/sec = 4,248 req/hour (86% utilization)
+	// This leaves safe margin for secondary limits (900 points/minute = 15 points/sec)
+	limiter := rate.NewLimiter(rate.Every(850*time.Millisecond), 1)
 
 	return &Fetcher{
 		client:      client,
@@ -978,7 +979,7 @@ func (f *Fetcher) FetchIssueComments(ctx context.Context, repoID int64, owner, r
 	return commentCount, nil
 }
 
-// logRateLimit logs GitHub API rate limit info
+// logRateLimit logs GitHub API rate limit info and adaptively adjusts rate limiter
 func (f *Fetcher) logRateLimit(resp *github.Response) {
 	if resp == nil {
 		return
@@ -987,9 +988,25 @@ func (f *Fetcher) logRateLimit(resp *github.Response) {
 	remaining := resp.Rate.Remaining
 	limit := resp.Rate.Limit
 
-	// Warn if getting low
+	// Adaptive rate limiting based on remaining quota
 	if remaining < 100 {
-		log.Printf("  ⚠️  Rate limit low: %d/%d remaining", remaining, limit)
+		// Critical: slow down significantly (0.5 req/sec)
+		f.rateLimiter = rate.NewLimiter(rate.Every(2*time.Second), 1)
+		log.Printf("  ⚠️  Rate limit critical: %d/%d remaining (throttling to 0.5 req/sec)", remaining, limit)
+	} else if remaining < 500 {
+		// Low: slow down moderately (0.83 req/sec)
+		f.rateLimiter = rate.NewLimiter(rate.Every(1200*time.Millisecond), 1)
+		log.Printf("  ⚠️  Rate limit low: %d/%d remaining (throttling to 0.83 req/sec)", remaining, limit)
+	} else if remaining < 1000 {
+		// Moderate: use optimal rate (1.18 req/sec)
+		f.rateLimiter = rate.NewLimiter(rate.Every(850*time.Millisecond), 1)
+		if remaining%100 == 0 {
+			log.Printf("  ℹ️  Rate limit: %d/%d remaining", remaining, limit)
+		}
+	}
+	// Above 1000: keep optimal rate, no logging unless it's a round number
+	if remaining >= 1000 && remaining%500 == 0 {
+		log.Printf("  ℹ️  Rate limit: %d/%d remaining", remaining, limit)
 	}
 }
 

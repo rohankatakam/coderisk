@@ -258,16 +258,35 @@ func (c *StagingClient) StoreTree(ctx context.Context, repoID int64, sha, ref st
 
 // StoreLanguages stores repository language statistics
 func (c *StagingClient) StoreLanguages(ctx context.Context, repoID int64, languages json.RawMessage) error {
+	// Parse JSON map of language: bytes
+	var langMap map[string]int64
+	if err := json.Unmarshal(languages, &langMap); err != nil {
+		return fmt.Errorf("failed to unmarshal languages: %w", err)
+	}
+
+	// Calculate total bytes for percentages
+	var totalBytes int64
+	for _, bytes := range langMap {
+		totalBytes += bytes
+	}
+
+	if totalBytes == 0 {
+		return nil // No languages to store
+	}
+
+	// Insert each language as a separate row
 	query := `
-		INSERT INTO github_languages (repo_id, languages, fetched_at)
-		VALUES ($1, $2, NOW())
-		ON CONFLICT (repo_id)
-		DO UPDATE SET languages = EXCLUDED.languages, fetched_at = NOW()
+		INSERT INTO github_languages (repo_id, language, bytes, percentage, fetched_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (repo_id, language)
+		DO UPDATE SET bytes = EXCLUDED.bytes, percentage = EXCLUDED.percentage, fetched_at = NOW()
 	`
 
-	_, err := c.db.ExecContext(ctx, query, repoID, languages)
-	if err != nil {
-		return fmt.Errorf("failed to store languages: %w", err)
+	for lang, bytes := range langMap {
+		percentage := float64(bytes) / float64(totalBytes) * 100.0
+		if _, err := c.db.ExecContext(ctx, query, repoID, lang, bytes, percentage); err != nil {
+			return fmt.Errorf("failed to store language %s: %w", lang, err)
+		}
 	}
 
 	return nil
@@ -280,8 +299,8 @@ func (c *StagingClient) StoreContributor(ctx context.Context, repoID int64, gith
 			repo_id, github_id, login, contributions, raw_data, fetched_at
 		)
 		VALUES ($1, $2, $3, $4, $5, NOW())
-		ON CONFLICT (repo_id, github_id)
-		DO UPDATE SET contributions = EXCLUDED.contributions, raw_data = EXCLUDED.raw_data, fetched_at = NOW()
+		ON CONFLICT (repo_id, login)
+		DO UPDATE SET github_id = EXCLUDED.github_id, contributions = EXCLUDED.contributions, raw_data = EXCLUDED.raw_data, fetched_at = NOW()
 	`
 
 	_, err := c.db.ExecContext(ctx, query, repoID, githubID, login, contributions, rawData)
@@ -627,7 +646,7 @@ func (c *StagingClient) StoreTimelineEvent(ctx context.Context, event TimelineEv
 			actor_login, actor_id, raw_data, fetched_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
-		ON CONFLICT (issue_id, event_type, created_at, source_number) DO NOTHING
+		ON CONFLICT (issue_id, event_type, created_at, source_sha, source_number) DO NOTHING
 	`
 
 	_, err := c.db.ExecContext(ctx, query,
@@ -928,7 +947,7 @@ func (c *StagingClient) StorePRFile(ctx context.Context, repoID, prID int64, fil
 			previous_filename, patch, raw_data, fetched_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-		ON CONFLICT (pr_id, filename)
+		ON CONFLICT (repo_id, pr_id, filename)
 		DO UPDATE SET
 			status = EXCLUDED.status,
 			additions = EXCLUDED.additions,
