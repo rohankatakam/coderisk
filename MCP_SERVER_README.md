@@ -84,8 +84,19 @@ You should see `crisk.get_risk_summary` listed.
 Returns risk evidence for a file including ownership, coupling, and temporal incident data.
 
 **Parameters**:
-- `file_path` (required): Path to the file to analyze
-- `diff_content` (optional): Diff content for uncommitted changes (future use)
+- `file_path` (required): Path to the file to analyze (relative or absolute)
+- `repo_root` (optional): Repository root path for resolving absolute paths
+- `diff_content` (optional): Git diff content for uncommitted change analysis
+- `max_coupled_blocks` (optional): Maximum coupled blocks per code block (default: 1)
+- `max_incidents` (optional): Maximum incidents per code block (default: 1)
+- `max_blocks` (optional): Maximum total blocks to return (default: 10, 0 = all)
+- `block_types` (optional): Filter by block types (e.g., `["class", "function"]`)
+- `summary_only` (optional): Return only aggregated statistics (default: false)
+- `min_staleness` (optional): Only return blocks with staleness >= N days
+- `min_incidents` (optional): Only return blocks with at least N incidents
+- `min_risk_score` (optional): Only return blocks with risk score >= threshold
+- `include_risk_score` (optional): Include calculated risk score in output
+- `prioritize_recent` (optional): Boost risk score for recently changed code
 
 **Example Usage in Claude Code**:
 
@@ -93,12 +104,34 @@ Returns risk evidence for a file including ownership, coupling, and temporal inc
 "Can you get the risk summary for docs/docs.json?"
 ```
 
-Or invoke the tool directly:
+**Using Relative Path**:
 ```json
 {
   "tool": "crisk.get_risk_summary",
   "arguments": {
     "file_path": "docs/docs.json"
+  }
+}
+```
+
+**Using Absolute Path** (requires `repo_root`):
+```json
+{
+  "tool": "crisk.get_risk_summary",
+  "arguments": {
+    "file_path": "/Users/rohankatakam/Documents/brain/mcp-use/libraries/python/mcp_use/auth/oauth.py",
+    "repo_root": "/Users/rohankatakam/Documents/brain/mcp-use"
+  }
+}
+```
+
+**Analyzing Uncommitted Changes** (diff-based):
+```json
+{
+  "tool": "crisk.get_risk_summary",
+  "arguments": {
+    "diff_content": "diff --git a/src/auth.py b/src/auth.py\n...",
+    "repo_root": "/Users/rohankatakam/Documents/brain/mcp-use"
   }
 }
 ```
@@ -172,12 +205,24 @@ echo '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"crisk.get_
 
 ### Data Flow
 
-1. **File Identity Resolution**: Uses `git log --follow` to track renamed files (cached in bbolt)
-2. **Code Block Query**: Queries Neo4j for code blocks in the file (including all historical paths)
-3. **Ownership Data**: Retrieved from Neo4j CodeBlock node properties
-4. **Coupling Data**: Queries Neo4j CO_CHANGES_WITH edges (rate >= 0.5)
-5. **Temporal Data**: Queries PostgreSQL code_block_incidents table
-6. **Response Assembly**: Combines all data into structured BlockEvidence objects
+#### File-Based Analysis (Traditional)
+1. **Path Resolution**: If absolute path provided, normalizes to relative using `repo_root`
+2. **File Identity Resolution**: Uses `git log --follow` to track renamed files (cached in bbolt)
+3. **Code Block Query**: Queries Neo4j for code blocks in the file (including all historical paths)
+4. **Ownership Data**: Retrieved from Neo4j CodeBlock node properties
+5. **Coupling Data**: Queries Neo4j CO_CHANGES_WITH edges (rate >= 0.5)
+6. **Temporal Data**: Queries PostgreSQL code_block_incidents table
+7. **Risk Scoring**: Calculates risk score based on incidents, coupling, staleness, and block type
+8. **Response Assembly**: Combines all data into structured BlockEvidence objects
+
+#### Diff-Based Analysis (Meta-Ingestion)
+1. **LLM Extraction**: Uses Gemini Flash to extract modified code blocks from diff (reuses atomizer infrastructure)
+2. **Path Resolution**: Normalizes file paths using `repo_root` if provided
+3. **File Identity Resolution**: Uses `git log --follow` for each modified file
+4. **Code Block Query**: Queries Neo4j for extracted blocks by name across all historical paths
+5. **Risk Analysis**: Same as file-based (steps 4-8 above)
+
+> **Meta-Ingestion**: The diff-based flow applies the same LLM extraction process used during ingestion to real-time diffs, enabling "What is the risk of my changes?" queries without tree-sitter parsing.
 
 ### Caching
 
@@ -210,10 +255,19 @@ This means:
 - File hasn't been analyzed yet (run `crisk init` first)
 - File path doesn't match what's in the database
 - Wrong repo_id (currently hardcoded to 4)
+- **Absolute path without repo_root**: If using absolute path, ensure `repo_root` is provided
 
 Check what files exist:
 ```bash
 PGPASSWORD="CHANGE_THIS_PASSWORD_IN_PRODUCTION_123" psql -h localhost -p 5433 -U coderisk -d coderisk -c "SELECT DISTINCT file_path FROM code_blocks WHERE repo_id = 4 LIMIT 10;"
+```
+
+**Solution for absolute paths**: Always pass `repo_root` when using absolute file paths:
+```json
+{
+  "file_path": "/full/path/to/file.py",
+  "repo_root": "/full/path/to/repo"
+}
 ```
 
 ### Empty coupling/temporal data
@@ -242,24 +296,67 @@ go build -o bin/crisk-check-server ./cmd/crisk-check-server
 
 ### Source files
 
-- `cmd/crisk-check-server/main.go` - Entry point
-- `internal/mcp/handler.go` - MCP protocol handler
-- `internal/mcp/stdio_transport.go` - stdio JSON-RPC transport
+- `cmd/crisk-check-server/main.go` - Entry point, tool registration
 - `internal/mcp/local_graph_client.go` - Neo4j/PostgreSQL queries
-- `internal/mcp/identity_resolver.go` - git log --follow wrapper
-- `internal/mcp/tools/get_risk_summary.go` - Main risk tool
+- `internal/mcp/identity_resolver.go` - git log --follow wrapper with dynamic repo_root
+- `internal/mcp/diff_atomizer.go` - LLM-based diff extraction (meta-ingestion)
+- `internal/mcp/path_utils.go` - Path normalization utilities
+- `internal/mcp/tools/get_risk_summary.go` - Main risk tool with branching logic
 - `internal/mcp/tools/types.go` - Data type definitions
+- `internal/llm/client.go` - Multi-provider LLM client (OpenAI/Gemini)
+- `internal/llm/gemini_client.go` - Gemini-specific client with retry logic
+
+## Path Resolution Strategies
+
+The MCP server supports three path resolution approaches:
+
+### 1. Relative Paths (Simplest)
+```json
+{"file_path": "libraries/python/mcp_use/client/session.py"}
+```
+- Works if Claude Code is in the repository root
+- No additional configuration needed
+
+### 2. Absolute Paths (Dynamic)
+```json
+{
+  "file_path": "/Users/rohankatakam/Documents/brain/mcp-use/libraries/python/mcp_use/auth/oauth.py",
+  "repo_root": "/Users/rohankatakam/Documents/brain/mcp-use"
+}
+```
+- Pass `repo_root` from Claude Code's working directory context
+- MCP server normalizes absolute → relative for graph queries
+- Enables cross-repository analysis
+
+### 3. Diff-Based (Uncommitted Changes)
+```json
+{
+  "diff_content": "diff --git a/src/file.py ...",
+  "repo_root": "/Users/rohankatakam/Documents/brain/project"
+}
+```
+- Analyzes uncommitted changes
+- Uses LLM to extract modified code blocks
+- Queries graph for historical risk data
+
+**Key Insight**: The `repo_root` parameter is passed from the Claude Code session context, making path resolution dynamic without database storage or filesystem probing.
 
 ## Current Limitations
 
 1. **Hardcoded repo_id**: Currently set to 4 (mcp-use repository)
-2. **Uncommitted changes**: `diff_content` parameter not yet implemented
-3. **Single repo support**: Cannot analyze multiple repos simultaneously
+2. **Single repo support**: Cannot analyze multiple repos simultaneously
+3. **GEMINI_API_KEY required**: Diff-based analysis requires Gemini API key in environment
+
+## Recent Enhancements
+
+- [x] Support diff_content for uncommitted change analysis (LLM-based meta-ingestion)
+- [x] Dynamic absolute path resolution via `repo_root` parameter
+- [x] Risk scoring with filtering and prioritization options
+- [x] Git history tracking with bbolt caching
 
 ## Future Enhancements
 
 - [ ] Auto-detect repo_id from git remote
-- [ ] Support diff_content for uncommitted change analysis
 - [ ] Add resource endpoints for browsing all files
 - [ ] Multi-repo support
 - [ ] Incremental cache invalidation
@@ -267,6 +364,12 @@ go build -o bin/crisk-check-server ./cmd/crisk-check-server
 
 ---
 
-**Status**: ✅ Fully Implemented and Tested
+**Status**: ✅ Fully Implemented with Diff-Based Analysis
 
-**Last Updated**: 2025-11-16
+**Last Updated**: 2025-11-16 22:06
+
+**Recent Changes**:
+- Added `repo_root` parameter for dynamic absolute path resolution
+- Implemented diff-based analysis using Gemini Flash (meta-ingestion)
+- Added comprehensive filtering and risk scoring options
+- Enhanced documentation with path resolution strategies

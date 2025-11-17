@@ -8,6 +8,7 @@ import (
 // GraphClient interface for querying risk data
 type GraphClient interface {
 	GetCodeBlocksForFile(ctx context.Context, filePath string, historicalPaths []string, repoID int) ([]CodeBlock, error)
+	GetCodeBlocksByNames(ctx context.Context, filePathsWithHistorical map[string][]string, blockNames []string, repoID int) ([]CodeBlock, error)
 	GetCouplingData(ctx context.Context, blockID string) (*CouplingData, error)
 	GetTemporalData(ctx context.Context, blockID string) (*TemporalData, error)
 }
@@ -15,32 +16,49 @@ type GraphClient interface {
 // IdentityResolver interface for resolving file renames
 type IdentityResolver interface {
 	ResolveHistoricalPaths(ctx context.Context, currentPath string) ([]string, error)
+	ResolveHistoricalPathsWithRoot(ctx context.Context, currentPath string, repoRoot string) ([]string, error)
+}
+
+// DiffAtomizer interface for extracting code blocks from diffs
+type DiffAtomizer interface {
+	ExtractBlocksFromDiff(ctx context.Context, diff string) ([]BlockReference, error)
+}
+
+// BlockReference represents a code block extracted from a diff
+type BlockReference struct {
+	FilePath  string
+	BlockName string
+	BlockType string
+	Behavior  string
 }
 
 // GetRiskSummaryTool implements the crisk.get_risk_summary tool
 type GetRiskSummaryTool struct {
 	graphClient      GraphClient
 	identityResolver IdentityResolver
+	diffAtomizer     DiffAtomizer // Optional: for diff-based analysis
 }
 
 // NewGetRiskSummaryTool creates a new GetRiskSummaryTool
-func NewGetRiskSummaryTool(graphClient GraphClient, identityResolver IdentityResolver) *GetRiskSummaryTool {
+func NewGetRiskSummaryTool(graphClient GraphClient, identityResolver IdentityResolver, diffAtomizer DiffAtomizer) *GetRiskSummaryTool {
 	return &GetRiskSummaryTool{
 		graphClient:      graphClient,
 		identityResolver: identityResolver,
+		diffAtomizer:     diffAtomizer,
 	}
 }
 
 // Execute executes the get_risk_summary tool
 func (t *GetRiskSummaryTool) Execute(ctx context.Context, args map[string]interface{}) (interface{}, error) {
 	// 1. Parse arguments
-	filePath, ok := args["file_path"].(string)
-	if !ok || filePath == "" {
-		return nil, fmt.Errorf("file_path is required")
-	}
+	filePath, _ := args["file_path"].(string)
+	diffContent, _ := args["diff_content"].(string)
+	repoRoot, _ := args["repo_root"].(string) // Optional: repository root for absolute path resolution
 
-	// Optional diff_content for future use
-	// diffContent, _ := args["diff_content"].(string)
+	// Either file_path OR diff_content must be provided
+	if filePath == "" && diffContent == "" {
+		return nil, fmt.Errorf("either file_path or diff_content is required")
+	}
 
 	// Parse limits with defaults
 	maxCoupledBlocks := 1
@@ -77,18 +95,72 @@ func (t *GetRiskSummaryTool) Execute(ctx context.Context, args map[string]interf
 	// Use repo_id from actual implementation
 	repoID := 4 // mcp-use repo_id
 
-	// 2. Resolve file identity (handle renames)
-	historicalPaths, err := t.identityResolver.ResolveHistoricalPaths(ctx, filePath)
-	if err != nil {
-		// Non-fatal: continue with just current path
-		historicalPaths = []string{}
-	}
+	var blocks []CodeBlock
 
-	// 3. Query Neo4j for CodeBlocks in this file
-	// IMPORTANT: This now returns ownership data inline
-	blocks, err := t.graphClient.GetCodeBlocksForFile(ctx, filePath, historicalPaths, repoID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get code blocks: %w", err)
+	// 2. BRANCH: Diff-based analysis OR file-based analysis
+	if diffContent != "" && t.diffAtomizer != nil {
+		// === DIFF-BASED FLOW (NEW) ===
+		// Extract code blocks from diff using LLM (meta-ingestion)
+		blockRefs, err := t.diffAtomizer.ExtractBlocksFromDiff(ctx, diffContent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract blocks from diff: %w", err)
+		}
+
+		// Build map of file paths to historical paths
+		filePathsWithHistorical := make(map[string][]string)
+		blockNamesSet := make(map[string]bool)
+
+		for _, ref := range blockRefs {
+			// Resolve historical paths for each file in the diff
+			var historical []string
+			var err error
+			if repoRoot != "" {
+				historical, err = t.identityResolver.ResolveHistoricalPathsWithRoot(ctx, ref.FilePath, repoRoot)
+			} else {
+				historical, err = t.identityResolver.ResolveHistoricalPaths(ctx, ref.FilePath)
+			}
+			if err != nil {
+				// Non-fatal: use just current path
+				historical = []string{}
+			}
+			allPaths := append([]string{ref.FilePath}, historical...)
+			filePathsWithHistorical[ref.FilePath] = allPaths
+
+			// Track unique block names
+			blockNamesSet[ref.BlockName] = true
+		}
+
+		// Convert set to slice
+		var blockNames []string
+		for name := range blockNamesSet {
+			blockNames = append(blockNames, name)
+		}
+
+		// Query graph for all extracted blocks
+		blocks, err = t.graphClient.GetCodeBlocksByNames(ctx, filePathsWithHistorical, blockNames, repoID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get code blocks by names: %w", err)
+		}
+	} else {
+		// === FILE-BASED FLOW (EXISTING) ===
+		// Resolve file identity (handle renames)
+		var historicalPaths []string
+		var err error
+		if repoRoot != "" {
+			historicalPaths, err = t.identityResolver.ResolveHistoricalPathsWithRoot(ctx, filePath, repoRoot)
+		} else {
+			historicalPaths, err = t.identityResolver.ResolveHistoricalPaths(ctx, filePath)
+		}
+		if err != nil {
+			// Non-fatal: continue with just current path
+			historicalPaths = []string{}
+		}
+
+		// Query Neo4j for CodeBlocks in this file
+		blocks, err = t.graphClient.GetCodeBlocksForFile(ctx, filePath, historicalPaths, repoID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get code blocks: %w", err)
+		}
 	}
 
 	// Edge case: No blocks found
@@ -259,9 +331,17 @@ func (t *GetRiskSummaryTool) Execute(ctx context.Context, args map[string]interf
 
 	// 6. Return structured response
 	response := map[string]interface{}{
-		"file_path":     filePath,
 		"total_blocks":  len(blocks),
 		"risk_evidence": evidence,
+	}
+
+	// Add file_path for file-based queries, or indicate diff-based analysis
+	if diffContent != "" {
+		response["analysis_type"] = "diff-based"
+		response["diff_provided"] = true
+	} else {
+		response["file_path"] = filePath
+		response["analysis_type"] = "file-based"
 	}
 
 	// Add summary stats if requested

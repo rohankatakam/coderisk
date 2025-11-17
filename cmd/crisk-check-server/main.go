@@ -10,6 +10,8 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	mcpinternal "github.com/rohankatakam/coderisk/internal/mcp"
 	"github.com/rohankatakam/coderisk/internal/mcp/tools"
+	"github.com/rohankatakam/coderisk/internal/config"
+	"github.com/rohankatakam/coderisk/internal/llm"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -27,6 +29,7 @@ func main() {
 	neo4jURI := getEnvOrDefault("NEO4J_URI", "bolt://localhost:7688")
 	neo4jPassword := getEnvOrDefault("NEO4J_PASSWORD", "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123")
 	postgresDSN := getEnvOrDefault("POSTGRES_DSN", "postgres://coderisk:CHANGE_THIS_PASSWORD_IN_PRODUCTION_123@localhost:5433/coderisk?sslmode=disable")
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY") // Optional: for diff-based analysis
 
 	// 2. Connect to Neo4j
 	driver, err := neo4j.NewDriverWithContext(neo4jURI, neo4j.BasicAuth("neo4j", neo4jPassword, ""))
@@ -74,6 +77,32 @@ func main() {
 	resolver := mcpinternal.NewIdentityResolver(cacheDB)
 	log.Println("✅ Identity resolver created")
 
+	// 6.5. Create diff atomizer (optional, requires GEMINI_API_KEY)
+	var diffAtomizer *mcpinternal.DiffAtomizer
+	if geminiAPIKey != "" {
+		log.Println("Creating LLM client for diff analysis...")
+		// Create a minimal config with Gemini API key
+		// Set PHASE2_ENABLED temporarily to allow LLM client creation
+		os.Setenv("PHASE2_ENABLED", "true")
+		cfg := &config.Config{
+			API: config.APIConfig{
+				GeminiKey:   geminiAPIKey,
+				GeminiModel: "gemini-2.0-flash",
+			},
+		}
+		llmClient, err := llm.NewClient(ctx, cfg)
+		if err != nil {
+			log.Printf("⚠️  Failed to create LLM client (diff analysis disabled): %v", err)
+		} else if llmClient.IsEnabled() {
+			diffAtomizer = mcpinternal.NewDiffAtomizer(llmClient)
+			log.Println("✅ Diff atomizer created (supports diff-based analysis)")
+		} else {
+			log.Println("⚠️  LLM client not enabled (diff analysis disabled)")
+		}
+	} else {
+		log.Println("⚠️  GEMINI_API_KEY not set - diff-based analysis disabled (file-based analysis still works)")
+	}
+
 	// 7. Create MCP server using official SDK
 	log.Println("Initializing MCP server...")
 	server := mcp.NewServer(&mcp.Implementation{
@@ -86,6 +115,7 @@ func main() {
 	type ToolArgs struct {
 		FilePath         string   `json:"file_path" jsonschema:"path to the file to analyze"`
 		DiffContent      string   `json:"diff_content,omitempty" jsonschema:"optional diff content for uncommitted changes"`
+		RepoRoot         string   `json:"repo_root,omitempty" jsonschema:"optional repository root path for resolving absolute paths (e.g. /Users/user/Documents/project)"`
 		MaxCoupledBlocks int      `json:"max_coupled_blocks,omitempty" jsonschema:"maximum number of coupled blocks to return per code block (default: 1)"`
 		MaxIncidents     int      `json:"max_incidents,omitempty" jsonschema:"maximum number of incidents to return per code block (default: 1)"`
 		MaxBlocks        int      `json:"max_blocks,omitempty" jsonschema:"maximum number of code blocks to return (default: 10, use 0 for all)"`
@@ -105,8 +135,8 @@ func main() {
 		Warning      string                  `json:"warning,omitempty"`
 	}
 
-	// Create the tool instance
-	riskTool := tools.NewGetRiskSummaryTool(graphClient, resolver)
+	// Create the tool instance with diff atomizer support
+	riskTool := tools.NewGetRiskSummaryTool(graphClient, resolver, diffAtomizer)
 
 	// Register the tool with the SDK
 	mcp.AddTool(server, &mcp.Tool{
@@ -119,6 +149,9 @@ func main() {
 		}
 		if args.DiffContent != "" {
 			argsMap["diff_content"] = args.DiffContent
+		}
+		if args.RepoRoot != "" {
+			argsMap["repo_root"] = args.RepoRoot
 		}
 		// Set defaults for limits
 		maxCoupled := args.MaxCoupledBlocks

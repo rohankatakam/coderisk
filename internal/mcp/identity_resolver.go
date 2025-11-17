@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	bolt "go.etcd.io/bbolt"
@@ -13,26 +15,76 @@ const bucketName = "file_renames"
 
 // IdentityResolver resolves historical file paths using git log --follow
 type IdentityResolver struct {
-	cacheDB *bolt.DB
+	cacheDB  *bolt.DB
+	repoRoot string // Repository root directory for path normalization
 }
 
 // NewIdentityResolver creates a new identity resolver
 func NewIdentityResolver(cacheDB *bolt.DB) *IdentityResolver {
+	// Try to detect repo root
+	repoRoot, _ := detectRepoRoot()
 	return &IdentityResolver{
-		cacheDB: cacheDB,
+		cacheDB:  cacheDB,
+		repoRoot: repoRoot,
 	}
 }
 
+// detectRepoRoot finds the git repository root by looking for .git directory
+func detectRepoRoot() (string, error) {
+	// Start from current directory
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	// Walk up the directory tree looking for .git
+	for {
+		gitPath := filepath.Join(dir, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			return dir, nil
+		}
+
+		// Move up one directory
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached root without finding .git
+			return "", nil
+		}
+		dir = parent
+	}
+}
+
+
 // ResolveHistoricalPaths returns all historical paths for a file
+// Uses the repo root from constructor
 func (r *IdentityResolver) ResolveHistoricalPaths(ctx context.Context, currentPath string) ([]string, error) {
+	return r.ResolveHistoricalPathsWithRoot(ctx, currentPath, r.repoRoot)
+}
+
+// ResolveHistoricalPathsWithRoot returns all historical paths for a file
+// Accepts repo root as parameter for dynamic path resolution from Claude Code session
+func (r *IdentityResolver) ResolveHistoricalPathsWithRoot(ctx context.Context, currentPath string, repoRoot string) ([]string, error) {
+	// Normalize path to relative if it's absolute
+	normalizedPath := currentPath
+
+	if repoRoot != "" && filepath.IsAbs(currentPath) {
+		normalizedPath = NormalizeToRelativePath(currentPath, repoRoot)
+	}
+
 	// 1. Check cache first
-	cached, err := r.getCached(currentPath)
+	cached, err := r.getCached(normalizedPath)
 	if err == nil {
 		return cached, nil
 	}
 
 	// 2. Run git log --follow
-	cmd := exec.CommandContext(ctx, "git", "log", "--follow", "--name-only", "--format=%H", currentPath)
+	cmd := exec.CommandContext(ctx, "git", "log", "--follow", "--name-only", "--format=%H", normalizedPath)
+	// Use provided repoRoot or fall back to instance repoRoot
+	if repoRoot != "" {
+		cmd.Dir = repoRoot
+	} else if r.repoRoot != "" {
+		cmd.Dir = r.repoRoot
+	}
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -53,7 +105,7 @@ func (r *IdentityResolver) ResolveHistoricalPaths(ctx context.Context, currentPa
 	for path := range paths {
 		result = append(result, path)
 	}
-	r.setCached(currentPath, result)
+	r.setCached(normalizedPath, result)
 
 	return result, nil
 }
