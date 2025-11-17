@@ -763,6 +763,7 @@ func (f *Fetcher) storeTimelineEvent(ctx context.Context, issueID int64, rawEven
 	}
 
 	// Extract source information for cross-reference events
+	// CRITICAL: GitHub API returns "cross-referenced" for cross-repo and "referenced" for same-repo
 	if eventType == "cross-referenced" {
 		if source, ok := rawEvent["source"].(map[string]interface{}); ok {
 			if sourceIssue, ok := source["issue"].(map[string]interface{}); ok {
@@ -805,6 +806,18 @@ func (f *Fetcher) storeTimelineEvent(ctx context.Context, issueID int64, rawEven
 					}
 				}
 			}
+		}
+	}
+
+	// Extract commit SHA for "referenced" events
+	// GitHub API returns "referenced" when commits/PRs mention an issue
+	// This is the PRIMARY source of issue→commit/PR linking (100% confidence)
+	if eventType == "referenced" {
+		// Check for commit_id (direct commit reference)
+		if commitID, ok := rawEvent["commit_id"].(string); ok && commitID != "" {
+			event.SourceSHA = &commitID
+			sourceType := "commit"
+			event.SourceType = &sourceType
 		}
 	}
 

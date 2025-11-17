@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/rohankatakam/coderisk/internal/atomizer"
 	"github.com/rohankatakam/coderisk/internal/auth"
 	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/database"
@@ -63,6 +65,7 @@ func init() {
 	initCmd.Flags().Int("days", 90, "Ingest PRs merged in last N days (default: 90)")
 	initCmd.Flags().Bool("all", false, "Ingest entire repository history")
 	initCmd.Flags().Bool("llm", false, "Enable LLM-based ASSOCIATED_WITH edge extraction (requires API key)")
+	initCmd.Flags().Bool("enable-atomization", false, "Enable Pipeline 2 code-block atomization (requires --llm)")
 }
 
 // detectCurrentRepo detects the git repository in the current directory
@@ -359,6 +362,26 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Graph built in %v\n", graphDuration)
 	fmt.Printf("    Nodes: %d | Edges: %d\n", buildStats.Nodes, buildStats.Edges)
 
+	// Stage: Pipeline 2 - Code-Block Atomization (optional)
+	enableAtomization, _ := cmd.Flags().GetBool("enable-atomization")
+	if enableAtomization {
+		if !enableLLM {
+			fmt.Printf("\n  ⚠️  Pipeline 2 requires --llm flag (skipping atomization)\n")
+		} else {
+			fmt.Printf("\n[Pipeline 2] Code-block atomization...\n")
+			atomizationStart := time.Now()
+
+			if err := runPipeline2(ctx, stagingDB, graphBackend, repoID, repoPath); err != nil {
+				// Don't fail entire pipeline, just log warning
+				fmt.Printf("  ⚠️  Pipeline 2 failed: %v\n", err)
+				fmt.Printf("  → Continuing without code-block atomization\n")
+			} else {
+				atomizationDuration := time.Since(atomizationStart)
+				fmt.Printf("  ✓ Pipeline 2 complete in %v\n", atomizationDuration)
+			}
+		}
+	}
+
 	// Stage: Validate graph
 	fmt.Printf("\n  Validating graph structure...\n")
 	if err := validateGraph(ctx, graphBackend, buildStats); err != nil {
@@ -419,6 +442,133 @@ func runInit(cmd *cobra.Command, args []string) error {
 }
 
 // Helper functions
+
+// runPipeline2 executes Pipeline 2 code-block atomization
+// Reference: AGENT-P2C integration
+func runPipeline2(ctx context.Context, stagingDB *database.StagingClient, graphBackend graph.Backend, repoID int64, repoPath string) error {
+	// 1. Fetch commits from database (chronologically)
+	fmt.Printf("  Fetching commits for atomization...\n")
+
+	rows, err := stagingDB.Query(ctx, `
+		SELECT sha, message, author_email, author_date
+		FROM github_commits
+		WHERE repo_id = $1
+		ORDER BY author_date ASC
+	`, repoID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch commits: %w", err)
+	}
+	defer rows.Close()
+
+	var commits []atomizer.CommitData
+	for rows.Next() {
+		var sha, message, authorEmail string
+		var authorDate time.Time
+
+		if err := rows.Scan(&sha, &message, &authorEmail, &authorDate); err != nil {
+			fmt.Printf("  ⚠️  Failed to scan commit: %v\n", err)
+			continue
+		}
+
+		// Fetch git diff for this commit
+		diff, err := getCommitDiff(repoPath, sha)
+		if err != nil {
+			fmt.Printf("  ⚠️  Failed to get diff for %s: %v\n", sha[:8], err)
+			continue
+		}
+
+		commits = append(commits, atomizer.CommitData{
+			SHA:         sha,
+			Message:     message,
+			DiffContent: diff,
+			AuthorEmail: authorEmail,
+			Timestamp:   authorDate,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("error iterating commits: %w", err)
+	}
+
+	fmt.Printf("  ✓ Fetched %d commits with diffs\n", len(commits))
+
+	// 2. Initialize LLM client
+	cfg, err := config.Load("")
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	llmClient, err := llm.NewClient(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create LLM client: %w", err)
+	}
+
+	if !llmClient.IsEnabled() {
+		return fmt.Errorf("LLM client not enabled (check GEMINI_API_KEY)")
+	}
+
+	// 3. Create Neo4j driver for atomizer
+	// Note: We create a new connection rather than reusing graphBackend's driver
+	// because the atomizer package expects a raw driver interface
+	neoDriver, err := createNeo4jDriver(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create Neo4j driver: %w", err)
+	}
+	defer neoDriver.Close(ctx)
+
+	// 4. Get raw DB connection from stagingDB
+	rawDB := stagingDB.DB()
+
+	// 5. Create atomizer processor
+	extractor := atomizer.NewExtractor(llmClient)
+	processor := atomizer.NewProcessor(extractor, rawDB, neoDriver, cfg.Neo4j.Database)
+
+	// 6. Run Pipeline 2
+	fmt.Printf("  Processing %d commits chronologically...\n", len(commits))
+	if err := processor.ProcessCommitsChronologically(ctx, commits, repoID); err != nil {
+		return fmt.Errorf("chronological processing failed: %w", err)
+	}
+
+	// 7. Verify results
+	var blockCount int
+	err = rawDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM code_blocks WHERE repo_id = $1", repoID).Scan(&blockCount)
+	if err != nil {
+		fmt.Printf("  ⚠️  Failed to count code blocks: %v\n", err)
+	} else {
+		fmt.Printf("  ✓ Created %d code blocks in PostgreSQL\n", blockCount)
+	}
+
+	return nil
+}
+
+// getCommitDiff fetches the git diff for a specific commit
+func getCommitDiff(repoPath, sha string) (string, error) {
+	cmd := exec.Command("git", "-C", repoPath, "show", "--format=", sha)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git show failed: %w", err)
+	}
+	return string(output), nil
+}
+
+// createNeo4jDriver creates a new Neo4j driver from config
+func createNeo4jDriver(ctx context.Context, cfg *config.Config) (neo4j.DriverWithContext, error) {
+	driver, err := neo4j.NewDriverWithContext(
+		cfg.Neo4j.URI,
+		neo4j.BasicAuth(cfg.Neo4j.User, cfg.Neo4j.Password, ""),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Neo4j driver: %w", err)
+	}
+
+	// Verify connectivity
+	if err := driver.VerifyConnectivity(ctx); err != nil {
+		driver.Close(ctx)
+		return nil, fmt.Errorf("failed to connect to Neo4j: %w", err)
+	}
+
+	return driver, nil
+}
 
 // createIndexes applies all necessary indexes for optimal query performance
 // Reference: NEO4J_PERFORMANCE_OPTIMIZATION_GUIDE.md Phase 1
