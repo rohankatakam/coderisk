@@ -117,48 +117,66 @@ func (c *LocalGraphClient) GetCodeBlocksForFile(ctx context.Context, filePath st
 	return blocks, result.Err()
 }
 
-// GetCouplingData queries PostgreSQL for coupling relationships
+// GetCouplingData queries Neo4j for coupling relationships
 // blockID is the PostgreSQL integer ID (as string)
 func (c *LocalGraphClient) GetCouplingData(ctx context.Context, blockID string) (*tools.CouplingData, error) {
-	// Coupling data is stored in PostgreSQL code_block_coupling table
-	// Find all blocks coupled with the given blockID (both as block_a and block_b)
+	// Coupling data is now stored in Neo4j as CO_CHANGES_WITH edges
+	// Query Neo4j for blocks coupled with the given blockID
+
+	// Convert string blockID to int64 for Neo4j query
+	// db_id property in Neo4j is int64, not string
+	var blockIDVal int64
+	_, err := fmt.Sscanf(blockID, "%d", &blockIDVal)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse blockID '%s': %w", blockID, err)
+	}
+
+	session := c.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
+	defer session.Close(ctx)
+
 	query := `
-		SELECT
-			CASE
-				WHEN cbc.block_a_id = $1 THEN cbc.block_b_id
-				ELSE cbc.block_a_id
-			END AS coupled_block_id,
-			cb.block_name,
-			cb.file_path,
-			cbc.co_change_rate,
-			cbc.co_change_count
-		FROM code_block_coupling cbc
-		JOIN code_blocks cb ON cb.id = CASE
-			WHEN cbc.block_a_id = $1 THEN cbc.block_b_id
-			ELSE cbc.block_a_id
-		END
-		WHERE (cbc.block_a_id = $1 OR cbc.block_b_id = $1)
-		  AND cbc.co_change_rate >= 0.5
-		ORDER BY cbc.co_change_rate DESC
+		MATCH (b:CodeBlock {db_id: $blockID})-[r:CO_CHANGES_WITH]-(coupled:CodeBlock)
+		WHERE r.rate >= 0.5
+		RETURN coupled.db_id AS id,
+		       coupled.name AS name,
+		       coupled.file_path AS path,
+		       r.rate AS rate,
+		       r.co_change_count AS count
+		ORDER BY r.rate DESC
 		LIMIT 20
 	`
 
-	rows, err := c.pgPool.Query(ctx, query, blockID)
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"blockID": blockIDVal,  // Use int64, not string
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	var coupledBlocks []tools.CoupledBlock
-	for rows.Next() {
+	for result.Next(ctx) {
+		record := result.Record()
+
+		// Handle NULL values gracefully
 		var coupledID int64
 		var coupledName, coupledPath string
 		var rate float64
-		var coChangeCount int
+		var coChangeCount int64
 
-		err := rows.Scan(&coupledID, &coupledName, &coupledPath, &rate, &coChangeCount)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan coupling row: %w", err)
+		if record.Values[0] != nil {
+			coupledID = record.Values[0].(int64)
+		}
+		if record.Values[1] != nil {
+			coupledName = record.Values[1].(string)
+		}
+		if record.Values[2] != nil {
+			coupledPath = record.Values[2].(string)
+		}
+		if record.Values[3] != nil {
+			rate = record.Values[3].(float64)
+		}
+		if record.Values[4] != nil {
+			coChangeCount = record.Values[4].(int64)
 		}
 
 		coupledBlocks = append(coupledBlocks, tools.CoupledBlock{
@@ -166,13 +184,13 @@ func (c *LocalGraphClient) GetCouplingData(ctx context.Context, blockID string) 
 			Name:          coupledName,
 			Path:          coupledPath,
 			Rate:          rate,
-			CoChangeCount: coChangeCount,
+			CoChangeCount: int(coChangeCount),
 		})
 	}
 
 	return &tools.CouplingData{
 		CoupledWith: coupledBlocks,
-	}, nil
+	}, result.Err()
 }
 
 // GetTemporalData queries PostgreSQL for temporal incident data
