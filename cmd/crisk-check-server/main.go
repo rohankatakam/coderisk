@@ -4,25 +4,31 @@ import (
 	"context"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	"github.com/rohankatakam/coderisk/internal/mcp"
+	mcpinternal "github.com/rohankatakam/coderisk/internal/mcp"
 	"github.com/rohankatakam/coderisk/internal/mcp/tools"
 	bolt "go.etcd.io/bbolt"
 )
 
 func main() {
+	// Redirect logs to file to avoid interfering with MCP stdio protocol
+	logFile, err := os.OpenFile("/tmp/crisk-mcp-server.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		log.SetOutput(logFile)
+		defer logFile.Close()
+	}
+
 	ctx := context.Background()
 
-	// 1. Get environment variables (CRITICAL: Use actual values from implementation)
+	// 1. Get environment variables
 	neo4jURI := getEnvOrDefault("NEO4J_URI", "bolt://localhost:7688")
 	neo4jPassword := getEnvOrDefault("NEO4J_PASSWORD", "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123")
 	postgresDSN := getEnvOrDefault("POSTGRES_DSN", "postgres://coderisk:CHANGE_THIS_PASSWORD_IN_PRODUCTION_123@localhost:5433/coderisk?sslmode=disable")
 
-	// 2. Connect to Neo4j (port 7688, not 7687!)
+	// 2. Connect to Neo4j
 	driver, err := neo4j.NewDriverWithContext(neo4jURI, neo4j.BasicAuth("neo4j", neo4jPassword, ""))
 	if err != nil {
 		log.Fatalf("Failed to connect to Neo4j at %s: %v", neo4jURI, err)
@@ -35,7 +41,7 @@ func main() {
 	}
 	log.Println("✅ Connected to Neo4j")
 
-	// 3. Connect to PostgreSQL (port 5433, user coderisk, not coderisk_user!)
+	// 3. Connect to PostgreSQL
 	pgPool, err := pgxpool.New(ctx, postgresDSN)
 	if err != nil {
 		log.Fatalf("Failed to connect to PostgreSQL: %v", err)
@@ -49,40 +55,135 @@ func main() {
 	log.Println("✅ Connected to PostgreSQL")
 
 	// 4. Open bbolt cache
+	log.Println("Opening cache database...")
 	cacheDB, err := bolt.Open("/tmp/crisk-mcp-cache.db", 0600, nil)
 	if err != nil {
 		log.Fatalf("Failed to open cache: %v", err)
 	}
 	defer cacheDB.Close()
+	log.Println("✅ Cache database opened")
 	log.Println("✅ Cache initialized")
 
 	// 5. Create graph client
-	graphClient := mcp.NewLocalGraphClient(driver, pgPool)
+	log.Println("Creating graph client...")
+	graphClient := mcpinternal.NewLocalGraphClient(driver, pgPool)
+	log.Println("✅ Graph client created")
 
 	// 6. Create identity resolver
-	resolver := mcp.NewIdentityResolver(cacheDB)
+	log.Println("Creating identity resolver...")
+	resolver := mcpinternal.NewIdentityResolver(cacheDB)
+	log.Println("✅ Identity resolver created")
 
-	// 7. Register tools
-	handler := mcp.NewHandler()
-	handler.RegisterTool("crisk.get_risk_summary", tools.NewGetRiskSummaryTool(graphClient, resolver))
+	// 7. Create MCP server using official SDK
+	log.Println("Initializing MCP server...")
+	server := mcp.NewServer(&mcp.Implementation{
+		Name:    "crisk-check-server",
+		Version: "0.1.0",
+	}, nil)
+	log.Println("✅ MCP server initialized")
+
+	// 8. Add the risk summary tool using the generic AddTool
+	type ToolArgs struct {
+		FilePath         string   `json:"file_path" jsonschema:"path to the file to analyze"`
+		DiffContent      string   `json:"diff_content,omitempty" jsonschema:"optional diff content for uncommitted changes"`
+		MaxCoupledBlocks int      `json:"max_coupled_blocks,omitempty" jsonschema:"maximum number of coupled blocks to return per code block (default: 1)"`
+		MaxIncidents     int      `json:"max_incidents,omitempty" jsonschema:"maximum number of incidents to return per code block (default: 1)"`
+		MaxBlocks        int      `json:"max_blocks,omitempty" jsonschema:"maximum number of code blocks to return (default: 10, use 0 for all)"`
+		BlockTypes       []string `json:"block_types,omitempty" jsonschema:"filter by block types (e.g. ['class', 'function', 'method'])"`
+		SummaryOnly      bool     `json:"summary_only,omitempty" jsonschema:"return only aggregated statistics instead of detailed block data"`
+		MinStaleness     int      `json:"min_staleness,omitempty" jsonschema:"only return blocks with staleness >= this many days (for finding stale code)"`
+		MinIncidents     int      `json:"min_incidents,omitempty" jsonschema:"only return blocks with at least this many incidents (for finding risky code)"`
+		MinRiskScore     float64  `json:"min_risk_score,omitempty" jsonschema:"only return blocks with risk score >= threshold (e.g. 5.0 for moderate+ risk)"`
+		IncludeRiskScore bool     `json:"include_risk_score,omitempty" jsonschema:"include the calculated risk score in output for debugging/verification"`
+		PrioritizeRecent bool     `json:"prioritize_recent,omitempty" jsonschema:"boost risk score for recently changed code (focuses on active development areas)"`
+	}
+
+	type ToolOutput struct {
+		FilePath     string                  `json:"file_path"`
+		TotalBlocks  int                     `json:"total_blocks,omitempty"`
+		RiskEvidence []tools.BlockEvidence   `json:"risk_evidence"`
+		Warning      string                  `json:"warning,omitempty"`
+	}
+
+	// Create the tool instance
+	riskTool := tools.NewGetRiskSummaryTool(graphClient, resolver)
+
+	// Register the tool with the SDK
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "crisk.get_risk_summary",
+		Description: "Get risk evidence for a file including ownership, coupling, and temporal incident data",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args ToolArgs) (*mcp.CallToolResult, ToolOutput, error) {
+		// Convert args to map for existing Execute method
+		argsMap := map[string]interface{}{
+			"file_path": args.FilePath,
+		}
+		if args.DiffContent != "" {
+			argsMap["diff_content"] = args.DiffContent
+		}
+		// Set defaults for limits
+		maxCoupled := args.MaxCoupledBlocks
+		if maxCoupled == 0 {
+			maxCoupled = 1 // Changed default from 5 to 1
+		}
+		maxIncidents := args.MaxIncidents
+		if maxIncidents == 0 {
+			maxIncidents = 1 // Changed default from 5 to 1
+		}
+		maxBlocks := args.MaxBlocks
+		if maxBlocks == 0 {
+			maxBlocks = 10 // Default to 10 blocks
+		}
+
+		argsMap["max_coupled_blocks"] = maxCoupled
+		argsMap["max_incidents"] = maxIncidents
+		argsMap["max_blocks"] = maxBlocks
+		argsMap["block_types"] = args.BlockTypes
+		argsMap["summary_only"] = args.SummaryOnly
+		argsMap["min_staleness"] = args.MinStaleness
+		argsMap["min_incidents"] = args.MinIncidents
+		argsMap["min_risk_score"] = args.MinRiskScore
+		argsMap["include_risk_score"] = args.IncludeRiskScore
+		argsMap["prioritize_recent"] = args.PrioritizeRecent
+
+		// Execute the tool
+		result, err := riskTool.Execute(ctx, argsMap)
+		if err != nil {
+			// Return error as tool result (not protocol error)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: "Error: " + err.Error()},
+				},
+				IsError: true,
+			}, ToolOutput{}, nil
+		}
+
+		// Convert result map to typed output
+		resultMap := result.(map[string]interface{})
+		output := ToolOutput{
+			FilePath: resultMap["file_path"].(string),
+		}
+
+		if totalBlocks, ok := resultMap["total_blocks"].(int); ok {
+			output.TotalBlocks = totalBlocks
+		}
+
+		if warning, ok := resultMap["warning"].(string); ok {
+			output.Warning = warning
+		}
+
+		if evidence, ok := resultMap["risk_evidence"].([]tools.BlockEvidence); ok {
+			output.RiskEvidence = evidence
+		}
+
+		return &mcp.CallToolResult{}, output, nil
+	})
+
 	log.Println("✅ Registered tool: crisk.get_risk_summary")
 
-	// 8. Start stdio transport
-	transport := mcp.NewStdioTransport(handler)
-
-	// 9. Handle shutdown gracefully
-	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
-		log.Println("Shutting down gracefully...")
-		os.Exit(0)
-	}()
-
-	// 10. Start server
+	// 9. Start server on stdio transport
 	log.Println("🚀 MCP server started on stdio")
-	if err := transport.Start(); err != nil {
-		log.Fatalf("Transport error: %v", err)
+	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
+		log.Fatalf("Server error: %v", err)
 	}
 }
 

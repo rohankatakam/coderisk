@@ -65,6 +65,8 @@ type BlockEvidence struct {
 	// Temporal
 	IncidentCount      int                `json:"incident_count"`
 	Incidents          []TemporalIncident `json:"incidents"`
+	// Risk Score (optional, for debugging/verification)
+	RiskScore          *float64           `json:"risk_score,omitempty"`
 }
 
 // JSONRPCRequest represents a JSON-RPC 2.0 request
