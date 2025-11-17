@@ -113,8 +113,8 @@ func main() {
 
 	// 8. Add the risk summary tool using the generic AddTool
 	type ToolArgs struct {
-		FilePath         string   `json:"file_path" jsonschema:"path to the file to analyze"`
-		DiffContent      string   `json:"diff_content,omitempty" jsonschema:"optional diff content for uncommitted changes"`
+		FilePath         string   `json:"file_path,omitempty" jsonschema:"path to the file to analyze (optional - tool will auto-detect uncommitted changes if available)"`
+		DiffContent      string   `json:"diff_content,omitempty" jsonschema:"optional diff content for uncommitted changes (if not provided, tool will check for uncommitted changes automatically)"`
 		RepoRoot         string   `json:"repo_root,omitempty" jsonschema:"optional repository root path for resolving absolute paths (e.g. /Users/user/Documents/project)"`
 		MaxCoupledBlocks int      `json:"max_coupled_blocks,omitempty" jsonschema:"maximum number of coupled blocks to return per code block (default: 1)"`
 		MaxIncidents     int      `json:"max_incidents,omitempty" jsonschema:"maximum number of incidents to return per code block (default: 1)"`
@@ -141,7 +141,7 @@ func main() {
 	// Register the tool with the SDK
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "crisk.get_risk_summary",
-		Description: "Get risk evidence for a file including ownership, coupling, and temporal incident data",
+		Description: "Get risk evidence for a file including ownership, coupling, and temporal incident data. Automatically detects and analyzes uncommitted changes when a file_path is provided. Use this tool when the user asks about 'my changes', 'uncommitted changes', or 'risk of changes' in a file.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args ToolArgs) (*mcp.CallToolResult, ToolOutput, error) {
 		// Convert args to map for existing Execute method
 		argsMap := map[string]interface{}{

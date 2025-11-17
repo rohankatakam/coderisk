@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os/exec"
 )
 
 // GraphClient interface for querying risk data
@@ -32,6 +33,33 @@ type BlockReference struct {
 	Behavior  string
 }
 
+// getUncommittedDiff returns git diff output for a specific file
+// Returns empty string if no changes exist
+func getUncommittedDiff(filePath, repoRoot string) (string, error) {
+	var cmd *exec.Cmd
+
+	if filePath != "" {
+		// Get diff for specific file
+		cmd = exec.Command("git", "diff", "HEAD", "--", filePath)
+	} else {
+		// Get diff for all uncommitted changes
+		cmd = exec.Command("git", "diff", "HEAD")
+	}
+
+	// Set working directory if provided
+	if repoRoot != "" {
+		cmd.Dir = repoRoot
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		// git diff returns error if not in a git repo
+		return "", err
+	}
+
+	return string(output), nil
+}
+
 // GetRiskSummaryTool implements the crisk.get_risk_summary tool
 type GetRiskSummaryTool struct {
 	graphClient      GraphClient
@@ -55,9 +83,22 @@ func (t *GetRiskSummaryTool) Execute(ctx context.Context, args map[string]interf
 	diffContent, _ := args["diff_content"].(string)
 	repoRoot, _ := args["repo_root"].(string) // Optional: repository root for absolute path resolution
 
-	// Either file_path OR diff_content must be provided
+	// AUTO-DETECT: If file_path is provided but no diff_content, check for uncommitted changes
+	// This enables queries like "What is the risk of my uncommitted changes in X?"
+	if filePath != "" && diffContent == "" && t.diffAtomizer != nil {
+		// Try to get uncommitted diff for the file
+		// Use repoRoot if available, otherwise git will use current directory
+		autoDiff, err := getUncommittedDiff(filePath, repoRoot)
+		if err == nil && autoDiff != "" {
+			// Found uncommitted changes - use diff-based analysis
+			diffContent = autoDiff
+		}
+		// If no diff or error, fall through to file-based analysis
+	}
+
+	// Validation: At least one parameter must be provided
 	if filePath == "" && diffContent == "" {
-		return nil, fmt.Errorf("either file_path or diff_content is required")
+		return nil, fmt.Errorf("at least one of file_path or diff_content is required")
 	}
 
 	// Parse limits with defaults

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -96,4 +97,32 @@ func ExtractFilePathsFromDiff(diff string) []string {
 	}
 
 	return paths
+}
+
+// GetUncommittedDiff returns git diff output for a specific file (or all files if path is empty)
+// Returns empty string if no changes exist
+// repoRoot is the working directory for the git command
+func GetUncommittedDiff(filePath, repoRoot string) (string, error) {
+	var cmd *exec.Cmd
+
+	if filePath != "" {
+		// Get diff for specific file
+		cmd = exec.Command("git", "diff", "HEAD", "--", filePath)
+	} else {
+		// Get diff for all uncommitted changes
+		cmd = exec.Command("git", "diff", "HEAD")
+	}
+
+	// Set working directory if provided
+	if repoRoot != "" {
+		cmd.Dir = repoRoot
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		// git diff returns error if not in a git repo
+		return "", err
+	}
+
+	return string(output), nil
 }

@@ -81,12 +81,17 @@ You should see `crisk.get_risk_summary` listed.
 
 ### Tool: `crisk.get_risk_summary`
 
-Returns risk evidence for a file including ownership, coupling, and temporal incident data.
+Returns risk evidence for a file including ownership, coupling, and temporal incident data. **Automatically detects and analyzes uncommitted changes** when a file_path is provided.
+
+**Key Features**:
+- **Auto-Detection**: When you provide a `file_path`, the tool automatically checks for uncommitted changes using `git diff`
+- **Smart Analysis**: If uncommitted changes are found, uses diff-based LLM analysis; otherwise falls back to file-based analysis
+- **Simple API**: Just provide a file path - no need to manually call `git diff` or pass diff content
 
 **Parameters**:
-- `file_path` (required): Path to the file to analyze (relative or absolute)
-- `repo_root` (optional): Repository root path for resolving absolute paths
-- `diff_content` (optional): Git diff content for uncommitted change analysis
+- `file_path` (optional): Path to the file to analyze (relative or absolute) - tool will auto-detect uncommitted changes
+- `repo_root` (optional): Repository root path for resolving absolute paths and git commands
+- `diff_content` (optional): Git diff content for uncommitted change analysis (auto-detected if not provided)
 - `max_coupled_blocks` (optional): Maximum coupled blocks per code block (default: 1)
 - `max_incidents` (optional): Maximum incidents per code block (default: 1)
 - `max_blocks` (optional): Maximum total blocks to return (default: 10, 0 = all)
@@ -100,11 +105,18 @@ Returns risk evidence for a file including ownership, coupling, and temporal inc
 
 **Example Usage in Claude Code**:
 
+**Simple Query (Auto-Detection)**:
 ```
-"Can you get the risk summary for docs/docs.json?"
+"What is the risk of my uncommitted changes in libraries/python/mcp_use/client/connectors/base.py?"
 ```
 
-**Using Relative Path**:
+This will automatically:
+1. Detect uncommitted changes using `git diff`
+2. Use LLM to extract modified code blocks
+3. Query the graph for risk evidence
+4. Return comprehensive risk analysis
+
+**Using Relative Path** (auto-detects uncommitted changes):
 ```json
 {
   "tool": "crisk.get_risk_summary",
@@ -113,6 +125,8 @@ Returns risk evidence for a file including ownership, coupling, and temporal inc
   }
 }
 ```
+- If uncommitted changes exist → diff-based analysis (LLM extraction)
+- If no changes → file-based analysis (all blocks in file)
 
 **Using Absolute Path** (requires `repo_root`):
 ```json
@@ -124,8 +138,10 @@ Returns risk evidence for a file including ownership, coupling, and temporal inc
   }
 }
 ```
+- Auto-detects uncommitted changes in the specified file
+- Uses `repo_root` for both path normalization and git commands
 
-**Analyzing Uncommitted Changes** (diff-based):
+**Manual Diff (Advanced)**:
 ```json
 {
   "tool": "crisk.get_risk_summary",
@@ -135,6 +151,7 @@ Returns risk evidence for a file including ownership, coupling, and temporal inc
   }
 }
 ```
+- Bypasses auto-detection and uses provided diff directly
 
 **Example Response**:
 ```json
@@ -349,6 +366,7 @@ The MCP server supports three path resolution approaches:
 
 ## Recent Enhancements
 
+- [x] **Auto-detection of uncommitted changes** (NEW) - Tool automatically calls `git diff` when analyzing files
 - [x] Support diff_content for uncommitted change analysis (LLM-based meta-ingestion)
 - [x] Dynamic absolute path resolution via `repo_root` parameter
 - [x] Risk scoring with filtering and prioritization options
@@ -364,12 +382,13 @@ The MCP server supports three path resolution approaches:
 
 ---
 
-**Status**: ✅ Fully Implemented with Diff-Based Analysis
+**Status**: ✅ Fully Implemented with Auto-Detection and Diff-Based Analysis
 
-**Last Updated**: 2025-11-16 22:06
+**Last Updated**: 2025-11-16 22:30
 
 **Recent Changes**:
-- Added `repo_root` parameter for dynamic absolute path resolution
-- Implemented diff-based analysis using Gemini Flash (meta-ingestion)
-- Added comprehensive filtering and risk scoring options
-- Enhanced documentation with path resolution strategies
+- **Added automatic git diff detection** - Tool now internally checks for uncommitted changes when file_path is provided
+- Made `file_path` optional in tool schema to support auto-detection
+- Updated tool description to help Claude Code route diff-based queries correctly
+- Simplified user experience - no need to manually call `git diff` or pass diff_content
+- Enhanced documentation with auto-detection examples and workflow
