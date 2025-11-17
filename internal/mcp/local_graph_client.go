@@ -34,10 +34,11 @@ func (c *LocalGraphClient) GetCodeBlocksForFile(ctx context.Context, filePath st
 
 	// CRITICAL: CodeBlock nodes are not linked to File nodes in current implementation
 	// Query CodeBlocks directly by file_path property
+	// IMPORTANT: b.db_id is the PostgreSQL integer ID used for temporal queries
 	query := `
 		MATCH (b:CodeBlock)
 		WHERE b.file_path IN $paths AND b.repo_id = $repoID
-		RETURN b.id AS id,
+		RETURN b.db_id AS id,
 		       b.name AS name,
 		       b.block_type AS type,
 		       b.file_path AS path,
@@ -66,8 +67,10 @@ func (c *LocalGraphClient) GetCodeBlocksForFile(ctx context.Context, filePath st
 		var stalenessDays int64
 
 		// Required fields
+		// db_id is int64 from PostgreSQL, convert to string for consistency
 		if record.Values[0] != nil {
-			id = record.Values[0].(string)
+			dbID := record.Values[0].(int64)
+			id = fmt.Sprintf("%d", dbID)
 		}
 		if record.Values[1] != nil {
 			name = record.Values[1].(string)
@@ -114,65 +117,62 @@ func (c *LocalGraphClient) GetCodeBlocksForFile(ctx context.Context, filePath st
 	return blocks, result.Err()
 }
 
-// GetCouplingData queries Neo4j for coupling relationships
+// GetCouplingData queries PostgreSQL for coupling relationships
+// blockID is the PostgreSQL integer ID (as string)
 func (c *LocalGraphClient) GetCouplingData(ctx context.Context, blockID string) (*tools.CouplingData, error) {
-	// Query Neo4j for CO_CHANGES_WITH edges
-	session := c.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
-	defer session.Close(ctx)
-
+	// Coupling data is stored in PostgreSQL code_block_coupling table
+	// Find all blocks coupled with the given blockID (both as block_a and block_b)
 	query := `
-		MATCH (b:CodeBlock {id: $blockID})-[r:CO_CHANGES_WITH]->(coupled:CodeBlock)
-		WHERE r.rate >= 0.5
-		RETURN coupled.id AS coupled_id,
-		       coupled.name AS coupled_name,
-		       coupled.file_path AS coupled_path,
-		       r.rate AS coupling_rate,
-		       r.co_change_count AS co_change_count
-		ORDER BY r.rate DESC
+		SELECT
+			CASE
+				WHEN cbc.block_a_id = $1 THEN cbc.block_b_id
+				ELSE cbc.block_a_id
+			END AS coupled_block_id,
+			cb.block_name,
+			cb.file_path,
+			cbc.co_change_rate,
+			cbc.co_change_count
+		FROM code_block_coupling cbc
+		JOIN code_blocks cb ON cb.id = CASE
+			WHEN cbc.block_a_id = $1 THEN cbc.block_b_id
+			ELSE cbc.block_a_id
+		END
+		WHERE (cbc.block_a_id = $1 OR cbc.block_b_id = $1)
+		  AND cbc.co_change_rate >= 0.5
+		ORDER BY cbc.co_change_rate DESC
 		LIMIT 20
 	`
 
-	result, err := session.Run(ctx, query, map[string]interface{}{"blockID": blockID})
+	rows, err := c.pgPool.Query(ctx, query, blockID)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	var coupledBlocks []tools.CoupledBlock
-	for result.Next(ctx) {
-		record := result.Record()
-
-		var coupledID, coupledName, coupledPath string
+	for rows.Next() {
+		var coupledID int64
+		var coupledName, coupledPath string
 		var rate float64
-		var coChangeCount int64
+		var coChangeCount int
 
-		if record.Values[0] != nil {
-			coupledID = record.Values[0].(string)
-		}
-		if record.Values[1] != nil {
-			coupledName = record.Values[1].(string)
-		}
-		if record.Values[2] != nil {
-			coupledPath = record.Values[2].(string)
-		}
-		if record.Values[3] != nil {
-			rate = record.Values[3].(float64)
-		}
-		if record.Values[4] != nil {
-			coChangeCount = record.Values[4].(int64)
+		err := rows.Scan(&coupledID, &coupledName, &coupledPath, &rate, &coChangeCount)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan coupling row: %w", err)
 		}
 
 		coupledBlocks = append(coupledBlocks, tools.CoupledBlock{
-			ID:            coupledID,
+			ID:            fmt.Sprintf("%d", coupledID),
 			Name:          coupledName,
 			Path:          coupledPath,
 			Rate:          rate,
-			CoChangeCount: int(coChangeCount),
+			CoChangeCount: coChangeCount,
 		})
 	}
 
 	return &tools.CouplingData{
 		CoupledWith: coupledBlocks,
-	}, result.Err()
+	}, nil
 }
 
 // GetTemporalData queries PostgreSQL for temporal incident data
@@ -245,12 +245,13 @@ func (c *LocalGraphClient) GetCodeBlocksByNames(ctx context.Context, filePathsWi
 	}
 
 	// Query for blocks that match any of the block names in any of the file paths
+	// IMPORTANT: b.db_id is the PostgreSQL integer ID used for temporal queries
 	query := `
 		MATCH (b:CodeBlock)
 		WHERE b.file_path IN $paths
 		  AND b.name IN $blockNames
 		  AND b.repo_id = $repoID
-		RETURN b.id AS id,
+		RETURN b.db_id AS id,
 		       b.name AS name,
 		       b.block_type AS type,
 		       b.file_path AS path,
@@ -280,8 +281,10 @@ func (c *LocalGraphClient) GetCodeBlocksByNames(ctx context.Context, filePathsWi
 		var stalenessDays int64
 
 		// Required fields
+		// db_id is int64 from PostgreSQL, convert to string for consistency
 		if record.Values[0] != nil {
-			id = record.Values[0].(string)
+			dbID := record.Values[0].(int64)
+			id = fmt.Sprintf("%d", dbID)
 		}
 		if record.Values[1] != nil {
 			name = record.Values[1].(string)
