@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rohankatakam/coderisk/internal/types"
+	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/risk/agents"
+	"github.com/rohankatakam/coderisk/internal/types"
 )
 
 // ChainOrchestrator coordinates the 5-phase sequential analysis chain
@@ -17,10 +18,10 @@ type ChainOrchestrator struct {
 }
 
 // NewChainOrchestrator creates a new chain orchestrator
-func NewChainOrchestrator() *ChainOrchestrator {
+func NewChainOrchestrator(graphBackend graph.Backend) *ChainOrchestrator {
 	return &ChainOrchestrator{
 		heuristicFilter: NewHeuristicFilter(),
-		collector:       NewCollector(),
+		collector:       NewCollector(graphBackend),
 		agentList: []agents.Agent{
 			agents.NewIncidentAgent(),
 			agents.NewBlastRadiusAgent(),

@@ -113,6 +113,27 @@ func (e *CommitExtractor) ExtractPRReferences(ctx context.Context, repoID int64)
 
 // processCommitBatch processes a batch of commits
 func (e *CommitExtractor) processCommitBatch(ctx context.Context, repoID int64, commits []database.CommitData) (int, error) {
+	// COLLISION PREVENTION: Filter out merge commits
+	// Merge commits already have MERGED_AS edges (100% confidence from PR.merge_commit_sha)
+	// We don't want to create duplicate ASSOCIATED_WITH edges with lower confidence
+	// Reference: Gap analysis 2025-11-13 - Prevent collision between MERGED_AS and ASSOCIATED_WITH
+	var nonMergeCommits []database.CommitData
+	for _, commit := range commits {
+		// Skip commits that start with "Merge pull request"
+		// These are GitHub's automatic merge commit messages
+		if !strings.HasPrefix(commit.Message, "Merge pull request") {
+			nonMergeCommits = append(nonMergeCommits, commit)
+		}
+	}
+
+	// If all commits were merge commits, nothing to process
+	if len(nonMergeCommits) == 0 {
+		return 0, nil
+	}
+
+	// Process only non-merge commits
+	commits = nonMergeCommits
+
 	// Build prompt
 	systemPrompt := `You are a Git commit analyzer. Extract issue/PR references from commit messages.
 

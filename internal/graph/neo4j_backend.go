@@ -314,43 +314,50 @@ func (n *Neo4jBackend) Close(ctx context.Context) error {
 // have been removed as they used vulnerable string concatenation.
 // All query generation now uses CypherBuilder with parameterized queries.
 
-// parseNodeID extracts label and ID from node reference (e.g., "commit:abc123" -> "Commit", "abc123")
+// parseNodeID extracts label and ID from node reference
+// Supports both legacy 2-part format ("commit:abc123") and new 3-part composite format ("1:commit:abc123")
 // For PR/Issue nodes, converts the ID to an integer to match Neo4j storage type
 func parseNodeID(nodeID string) (label string, id interface{}) {
-	parts := strings.SplitN(nodeID, ":", 2)
-	if len(parts) == 2 {
-		prefix := parts[0]
+	parts := strings.SplitN(nodeID, ":", 3)
 
-		// Handle special uppercase labels
-		switch strings.ToLower(prefix) {
-		case "pr":
-			label = "PR"
-		case "issue":
-			label = "Issue"
-		default:
-			// Capitalize first letter for label
-			label = strings.ToUpper(string(prefix[0])) + prefix[1:]
-		}
+	var prefix string
+	var identifier string
 
-		// Convert PR/Issue numbers to integers (Neo4j stores them as integers)
-		// This fixes type mismatch bug where string "42" doesn't match integer 42
-		if label == "PR" || label == "Issue" {
-			if num, err := strconv.Atoi(parts[1]); err == nil {
-				return label, num // Return as integer
-			}
-			// Fall through to string if conversion fails
-		}
-
-		return label, parts[1] // Return as string for other types
+	if len(parts) == 3 {
+		// New format: <repo_id>:<type>:<identifier>
+		// Skip repo_id (parts[0]) since we use repo_id property for filtering
+		prefix = parts[1]
+		identifier = parts[2]
+	} else if len(parts) == 2 {
+		// Legacy format: <type>:<identifier> (backward compatibility)
+		prefix = parts[0]
+		identifier = parts[1]
+	} else {
+		// Invalid format, return empty
+		return "", nil
 	}
 
-	// If no prefix, assume it's a file path (backwards compatibility)
-	// File paths don't have colons at the start but may have them in the path
-	if strings.Contains(nodeID, "/") || strings.Contains(nodeID, ".") {
-		return "File", nodeID
+	// Handle special uppercase labels
+	switch strings.ToLower(prefix) {
+	case "pr":
+		label = "PR"
+	case "issue":
+		label = "Issue"
+	default:
+		// Capitalize first letter for label
+		label = strings.ToUpper(string(prefix[0])) + prefix[1:]
 	}
 
-	return "Unknown", nodeID
+	// Convert PR/Issue numbers to integers (Neo4j stores them as integers)
+	// This fixes type mismatch bug where string "42" doesn't match integer 42
+	if label == "PR" || label == "Issue" {
+		if num, err := strconv.Atoi(identifier); err == nil {
+			return label, num // Return as integer
+		}
+		// Fall through to string if conversion fails
+	}
+
+	return label, identifier // Return as string for other types
 }
 
 // getUniqueKey returns the unique identifier field for each node type

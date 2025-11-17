@@ -163,6 +163,16 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string)
 	stats.Nodes += issueStats.Nodes
 	log.Printf("  ✓ Processed issues: %d nodes", issueStats.Nodes)
 
+	// Create 100% confidence edges from timeline events (REFERENCES, CLOSED_BY)
+	// This must run BEFORE ASSOCIATED_WITH to prevent collisions
+	// Reference: Gap analysis 2025-11-13 - Timeline edges take priority
+	timelineStats, err := b.createTimelineEdges(ctx, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("create timeline edges failed: %w", err)
+	}
+	stats.Edges += timelineStats.Edges
+	log.Printf("  ✓ Created timeline edges: %d edges (100%% confidence)", timelineStats.Edges)
+
 	// Run Temporal Correlation (finds temporal matches and stores as IssueCommitRefs)
 	// Reference: LINKING_PATTERNS.md - Pattern 2: Temporal (20% of real-world cases)
 	temporalStats, err := b.runTemporalCorrelation(ctx, repoID)
@@ -196,6 +206,32 @@ func (b *Builder) BuildGraph(ctx context.Context, repoID int64, repoPath string)
 	}
 
 	return stats, nil
+}
+
+// RunPipeline2 executes Pipeline 2 code-block atomization for a repository
+// This is an optional enhancement that extracts fine-grained code blocks from commits
+// Reference: AGENT-P2A and AGENT-P2B implementation
+//
+// Requirements:
+//   - repoID: Repository identifier
+//   - repoPath: Absolute path to cloned repository (for git diff access)
+//   - llmClient: LLM client for semantic extraction (must be enabled)
+//   - rawDB: Raw SQL database connection (stagingDB.DB() accessor)
+//   - neoDriver: Neo4j driver for graph operations
+//   - neoDatabase: Neo4j database name
+func (b *Builder) RunPipeline2(ctx context.Context, repoID int64, repoPath string, llmClient interface{}, rawDB interface{}, neoDriver interface{}, neoDatabase string) error {
+	log.Printf("🔬 Running Pipeline 2: Code-Block Atomization...")
+
+	// Import atomizer package (will be resolved by Go compiler)
+	// We use interface{} types here to avoid circular dependencies
+	// The actual implementation will type-assert these at runtime
+
+	// Note: This is a placeholder for the actual implementation
+	// The real integration will happen in the init command
+	log.Printf("  ⚠️  Pipeline 2 not yet fully integrated into Builder")
+	log.Printf("  → Use standalone process-repo-v2 command for now")
+
+	return nil
 }
 
 // runTemporalCorrelation finds temporal correlations between issues and PRs/commits
@@ -888,6 +924,124 @@ func (b *Builder) linkPRsToMergeCommits(ctx context.Context, repoID int64, repoF
 		}
 
 		stats.Edges = len(edges)
+	}
+
+	return stats, nil
+}
+
+// createTimelineEdges creates 100% confidence edges from GitHub timeline events
+// This implements the missing timeline edge system identified in the gap analysis.
+//
+// Creates two types of edges with 100% confidence:
+// 1. REFERENCES: Issue → PR (from cross-referenced events)
+// 2. CLOSED_BY: Issue → Commit (from closed events with source_sha)
+//
+// These edges have higher confidence than ASSOCIATED_WITH edges because they come
+// directly from GitHub's timeline API, not from LLM extraction or temporal correlation.
+//
+// Reference: Gap analysis 2025-11-13 - Timeline events are fetched but never converted to edges
+func (b *Builder) createTimelineEdges(ctx context.Context, repoID int64) (*BuildStats, error) {
+	stats := &BuildStats{}
+
+	log.Printf("  Creating 100% confidence edges from timeline events...")
+
+	// Query timeline events for cross-references and closures
+	// We need to query the database directly since there's no method to get all timeline events
+	query := `
+		SELECT
+			gi.number as issue_number,
+			gte.event_type,
+			gte.source_type,
+			gte.source_number,
+			gte.source_sha
+		FROM github_issue_timeline gte
+		JOIN github_issues gi ON gte.issue_id = gi.id
+		WHERE gi.repo_id = $1
+		  AND (
+		    (gte.event_type = 'cross-referenced' AND gte.source_type = 'pull_request' AND gte.source_number IS NOT NULL)
+		    OR
+		    (gte.event_type = 'closed' AND gte.source_sha IS NOT NULL)
+		  )
+	`
+
+	rows, err := b.stagingDB.Query(ctx, query, repoID)
+	if err != nil {
+		return stats, fmt.Errorf("failed to query timeline events: %w", err)
+	}
+	defer rows.Close()
+
+	var edges []GraphEdge
+	referencesCount := 0
+	closedByCount := 0
+
+	for rows.Next() {
+		var issueNumber int
+		var eventType string
+		var sourceType *string
+		var sourceNumber *int
+		var sourceSHA *string
+
+		err := rows.Scan(&issueNumber, &eventType, &sourceType, &sourceNumber, &sourceSHA)
+		if err != nil {
+			log.Printf("  ⚠️  Failed to scan timeline event: %v", err)
+			continue
+		}
+
+		if eventType == "cross-referenced" && sourceType != nil && *sourceType == "pull_request" && sourceNumber != nil {
+			// Create REFERENCES edge: Issue → PR
+			edge := GraphEdge{
+				Label: "REFERENCES",
+				From:  buildCompositeNodeID(repoID, "issue", strconv.Itoa(issueNumber)),
+				To:    buildCompositeNodeID(repoID, "pr", strconv.Itoa(*sourceNumber)),
+				Properties: map[string]interface{}{
+					"source":     "github_timeline",
+					"confidence": 1.0, // 100% confidence - from GitHub API
+					"event_type": "cross-referenced",
+				},
+			}
+			edges = append(edges, edge)
+			referencesCount++
+		} else if eventType == "closed" && sourceSHA != nil {
+			// Create CLOSED_BY edge: Issue → Commit
+			edge := GraphEdge{
+				Label: "CLOSED_BY",
+				From:  buildCompositeNodeID(repoID, "issue", strconv.Itoa(issueNumber)),
+				To:    buildCompositeNodeID(repoID, "commit", *sourceSHA),
+				Properties: map[string]interface{}{
+					"source":     "github_timeline",
+					"confidence": 1.0, // 100% confidence - from GitHub API
+					"event_type": "closed",
+				},
+			}
+			edges = append(edges, edge)
+			closedByCount++
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return stats, fmt.Errorf("error iterating timeline events: %w", err)
+	}
+
+	// Create edges in batches
+	if len(edges) > 0 {
+		batchSize := 100
+		for i := 0; i < len(edges); i += batchSize {
+			end := i + batchSize
+			if end > len(edges) {
+				end = len(edges)
+			}
+
+			batch := edges[i:end]
+			if err := b.backend.CreateEdges(ctx, batch); err != nil {
+				return stats, fmt.Errorf("failed to create timeline edges (batch %d-%d): %w", i, end, err)
+			}
+		}
+
+		stats.Edges = len(edges)
+		log.Printf("    ✓ Created %d REFERENCES edges (Issue → PR)", referencesCount)
+		log.Printf("    ✓ Created %d CLOSED_BY edges (Issue → Commit)", closedByCount)
+	} else {
+		log.Printf("    ℹ️  No timeline events found to create edges")
 	}
 
 	return stats, nil

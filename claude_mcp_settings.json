@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "crisk": {
+      "command": "/Users/rohankatakam/Documents/brain/coderisk/bin/crisk-check-server",
+      "args": [],
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7688",
+        "NEO4J_PASSWORD": "CHANGE_THIS_PASSWORD_IN_PRODUCTION_123",
+        "POSTGRES_DSN": "postgres://coderisk:CHANGE_THIS_PASSWORD_IN_PRODUCTION_123@localhost:5433/coderisk?sslmode=disable"
+      }
+    }
+  }
+}

@@ -162,6 +162,41 @@ func (l *IssueLinker) createIncidentEdges(ctx context.Context, repoID int64) (*B
 		if ref.CommitSHA != nil {
 			commitID := fmt.Sprintf("commit:%s", *ref.CommitSHA)
 
+			// DEDUPLICATION CHECK: Don't create ASSOCIATED_WITH edge if 100% confidence edge exists
+			// Check for: MERGED_AS, REFERENCES, or CLOSED_BY edges
+			// Reference: Gap analysis 2025-11-13 - Prevent collision with 100% confidence edges
+
+			// Parse node IDs to extract label and ID
+			sourceLabel, sourceIDValue := parseNodeID(sourceID)
+			targetLabel, targetIDValue := parseNodeID(commitID)
+			sourceKey := getUniqueKey(sourceLabel)
+			targetKey := getUniqueKey(targetLabel)
+
+			checkQuery := `
+				MATCH (source)-[r]-(target)
+				WHERE $sourceLabel IN labels(source) AND source[$sourceKey] = $sourceIDValue
+				  AND $targetLabel IN labels(target) AND target[$targetKey] = $targetIDValue
+				  AND type(r) IN ['MERGED_AS', 'REFERENCES', 'CLOSED_BY']
+				RETURN COUNT(r) > 0 as exists
+			`
+			checkParams := map[string]interface{}{
+				"sourceLabel":    sourceLabel,
+				"sourceKey":      sourceKey,
+				"sourceIDValue":  sourceIDValue,
+				"targetLabel":    targetLabel,
+				"targetKey":      targetKey,
+				"targetIDValue":  targetIDValue,
+			}
+			checkResults, err := l.backend.QueryWithParams(ctx, checkQuery, checkParams)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to check for existing 100%% confidence edge: %v", err)
+			} else if len(checkResults) > 0 {
+				if exists, ok := checkResults[0]["exists"].(bool); ok && exists {
+					fmt.Printf("    → Skipping: 100%% confidence edge already exists between %s and %s\n", sourceID, commitID)
+					continue
+				}
+			}
+
 			edge := GraphEdge{
 				Label: edgeLabel,
 				From:  sourceID,
@@ -181,6 +216,39 @@ func (l *IssueLinker) createIncidentEdges(ctx context.Context, repoID int64) (*B
 		// Create edge to PR if available
 		if ref.PRNumber != nil {
 			prID := fmt.Sprintf("pr:%d", *ref.PRNumber)
+
+			// DEDUPLICATION CHECK: Don't create ASSOCIATED_WITH edge if 100% confidence edge exists
+
+			// Parse node IDs to extract label and ID
+			sourceLabel, sourceIDValue := parseNodeID(sourceID)
+			targetLabel, targetIDValue := parseNodeID(prID)
+			sourceKey := getUniqueKey(sourceLabel)
+			targetKey := getUniqueKey(targetLabel)
+
+			checkQuery := `
+				MATCH (source)-[r]-(target)
+				WHERE $sourceLabel IN labels(source) AND source[$sourceKey] = $sourceIDValue
+				  AND $targetLabel IN labels(target) AND target[$targetKey] = $targetIDValue
+				  AND type(r) IN ['MERGED_AS', 'REFERENCES', 'CLOSED_BY']
+				RETURN COUNT(r) > 0 as exists
+			`
+			checkParams := map[string]interface{}{
+				"sourceLabel":    sourceLabel,
+				"sourceKey":      sourceKey,
+				"sourceIDValue":  sourceIDValue,
+				"targetLabel":    targetLabel,
+				"targetKey":      targetKey,
+				"targetIDValue":  targetIDValue,
+			}
+			checkResults, err := l.backend.QueryWithParams(ctx, checkQuery, checkParams)
+			if err != nil {
+				log.Printf("  ⚠️  Failed to check for existing 100%% confidence edge: %v", err)
+			} else if len(checkResults) > 0 {
+				if exists, ok := checkResults[0]["exists"].(bool); ok && exists {
+					fmt.Printf("    → Skipping: 100%% confidence edge already exists between %s and %s\n", sourceID, prID)
+					continue
+				}
+			}
 
 			edge := GraphEdge{
 				Label: edgeLabel,

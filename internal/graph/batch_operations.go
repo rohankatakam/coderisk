@@ -59,7 +59,7 @@ func (b *BatchNodeCreator) CreateFileNodes(ctx context.Context, nodes []GraphNod
 		// Reference: dev_docs/01-architecture/simplified_graph_schema.md line 94 (File nodes use 'path' property)
 		query := `
 			UNWIND $nodes AS node
-			MERGE (f:File {path: node.path})
+			MERGE (f:File {repo_id: node.repo_id, path: node.path})
 			SET f += node
 			RETURN count(f) as created
 		`
@@ -177,20 +177,32 @@ func (b *BatchNodeCreator) CreateCommitNodes(ctx context.Context, nodes []GraphN
 
 		batch := nodeParams[i:end]
 
+		// DEBUG: Log first node properties to verify repo_id is present
+		if i == 0 && len(batch) > 0 {
+			log.Printf("DEBUG: First commit batch node properties: %+v", batch[0])
+		}
+
 		query := `
 			UNWIND $nodes AS node
-			MERGE (c:Commit {sha: node.sha})
+			MERGE (c:Commit {repo_id: node.repo_id, sha: node.sha})
 			SET c += node
 			RETURN count(c) as created
 		`
 
-		_, err := neo4j.ExecuteQuery(ctx, b.driver, query,
+		result, err := neo4j.ExecuteQuery(ctx, b.driver, query,
 			map[string]any{"nodes": batch},
 			neo4j.EagerResultTransformer,
 			neo4j.ExecuteQueryWithDatabase(b.database))
 
 		if err != nil {
 			return fmt.Errorf("batch commit creation failed (batch %d-%d): %w", i, end, err)
+		}
+
+		// DEBUG: Log how many nodes were actually created
+		if len(result.Records) > 0 {
+			if created, ok := result.Records[0].Get("created"); ok {
+				log.Printf("DEBUG: Batch %d-%d created %v commits", i, end, created)
+			}
 		}
 	}
 
@@ -264,9 +276,10 @@ func (b *BatchNodeCreator) CreateIssueNodes(ctx context.Context, nodes []GraphNo
 		batch := nodeParams[i:end]
 
 		// Use dynamic label for Issue/PR/Incident nodes (all use 'number' as unique key)
+		// Multi-repo safety: MERGE on composite key (repo_id, number)
 		query := fmt.Sprintf(`
 			UNWIND $nodes AS node
-			MERGE (n:%s {number: node.number})
+			MERGE (n:%s {repo_id: node.repo_id, number: node.number})
 			SET n += node
 			RETURN count(n) as created
 		`, label)

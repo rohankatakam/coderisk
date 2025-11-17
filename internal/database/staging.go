@@ -44,6 +44,12 @@ func (c *StagingClient) Close() error {
 	return c.db.Close()
 }
 
+// DB returns the underlying database connection
+// This is used for advanced operations like Pipeline 2 atomization
+func (c *StagingClient) DB() *sql.DB {
+	return c.db
+}
+
 // DataCounts represents counts of existing data for a repository
 type DataCounts struct {
 	Commits      int
