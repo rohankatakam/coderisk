@@ -115,7 +115,8 @@ func main() {
 	type ToolArgs struct {
 		FilePath         string   `json:"file_path,omitempty" jsonschema:"path to the file to analyze (optional - tool will auto-detect uncommitted changes if available)"`
 		DiffContent      string   `json:"diff_content,omitempty" jsonschema:"optional diff content for uncommitted changes (if not provided, tool will check for uncommitted changes automatically)"`
-		RepoRoot         string   `json:"repo_root,omitempty" jsonschema:"optional repository root path for resolving absolute paths (e.g. /Users/user/Documents/project)"`
+		RepoRoot         string   `json:"repo_root,omitempty" jsonschema:"repository root path for git commands and path resolution (REQUIRED when analyze_all_changes=true, e.g. /Users/user/Documents/project)"`
+		AnalyzeAllChanges bool    `json:"analyze_all_changes,omitempty" jsonschema:"analyze ALL uncommitted changes in the repository (REQUIRES repo_root parameter, ignores file_path, gets full git diff for all modified files)"`
 		MaxCoupledBlocks int      `json:"max_coupled_blocks,omitempty" jsonschema:"maximum number of coupled blocks to return per code block (default: 1)"`
 		MaxIncidents     int      `json:"max_incidents,omitempty" jsonschema:"maximum number of incidents to return per code block (default: 1)"`
 		MaxBlocks        int      `json:"max_blocks,omitempty" jsonschema:"maximum number of code blocks to return (default: 10, use 0 for all)"`
@@ -141,8 +142,10 @@ func main() {
 	// Register the tool with the SDK
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "crisk.get_risk_summary",
-		Description: "Get risk evidence for a file including ownership, coupling, and temporal incident data. Automatically detects and analyzes uncommitted changes when a file_path is provided. Use this tool when the user asks about 'my changes', 'uncommitted changes', or 'risk of changes' in a file.",
+		Description: "Analyzes code risk using historical data from Neo4j and PostgreSQL. Returns ownership (author, staleness), coupling (co-change relationships), and temporal (incident history) data for code blocks. Supports: (1) Single file analysis (2) All uncommitted changes analysis via analyze_all_changes=true (REQUIRES repo_root parameter) (3) Custom diff analysis. IMPORTANT: When analyze_all_changes=true, you MUST provide repo_root with the repository path (e.g. /Users/user/Documents/brain/mcp-use). Use when asked about risk, changes, code quality, technical debt, or file analysis.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args ToolArgs) (*mcp.CallToolResult, ToolOutput, error) {
+		// Log tool invocation
+		log.Printf("📞 Tool called: file_path=%s, analyze_all_changes=%v, diff_content_len=%d, repo_root=%s", args.FilePath, args.AnalyzeAllChanges, len(args.DiffContent), args.RepoRoot)
 		// Convert args to map for existing Execute method
 		argsMap := map[string]interface{}{
 			"file_path": args.FilePath,
@@ -152,6 +155,9 @@ func main() {
 		}
 		if args.RepoRoot != "" {
 			argsMap["repo_root"] = args.RepoRoot
+		}
+		if args.AnalyzeAllChanges {
+			argsMap["analyze_all_changes"] = true
 		}
 		// Set defaults for limits
 		maxCoupled := args.MaxCoupledBlocks
@@ -192,8 +198,11 @@ func main() {
 
 		// Convert result map to typed output
 		resultMap := result.(map[string]interface{})
-		output := ToolOutput{
-			FilePath: resultMap["file_path"].(string),
+		output := ToolOutput{}
+
+		// file_path is optional (not present for analyze_all_changes)
+		if filePath, ok := resultMap["file_path"].(string); ok {
+			output.FilePath = filePath
 		}
 
 		if totalBlocks, ok := resultMap["total_blocks"].(int); ok {

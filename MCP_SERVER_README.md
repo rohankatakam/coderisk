@@ -84,14 +84,16 @@ You should see `crisk.get_risk_summary` listed.
 Returns risk evidence for a file including ownership, coupling, and temporal incident data. **Automatically detects and analyzes uncommitted changes** when a file_path is provided.
 
 **Key Features**:
-- **Auto-Detection**: When you provide a `file_path`, the tool automatically checks for uncommitted changes using `git diff`
-- **Smart Analysis**: If uncommitted changes are found, uses diff-based LLM analysis; otherwise falls back to file-based analysis
-- **Simple API**: Just provide a file path - no need to manually call `git diff` or pass diff content
+- **Analyze All Changes**: Set `analyze_all_changes=true` to analyze ALL uncommitted changes across the repository
+- **Diff-Based Analysis**: Uses LLM to extract modified code blocks from diffs (meta-ingestion)
+- **File-Based Analysis**: Analyze specific files by providing `file_path` (uses all code blocks in file)
+- **Simple API**: Just set a boolean flag - no need to manually call `git diff` or pass diff content
 
 **Parameters**:
-- `file_path` (optional): Path to the file to analyze (relative or absolute) - tool will auto-detect uncommitted changes
-- `repo_root` (optional): Repository root path for resolving absolute paths and git commands
-- `diff_content` (optional): Git diff content for uncommitted change analysis (auto-detected if not provided)
+- `file_path` (optional): Path to the file to analyze (relative or absolute)
+- `analyze_all_changes` (optional): Boolean - analyze ALL uncommitted changes in repository (ignores file_path)
+- `repo_root` (optional): Repository root path for git commands and path resolution
+- `diff_content` (optional): Manual git diff content (bypasses auto-detection)
 - `max_coupled_blocks` (optional): Maximum coupled blocks per code block (default: 1)
 - `max_incidents` (optional): Maximum incidents per code block (default: 1)
 - `max_blocks` (optional): Maximum total blocks to return (default: 10, 0 = all)
@@ -105,18 +107,29 @@ Returns risk evidence for a file including ownership, coupling, and temporal inc
 
 **Example Usage in Claude Code**:
 
-**Simple Query (Auto-Detection)**:
+**Analyze All Uncommitted Changes** (RECOMMENDED):
 ```
-"What is the risk of my uncommitted changes in libraries/python/mcp_use/client/connectors/base.py?"
+"What is the risk of all my uncommitted changes?"
 ```
 
-This will automatically:
-1. Detect uncommitted changes using `git diff`
-2. Use LLM to extract modified code blocks
-3. Query the graph for risk evidence
-4. Return comprehensive risk analysis
+Tool call:
+```json
+{
+  "tool": "crisk.get_risk_summary",
+  "arguments": {
+    "analyze_all_changes": true,
+    "repo_root": "/Users/rohankatakam/Documents/brain/mcp-use"
+  }
+}
+```
 
-**Using Relative Path** (auto-detects uncommitted changes):
+This will:
+1. Run `git diff HEAD` to get ALL uncommitted changes
+2. Use LLM to extract all modified code blocks across all files
+3. Query the graph for risk evidence for each block
+4. Return comprehensive risk analysis for all changes
+
+**Analyze Specific File**:
 ```json
 {
   "tool": "crisk.get_risk_summary",
@@ -125,8 +138,7 @@ This will automatically:
   }
 }
 ```
-- If uncommitted changes exist → diff-based analysis (LLM extraction)
-- If no changes → file-based analysis (all blocks in file)
+- Returns risk evidence for ALL code blocks in the file (not just uncommitted changes)
 
 **Using Absolute Path** (requires `repo_root`):
 ```json

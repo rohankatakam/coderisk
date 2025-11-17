@@ -181,17 +181,13 @@ func (c *LocalGraphClient) GetTemporalData(ctx context.Context, blockID string) 
 	query := `
 		SELECT
 			cbi.issue_id,
-			cbi.pr_id,
-			cbi.confidence_score,
+			cbi.confidence,
 			gi.title AS issue_title,
-			gi.state AS issue_state,
-			gpr.title AS pr_title,
-			gpr.state AS pr_state
+			gi.state AS issue_state
 		FROM code_block_incidents cbi
 		LEFT JOIN github_issues gi ON cbi.issue_id = gi.id
-		LEFT JOIN github_pull_requests gpr ON cbi.pr_id = gpr.id
 		WHERE cbi.code_block_id = $1
-		ORDER BY cbi.confidence_score DESC
+		ORDER BY cbi.confidence DESC
 		LIMIT 10
 	`
 
@@ -204,17 +200,14 @@ func (c *LocalGraphClient) GetTemporalData(ctx context.Context, blockID string) 
 	var incidents []tools.TemporalIncident
 	for rows.Next() {
 		var incident tools.TemporalIncident
-		var issueID, prID sql.NullInt64
-		var issueTitle, issueState, prTitle, prState sql.NullString
+		var issueID sql.NullInt64
+		var issueTitle, issueState sql.NullString
 
 		err := rows.Scan(
 			&issueID,
-			&prID,
 			&incident.ConfidenceScore,
 			&issueTitle,
 			&issueState,
-			&prTitle,
-			&prState,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan temporal incident: %w", err)
@@ -224,11 +217,6 @@ func (c *LocalGraphClient) GetTemporalData(ctx context.Context, blockID string) 
 			incident.IssueID = int(issueID.Int64)
 			incident.IssueTitle = issueTitle.String
 			incident.IssueState = issueState.String
-		}
-		if prID.Valid {
-			incident.PRID = int(prID.Int64)
-			incident.PRTitle = prTitle.String
-			incident.PRState = prState.String
 		}
 
 		incidents = append(incidents, incident)
