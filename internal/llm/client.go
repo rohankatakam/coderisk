@@ -8,6 +8,7 @@ import (
 
 	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/sashabaranov/go-openai"
+	"google.golang.org/genai"
 )
 
 // Provider represents the LLM provider
@@ -289,6 +290,32 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 	case ProviderGemini:
 		return c.geminiClient.CompleteJSON(ctx, systemPrompt, userPrompt)
 	case ProviderOpenAI:
+		return c.completeOpenAIJSON(ctx, systemPrompt, userPrompt)
+	default:
+		return "", fmt.Errorf("no provider configured")
+	}
+}
+
+// CompleteWithSchema sends a prompt to the LLM with strict schema validation
+// Uses Google's ResponseSchema for server-side validation (Gemini only)
+// OpenAI does not support server-side schema validation, falls back to CompleteJSON
+// Reference: YC_DEMO_GAP_ANALYSIS.md - Fix timestamp hallucination with schema enforcement
+func (c *Client) CompleteWithSchema(ctx context.Context, systemPrompt, userPrompt string, schema interface{}) (string, error) {
+	if !c.enabled {
+		return "", fmt.Errorf("llm client not enabled (check PHASE2_ENABLED and API key)")
+	}
+
+	switch c.provider {
+	case ProviderGemini:
+		// Import genai package for schema type
+		geminiSchema, ok := schema.(*genai.Schema)
+		if !ok {
+			return "", fmt.Errorf("schema must be *genai.Schema for Gemini provider")
+		}
+		return c.geminiClient.CompleteWithSchema(ctx, systemPrompt, userPrompt, geminiSchema)
+	case ProviderOpenAI:
+		// OpenAI doesn't support server-side schema validation, fall back to JSON mode
+		c.logger.Warn("OpenAI provider does not support server-side schema validation, using JSON mode")
 		return c.completeOpenAIJSON(ctx, systemPrompt, userPrompt)
 	default:
 		return "", fmt.Errorf("no provider configured")

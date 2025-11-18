@@ -25,6 +25,7 @@ func NewGraphWriter(driver neo4j.DriverWithContext, database string) *GraphWrite
 
 // CreateCodeBlockNode creates a CodeBlock node in Neo4j
 // Reference: AGENT_P2B_PROCESSOR.md - Neo4j Cypher queries
+// Schema aligned with DATA_SCHEMA_REFERENCE.md
 func (g *GraphWriter) CreateCodeBlockNode(ctx context.Context, blockID int64, event *ChangeEvent, repoID int64) error {
 	query := `
 		MERGE (b:CodeBlock {
@@ -32,8 +33,10 @@ func (g *GraphWriter) CreateCodeBlockNode(ctx context.Context, blockID int64, ev
 			repo_id: $repo_id
 		})
 		SET b.block_type = $block_type,
-		    b.name = $name,
-		    b.file_path = $file_path,
+		    b.block_name = $block_name,
+		    b.canonical_file_path = $canonical_file_path,
+		    b.start_line = $start_line,
+		    b.end_line = $end_line,
 		    b.language = $language,
 		    b.db_id = $db_id
 	`
@@ -47,13 +50,15 @@ func (g *GraphWriter) CreateCodeBlockNode(ctx context.Context, blockID int64, ev
 
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		_, err := tx.Run(ctx, query, map[string]any{
-			"composite_id": compositeID,
-			"repo_id":      repoID,
-			"block_type":   event.BlockType,
-			"name":         event.TargetBlockName,
-			"file_path":    event.TargetFile,
-			"language":     detectLanguage(event.TargetFile),
-			"db_id":        blockID,
+			"composite_id":        compositeID,
+			"repo_id":             repoID,
+			"block_type":          event.BlockType,
+			"block_name":          event.TargetBlockName,
+			"canonical_file_path": event.TargetFile,
+			"start_line":          event.StartLine,
+			"end_line":            event.EndLine,
+			"language":            detectLanguage(event.TargetFile),
+			"db_id":               blockID,
 		})
 		return nil, err
 	})
@@ -281,8 +286,10 @@ func (g *GraphWriter) BatchCreateCodeBlockNodes(ctx context.Context, events []st
 					repo_id: $repo_id
 				})
 				SET b.block_type = $block_type,
-					b.name = $name,
-					b.file_path = $file_path,
+					b.block_name = $block_name,
+					b.canonical_file_path = $canonical_file_path,
+					b.start_line = $start_line,
+					b.end_line = $end_line,
 					b.language = $language,
 					b.db_id = $db_id
 			`
@@ -290,13 +297,15 @@ func (g *GraphWriter) BatchCreateCodeBlockNodes(ctx context.Context, events []st
 			compositeID := fmt.Sprintf("%d:codeblock:%s:%s", item.RepoID, item.Event.TargetFile, item.Event.TargetBlockName)
 
 			_, err := tx.Run(ctx, query, map[string]any{
-				"composite_id": compositeID,
-				"repo_id":      item.RepoID,
-				"block_type":   item.Event.BlockType,
-				"name":         item.Event.TargetBlockName,
-				"file_path":    item.Event.TargetFile,
-				"language":     detectLanguage(item.Event.TargetFile),
-				"db_id":        item.BlockID,
+				"composite_id":        compositeID,
+				"repo_id":             item.RepoID,
+				"block_type":          item.Event.BlockType,
+				"block_name":          item.Event.TargetBlockName,
+				"canonical_file_path": item.Event.TargetFile,
+				"start_line":          item.Event.StartLine,
+				"end_line":            item.Event.EndLine,
+				"language":            detectLanguage(item.Event.TargetFile),
+				"db_id":               item.BlockID,
 			})
 
 			if err != nil {

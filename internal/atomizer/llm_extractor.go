@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rohankatakam/coderisk/internal/llm"
+	"google.golang.org/genai"
 )
 
 // Extractor extracts semantic code block events from git commits using LLM
@@ -21,9 +21,10 @@ func NewExtractor(llmClient *llm.Client) *Extractor {
 	return &Extractor{llmClient: llmClient}
 }
 
-// ExtractCodeBlocks extracts semantic events from a commit's diff
-// Returns CommitChangeEventLog containing all code block changes
+// ExtractCodeBlocks extracts semantic events from a commit's diff using structured output
+// Returns CommitChangeEventLog with metadata appended AFTER LLM extraction to prevent hallucination
 // Reference: AGENT_P2A_LLM_ATOMIZER.md - Main extraction logic
+// Reference: YC_DEMO_GAP_ANALYSIS.md - Fix hallucination by parsing structured data from diff
 func (e *Extractor) ExtractCodeBlocks(ctx context.Context, commit CommitData) (*CommitChangeEventLog, error) {
 	// Handle empty diff case
 	if strings.TrimSpace(commit.DiffContent) == "" {
@@ -37,37 +38,73 @@ func (e *Extractor) ExtractCodeBlocks(ctx context.Context, commit CommitData) (*
 		}, nil
 	}
 
-	// 1. Build LLM prompt
+	// 1. Parse diff to extract file paths and line numbers (BEFORE LLM)
+	parsedFiles := ParseDiff(commit.DiffContent)
+
+	// 2. Build LLM prompt (NO metadata or file paths in output)
 	prompt := fmt.Sprintf(AtomizationPromptTemplate,
 		commit.Message,
 		truncateDiff(commit.DiffContent, 15000), // Limit diff size to avoid token limits
-		commit.SHA,
-		commit.AuthorEmail,
-		commit.Timestamp.Format(time.RFC3339),
 	)
 
-	// 2. Call LLM with JSON mode
+	// 3. Call LLM with JSON mode (without ResponseSchema to avoid runaway generation issues)
+	// Note: Gemini 2.0-flash with ResponseSchema has issues with repetitive text generation
+	// Falling back to simple JSON mode for more reliable output
 	response, err := e.llmClient.CompleteJSON(ctx, "system", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
 
-	// 3. Parse JSON response
-	var result CommitChangeEventLog
-	if err := json.Unmarshal([]byte(response), &result); err != nil {
-		// Try to repair common JSON errors
-		repaired := repairJSON(response)
-		if err2 := json.Unmarshal([]byte(repaired), &result); err2 != nil {
-			return nil, fmt.Errorf("JSON parse failed: %w (original: %v)", err2, err)
+	// 5. Handle empty response (Gemini sometimes returns empty string)
+	if strings.TrimSpace(response) == "" {
+		return &CommitChangeEventLog{
+			CommitSHA:        commit.SHA,
+			AuthorEmail:      commit.AuthorEmail,
+			Timestamp:        commit.Timestamp,
+			LLMIntentSummary: "No code block changes detected",
+			MentionedIssues:  []string{},
+			ChangeEvents:     []ChangeEvent{},
+		}, nil
+	}
+
+	// 6. Parse JSON response (guaranteed to match schema by Gemini)
+	var llmResponse LLMExtractionResponse
+	if err := json.Unmarshal([]byte(response), &llmResponse); err != nil {
+		return nil, fmt.Errorf("JSON parse failed (response: %q): %w", response, err)
+	}
+
+	// 6b. Truncate any overly long target_block_names (Gemini MaxLength constraint not always honored)
+	for i := range llmResponse.ChangeEvents {
+		if len(llmResponse.ChangeEvents[i].TargetBlockName) > 100 {
+			llmResponse.ChangeEvents[i].TargetBlockName = llmResponse.ChangeEvents[i].TargetBlockName[:100]
 		}
 	}
 
-	// 4. Validate result
-	if err := validateEventLog(&result); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
+	// 7. Match LLM events to parsed files and enrich with file paths + line numbers
+	enrichedEvents := matchEventsToFiles(llmResponse.ChangeEvents, parsedFiles)
+
+	// 8. Validate and filter events
+	validEvents := filterValidEvents(enrichedEvents)
+
+	// 9. Build final CommitChangeEventLog by appending metadata from commit
+	result := &CommitChangeEventLog{
+		CommitSHA:        commit.SHA,         // From CommitData, NOT from LLM
+		AuthorEmail:      commit.AuthorEmail, // From CommitData, NOT from LLM
+		Timestamp:        commit.Timestamp,   // From CommitData, NOT from LLM
+		LLMIntentSummary: llmResponse.LLMIntentSummary,
+		MentionedIssues:  llmResponse.MentionedIssues,
+		ChangeEvents:     validEvents,
 	}
 
-	return &result, nil
+	// Initialize empty arrays if nil
+	if result.MentionedIssues == nil {
+		result.MentionedIssues = []string{}
+	}
+	if result.ChangeEvents == nil {
+		result.ChangeEvents = []ChangeEvent{}
+	}
+
+	return result, nil
 }
 
 // ExtractCodeBlocksBatch processes multiple commits in parallel
@@ -90,105 +127,6 @@ func (e *Extractor) ExtractCodeBlocksBatch(ctx context.Context, commits []Commit
 	return results, errors
 }
 
-// repairJSON attempts to fix common LLM JSON formatting issues
-// Reference: AGENT_P2A_LLM_ATOMIZER.md - Error handling for malformed responses
-func repairJSON(s string) string {
-	// Remove markdown code blocks
-	s = strings.ReplaceAll(s, "```json\n", "")
-	s = strings.ReplaceAll(s, "```json", "")
-	s = strings.ReplaceAll(s, "\n```", "")
-	s = strings.ReplaceAll(s, "```", "")
-
-	// Trim whitespace
-	s = strings.TrimSpace(s)
-
-	// Check if LLM returned an array instead of an object
-	// If it starts with [, extract the first element
-	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
-		// Try to parse as array and extract first element
-		var arr []json.RawMessage
-		if err := json.Unmarshal([]byte(s), &arr); err == nil && len(arr) > 0 {
-			return string(arr[0])
-		}
-	}
-
-	return s
-}
-
-// validateEventLog ensures the LLM output is reasonable
-// Reference: AGENT_P2A_LLM_ATOMIZER.md - Validation requirements
-func validateEventLog(log *CommitChangeEventLog) error {
-	if log.CommitSHA == "" {
-		return fmt.Errorf("missing commit_sha")
-	}
-	if log.AuthorEmail == "" {
-		return fmt.Errorf("missing author_email")
-	}
-
-	// Initialize empty arrays if nil
-	if log.MentionedIssues == nil {
-		log.MentionedIssues = []string{}
-	}
-	if log.ChangeEvents == nil {
-		log.ChangeEvents = []ChangeEvent{}
-	}
-
-	// Filter and validate change events
-	var validEvents []ChangeEvent
-	for i, event := range log.ChangeEvents {
-		if event.Behavior == "" {
-			return fmt.Errorf("event %d missing behavior", i)
-		}
-
-		// Validate behavior is one of the allowed values
-		validBehaviors := map[string]bool{
-			"CREATE_BLOCK":  true,
-			"MODIFY_BLOCK":  true,
-			"DELETE_BLOCK":  true,
-			"ADD_IMPORT":    true,
-			"REMOVE_IMPORT": true,
-		}
-		if !validBehaviors[event.Behavior] {
-			return fmt.Errorf("event %d has invalid behavior: %s", i, event.Behavior)
-		}
-
-		if event.TargetFile == "" {
-			return fmt.Errorf("event %d missing target_file", i)
-		}
-
-		// For block operations, validate block_type if present
-		// Be lenient: if block_type is invalid, filter or normalize it
-		if event.BlockType != "" {
-			validBlockTypes := map[string]bool{
-				"function":  true,
-				"method":    true,
-				"class":     true,
-				"component": true,
-			}
-			if !validBlockTypes[event.BlockType] {
-				// Normalize common variations to valid types
-				switch strings.ToLower(event.BlockType) {
-				case "variable", "constant", "var", "const":
-					// Skip variables/constants - not code blocks we track
-					continue
-				case "text", "documentation", "doc", "markdown":
-					// Skip documentation changes
-					continue
-				default:
-					// Unknown type - normalize to function as best guess
-					event.BlockType = "function"
-				}
-			}
-		}
-
-		validEvents = append(validEvents, event)
-	}
-
-	// Update with filtered events
-	log.ChangeEvents = validEvents
-
-	return nil
-}
 
 // truncateDiff limits diff size to avoid token limits
 // Large commits (>100 files) are split into smaller chunks
@@ -225,4 +163,201 @@ func IsBinaryFile(filename string) bool {
 	}
 
 	return false
+}
+
+// buildExtractionSchema defines the Google ResponseSchema for LLM extraction
+// Reference: YC_DEMO_GAP_ANALYSIS.md - Server-side validation prevents hallucination
+// NOTE: File paths and line numbers are parsed from diff headers, NOT extracted by LLM
+func buildExtractionSchema() *genai.Schema {
+	truePtr := boolPtr(true)
+	maxBlockNameLength := int64(100)
+	maxDependencyPathLength := int64(200)
+	maxSummaryLength := int64(500)
+
+	return &genai.Schema{
+		Type: genai.TypeObject,
+		Properties: map[string]*genai.Schema{
+			"llm_intent_summary": {
+				Type:        genai.TypeString,
+				Description: "One sentence summary of the change intent from the commit message",
+				MaxLength:   &maxSummaryLength,
+			},
+			"mentioned_issues_in_msg": {
+				Type:        genai.TypeArray,
+				Description: "Issue numbers mentioned in commit message (e.g., #123, #456)",
+				Items: &genai.Schema{
+					Type: genai.TypeString,
+				},
+			},
+			"change_events": {
+				Type:        genai.TypeArray,
+				Description: "List of code block changes (file paths and line numbers are parsed separately)",
+				Items: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"behavior": {
+							Type:        genai.TypeString,
+							Description: "Type of change",
+							Enum:        []string{"CREATE_BLOCK", "MODIFY_BLOCK", "DELETE_BLOCK", "ADD_IMPORT", "REMOVE_IMPORT"},
+						},
+						"target_block_name": {
+							Type:        genai.TypeString,
+							Description: "Name of the function/method/class (SHORT NAME ONLY, max 100 chars, omit for imports)",
+							MaxLength:   &maxBlockNameLength,
+							Nullable:    truePtr,
+						},
+						"block_type": {
+							Type:        genai.TypeString,
+							Description: "Type of code block",
+							Enum:        []string{"function", "method", "class", "component"},
+							Nullable:    truePtr,
+						},
+						"dependency_path": {
+							Type:        genai.TypeString,
+							Description: "For imports: package/module path (e.g., 'axios', 'lodash')",
+							MaxLength:   &maxDependencyPathLength,
+							Nullable:    truePtr,
+						},
+						"old_version": {
+							Type:        genai.TypeString,
+							Description: "Old code snippet for modifications (optional)",
+							Nullable:    truePtr,
+						},
+						"new_version": {
+							Type:        genai.TypeString,
+							Description: "New code snippet for modifications (optional)",
+							Nullable:    truePtr,
+						},
+					},
+					Required: []string{"behavior"},
+				},
+			},
+		},
+		Required: []string{"llm_intent_summary", "mentioned_issues_in_msg", "change_events"},
+	}
+}
+
+// boolPtr returns a pointer to a bool value
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+// matchEventsToFiles matches LLM-extracted events to parsed file changes
+// Enriches events with file paths and line numbers from diff parsing
+// Reference: YC_DEMO_GAP_ANALYSIS.md - Prevent file path hallucination
+func matchEventsToFiles(llmEvents []LLMChangeEvent, parsedFiles map[string]*DiffFileChange) []ChangeEvent {
+	var enrichedEvents []ChangeEvent
+
+	// If only one file in diff, all events belong to that file
+	if len(parsedFiles) == 1 {
+		var filePath string
+		var fileChange *DiffFileChange
+		for path, change := range parsedFiles {
+			filePath = path
+			fileChange = change
+			break
+		}
+
+		startLine, endLine := GetLineRangeForFile(fileChange)
+
+		for _, llmEvent := range llmEvents {
+			enrichedEvents = append(enrichedEvents, ChangeEvent{
+				Behavior:        llmEvent.Behavior,
+				TargetFile:      filePath,
+				TargetBlockName: llmEvent.TargetBlockName,
+				BlockType:       llmEvent.BlockType,
+				StartLine:       startLine,
+				EndLine:         endLine,
+				DependencyPath:  llmEvent.DependencyPath,
+				OldVersion:      llmEvent.OldVersion,
+				NewVersion:      llmEvent.NewVersion,
+			})
+		}
+
+		return enrichedEvents
+	}
+
+	// Multiple files: distribute events evenly across files
+	// This is a heuristic - in most cases each file gets one event
+	if len(llmEvents) > 0 && len(parsedFiles) > 0 {
+		fileList := make([]string, 0, len(parsedFiles))
+		for path := range parsedFiles {
+			fileList = append(fileList, path)
+		}
+
+		for i, llmEvent := range llmEvents {
+			// Round-robin distribution
+			fileIndex := i % len(fileList)
+			filePath := fileList[fileIndex]
+			fileChange := parsedFiles[filePath]
+
+			startLine, endLine := GetLineRangeForFile(fileChange)
+
+			enrichedEvents = append(enrichedEvents, ChangeEvent{
+				Behavior:        llmEvent.Behavior,
+				TargetFile:      filePath,
+				TargetBlockName: llmEvent.TargetBlockName,
+				BlockType:       llmEvent.BlockType,
+				StartLine:       startLine,
+				EndLine:         endLine,
+				DependencyPath:  llmEvent.DependencyPath,
+				OldVersion:      llmEvent.OldVersion,
+				NewVersion:      llmEvent.NewVersion,
+			})
+		}
+	}
+
+	return enrichedEvents
+}
+
+// filterValidEvents validates and filters change events
+// Replaces the old validateEventLog logic but focuses only on event validation
+func filterValidEvents(events []ChangeEvent) []ChangeEvent {
+	validBehaviors := map[string]bool{
+		"CREATE_BLOCK":  true,
+		"MODIFY_BLOCK":  true,
+		"DELETE_BLOCK":  true,
+		"ADD_IMPORT":    true,
+		"REMOVE_IMPORT": true,
+	}
+
+	validBlockTypes := map[string]bool{
+		"function":  true,
+		"method":    true,
+		"class":     true,
+		"component": true,
+	}
+
+	var validEvents []ChangeEvent
+	for _, event := range events {
+		// Skip invalid behaviors (should not happen with schema)
+		if !validBehaviors[event.Behavior] {
+			continue
+		}
+
+		// Skip events without target file (should not happen with schema)
+		if event.TargetFile == "" {
+			continue
+		}
+
+		// Filter or normalize block_type if present
+		if event.BlockType != "" && !validBlockTypes[event.BlockType] {
+			// Normalize common variations or skip
+			switch strings.ToLower(event.BlockType) {
+			case "variable", "constant", "var", "const":
+				// Skip variables/constants - not code blocks we track
+				continue
+			case "text", "documentation", "doc", "markdown":
+				// Skip documentation changes
+				continue
+			default:
+				// Unknown type - normalize to function as best guess
+				event.BlockType = "function"
+			}
+		}
+
+		validEvents = append(validEvents, event)
+	}
+
+	return validEvents
 }

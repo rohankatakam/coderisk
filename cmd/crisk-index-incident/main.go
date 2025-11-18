@@ -158,7 +158,15 @@ func runIndexIncident(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   Blocks without incidents:  %d\n", stats["blocks_without_incidents"])
 	fmt.Printf("   Total unique issues:       %d\n", stats["total_unique_issues"])
 	fmt.Printf("   Total incident links:      %d\n", stats["total_incident_links"])
-	if stats["blocks_with_incidents"].(int64) > 0 {
+	blocksWithIncidents, ok := stats["blocks_with_incidents"].(int)
+	if !ok {
+		// Try int64 if int fails
+		blocksWithIncidentsInt64, ok := stats["blocks_with_incidents"].(int64)
+		if ok {
+			blocksWithIncidents = int(blocksWithIncidentsInt64)
+		}
+	}
+	if blocksWithIncidents > 0 {
 		fmt.Printf("   Average incidents/block:   %.2f\n", stats["avg_incidents_per_block"])
 		fmt.Printf("   Max incidents/block:       %.0f\n", stats["max_incidents_per_block"])
 	}

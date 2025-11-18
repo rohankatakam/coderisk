@@ -103,7 +103,7 @@ func (c *GeminiClient) CompleteJSON(ctx context.Context, systemPrompt, userPromp
 		systemInstruction = genai.Text(systemPrompt)[0]
 	}
 
-	// Create generation config with JSON output
+	// Create generation config with JSON output (no schema enforcement)
 	genConfig := &genai.GenerateContentConfig{
 		SystemInstruction: systemInstruction,
 		Temperature:       ptrFloat32(0.1),
@@ -131,6 +131,53 @@ func (c *GeminiClient) CompleteJSON(ctx context.Context, systemPrompt, userPromp
 	jsonText := part.Text
 
 	c.logger.Debug("gemini json completion",
+		"prompt_length", len(userPrompt),
+		"response_length", len(jsonText),
+	)
+
+	return jsonText, nil
+}
+
+// CompleteWithSchema sends a prompt to Gemini with a strict JSON schema
+// Uses Gemini's native structured output (ResponseSchema) to guarantee schema compliance
+// This eliminates issues like timestamp="N/A" by enforcing server-side validation
+func (c *GeminiClient) CompleteWithSchema(ctx context.Context, systemPrompt, userPrompt string, schema *genai.Schema) (string, error) {
+	// Build system instruction if provided
+	var systemInstruction *genai.Content
+	if systemPrompt != "" {
+		systemInstruction = genai.Text(systemPrompt)[0]
+	}
+
+	// Create generation config with strict schema enforcement
+	genConfig := &genai.GenerateContentConfig{
+		SystemInstruction: systemInstruction,
+		Temperature:       ptrFloat32(0.1),
+		MaxOutputTokens:   2000, // Prevent runaway generation
+		ResponseMIMEType:  "application/json",
+		ResponseSchema:    schema, // Server-side schema validation
+	}
+
+	// Generate content with retry logic
+	resp, err := c.generateContentWithRetry(ctx, c.model, genai.Text(userPrompt), genConfig)
+	if err != nil {
+		return "", fmt.Errorf("gemini schema completion failed: %w", err)
+	}
+
+	// Validate response
+	if len(resp.Candidates) == 0 {
+		return "", fmt.Errorf("gemini returned no candidates")
+	}
+
+	candidate := resp.Candidates[0]
+	if len(candidate.Content.Parts) == 0 {
+		return "", fmt.Errorf("gemini returned no content parts")
+	}
+
+	// Extract JSON text (guaranteed to match schema)
+	part := candidate.Content.Parts[0]
+	jsonText := part.Text
+
+	c.logger.Debug("gemini schema completion",
 		"prompt_length", len(userPrompt),
 		"response_length", len(jsonText),
 	)

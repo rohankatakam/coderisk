@@ -25,26 +25,37 @@ func NewDBWriter(db *sql.DB) *DBWriter {
 // Returns the PostgreSQL ID of the created block
 // Reference: AGENT_P2B_PROCESSOR.md - CREATE_BLOCK handling
 func (w *DBWriter) CreateCodeBlock(ctx context.Context, event *ChangeEvent, commitSHA, authorEmail string, timestamp time.Time, repoID int64) (int64, error) {
+	// Use TargetFile as both canonical_file_path and path_at_creation
+	// canonical_file_path will be updated by file identity resolution later
 	query := `
 		INSERT INTO code_blocks (
 			repo_id, file_path, block_name, block_type,
 			language, first_seen_sha, current_status,
+			canonical_file_path, path_at_creation,
+			start_line, end_line,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW(), NOW())
-		ON CONFLICT (repo_id, file_path, block_name)
+		) VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, $10, NOW(), NOW())
+		ON CONFLICT (repo_id, canonical_file_path, block_name)
 		DO UPDATE SET
-			updated_at = NOW()
+			updated_at = NOW(),
+			file_path = EXCLUDED.file_path,
+			start_line = EXCLUDED.start_line,
+			end_line = EXCLUDED.end_line
 		RETURNING id
 	`
 
 	var blockID int64
 	err := w.db.QueryRowContext(ctx, query,
 		repoID,
-		event.TargetFile,
+		event.TargetFile,        // file_path (current path)
 		event.TargetBlockName,
 		event.BlockType,
 		detectLanguage(event.TargetFile),
 		commitSHA,
+		event.TargetFile,        // canonical_file_path (will be resolved later)
+		event.TargetFile,        // path_at_creation
+		event.StartLine,         // start_line
+		event.EndLine,           // end_line
 	).Scan(&blockID)
 
 	if err != nil {
@@ -141,10 +152,11 @@ func (w *DBWriter) MarkCodeBlockDeleted(ctx context.Context, blockID int64, comm
 
 // GetCodeBlockID retrieves the PostgreSQL ID for a code block by file path and name
 // Used to initialize state tracker from existing data
+// Uses canonical_file_path for matching per DATA_SCHEMA_REFERENCE.md
 func (w *DBWriter) GetCodeBlockID(ctx context.Context, repoID int64, filePath, blockName string) (int64, error) {
 	query := `
 		SELECT id FROM code_blocks
-		WHERE repo_id = $1 AND file_path = $2 AND block_name = $3
+		WHERE repo_id = $1 AND canonical_file_path = $2 AND block_name = $3
 	`
 
 	var blockID int64
