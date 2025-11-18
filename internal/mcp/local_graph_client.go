@@ -117,6 +117,35 @@ func (c *LocalGraphClient) GetCodeBlocksForFile(ctx context.Context, filePath st
 	return blocks, result.Err()
 }
 
+// ExecuteQuery implements git.GraphQueryer interface for Neo4j queries
+// This allows LocalGraphClient to be used with git.FileResolver
+func (c *LocalGraphClient) ExecuteQuery(ctx context.Context, query string, params map[string]any) ([]map[string]any, error) {
+	session := c.neo4jDriver.NewSession(ctx, neo4j.SessionConfig{})
+	defer session.Close(ctx)
+
+	result, err := session.Run(ctx, query, params)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []map[string]any
+	for result.Next(ctx) {
+		record := result.Record()
+
+		// Convert neo4j.Record to map[string]any
+		recordMap := make(map[string]any)
+		for _, key := range record.Keys {
+			value, ok := record.Get(key)
+			if ok {
+				recordMap[key] = value
+			}
+		}
+		results = append(results, recordMap)
+	}
+
+	return results, result.Err()
+}
+
 // GetCouplingData queries Neo4j for coupling relationships
 // blockID is the PostgreSQL integer ID (as string)
 func (c *LocalGraphClient) GetCouplingData(ctx context.Context, blockID string) (*tools.CouplingData, error) {
@@ -348,3 +377,4 @@ func (c *LocalGraphClient) GetCodeBlocksByNames(ctx context.Context, filePathsWi
 
 	return blocks, result.Err()
 }
+

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/rohankatakam/coderisk/internal/database"
+	"github.com/rohankatakam/coderisk/internal/ingestion"
 	"github.com/rohankatakam/coderisk/internal/linking/types"
 )
 
@@ -91,15 +92,17 @@ func parseCompositeNodeID(compositeID string) (repoID int64, nodeType, identifie
 // Builder orchestrates graph construction from PostgreSQL staging tables
 // Reference: dev_docs/03-implementation/integration_guides/layers_2_3_graph_construction.md
 type Builder struct {
-	stagingDB *database.StagingClient
-	backend   Backend
+	stagingDB    *database.StagingClient
+	backend      Backend
+	identityRepo *database.FileIdentityRepository
 }
 
 // NewBuilder creates a graph builder instance
 func NewBuilder(stagingDB *database.StagingClient, backend Backend) *Builder {
 	return &Builder{
-		stagingDB: stagingDB,
-		backend:   backend,
+		stagingDB:    stagingDB,
+		backend:      backend,
+		identityRepo: database.NewFileIdentityRepository(stagingDB.DB()),
 	}
 }
 
@@ -423,6 +426,25 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64, repoFullName
 	batchSize := 100
 	stats := &BuildStats{}
 
+	// Load file identity mapping once for efficient path resolution
+	// This maps historical_path -> canonical_path for all files in the repository
+	log.Printf("  Loading file identity map for repo %d...", repoID)
+	identityMap, err := b.identityRepo.GetByRepoID(ctx, repoID)
+	if err != nil {
+		log.Printf("  ⚠️  Failed to load file identity map: %v (continuing without canonical paths)", err)
+		identityMap = make(map[string]*ingestion.FileIdentity) // Empty map, fall back to historical paths
+	} else {
+		log.Printf("  ✓ Loaded %d file identity mappings", len(identityMap))
+	}
+
+	// Build reverse lookup: historical_path -> canonical_path
+	pathResolutionMap := make(map[string]string)
+	for canonicalPath, identity := range identityMap {
+		for _, historicalPath := range identity.HistoricalPaths {
+			pathResolutionMap[historicalPath] = canonicalPath
+		}
+	}
+
 	for {
 		// Fetch unprocessed commits
 		commits, err := b.stagingDB.FetchUnprocessedCommits(ctx, repoID, batchSize)
@@ -440,7 +462,7 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64, repoFullName
 		var commitIDs []int64
 
 		for _, commit := range commits {
-			nodes, edges, err := b.transformCommit(commit, repoID, repoFullName, repoPath)
+			nodes, edges, err := b.transformCommit(commit, repoID, repoFullName, repoPath, pathResolutionMap)
 			if err != nil {
 				log.Printf("  ⚠️  Failed to transform commit %s: %v", commit.SHA, err)
 				continue
@@ -480,7 +502,7 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64, repoFullName
 
 // transformCommit converts a commit into graph nodes and edges
 // repoPath is used to convert relative file paths from GitHub to absolute paths matching File nodes
-func (b *Builder) transformCommit(commit database.CommitData, repoID int64, repoFullName, repoPath string) ([]GraphNode, []GraphEdge, error) {
+func (b *Builder) transformCommit(commit database.CommitData, repoID int64, repoFullName, repoPath string, pathResolutionMap map[string]string) ([]GraphNode, []GraphEdge, error) {
 	var nodes []GraphNode
 	var edges []GraphEdge
 
@@ -552,23 +574,31 @@ func (b *Builder) transformCommit(commit database.CommitData, repoID int64, repo
 
 	// 4. Create File nodes + MODIFIED edges for each file (Commit → File)
 	// Schema: PRE_COMMIT_GRAPH_SPEC.md - MODIFIED edge with additions, deletions, status
-	// GitHub API provides relative paths which now match File node paths exactly!
-	// Reference: issue_ingestion_implementation_plan.md Phase 1 - File Resolution
+	// NEW: Resolve historical paths to canonical paths using file_identity_map
+	// Reference: ingestion_aws.md Pipeline 1.0 - File Identity Resolution
 	for _, file := range fullCommit.Files {
-		// Use GitHub API path directly - it's relative from repo root
-		relativePath := file.Filename
+		// Historical path from GitHub API (path at commit time)
+		historicalPath := file.Filename
 
-		// Create File node with composite ID and repo properties
-		// These represent files as they existed at commit time (historical paths)
-		fileID := buildCompositeNodeID(repoID, "file", relativePath)
+		// Resolve to canonical path (current path at HEAD)
+		canonicalPath := historicalPath // Default: use historical path if no mapping found
+		if resolvedPath, exists := pathResolutionMap[historicalPath]; exists {
+			canonicalPath = resolvedPath
+		}
+
+		// Create File node with CANONICAL path as the node ID
+		// This ensures all historical instances of the same logical file link to one canonical node
+		fileID := buildCompositeNodeID(repoID, "file", canonicalPath)
 		fileNode := GraphNode{
 			Label: "File",
 			ID:    fileID,
 			Properties: map[string]interface{}{
-				"repo_id":        repoID,
-				"repo_full_name": repoFullName,
-				"path":           relativePath,
-				"historical":     true, // Mark as historical (from GitHub commits)
+				"repo_id":         repoID,
+				"repo_full_name":  repoFullName,
+				"path":            canonicalPath,         // Required by Neo4j constraint
+				"canonical_path":  canonicalPath,         // Current path at HEAD
+				"path_at_commit":  historicalPath,        // Path at this commit (may differ due to renames)
+				"is_renamed":      historicalPath != canonicalPath, // True if file was renamed since this commit
 			},
 		}
 		nodes = append(nodes, fileNode)

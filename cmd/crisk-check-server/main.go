@@ -12,7 +12,7 @@ import (
 	"github.com/rohankatakam/coderisk/internal/mcp/tools"
 	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/llm"
-	bolt "go.etcd.io/bbolt"
+	"github.com/rohankatakam/coderisk/internal/git"
 )
 
 func main() {
@@ -57,27 +57,35 @@ func main() {
 	}
 	log.Println("✅ Connected to PostgreSQL")
 
-	// 4. Open bbolt cache
-	log.Println("Opening cache database...")
-	cacheDB, err := bolt.Open("/tmp/crisk-mcp-cache.db", 0600, nil)
-	if err != nil {
-		log.Fatalf("Failed to open cache: %v", err)
-	}
-	defer cacheDB.Close()
-	log.Println("✅ Cache database opened")
-	log.Println("✅ Cache initialized")
-
-	// 5. Create graph client
+	// 4. Create graph client (implements both tools.GraphClient and git.GraphQueryer)
 	log.Println("Creating graph client...")
 	graphClient := mcpinternal.NewLocalGraphClient(driver, pgPool)
 	log.Println("✅ Graph client created")
 
-	// 6. Create identity resolver
-	log.Println("Creating identity resolver...")
-	resolver := mcpinternal.NewIdentityResolver(cacheDB)
-	log.Println("✅ Identity resolver created")
+	// 5. Create file identity resolver using git.FileResolver
+	// This uses the proven 2-level resolution strategy from `crisk check`
+	log.Println("Creating file identity resolver...")
 
-	// 6.5. Create diff atomizer (optional, requires GEMINI_API_KEY)
+	// Try to detect repo root from environment or use current directory
+	repoRoot := os.Getenv("REPO_ROOT")
+	if repoRoot == "" {
+		// Fallback: use current working directory
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			log.Printf("⚠️  Failed to get current directory: %v (will use repo_root from tool args)", err)
+			repoRoot = "."
+		}
+	}
+	log.Printf("Using repo root: %s (can be overridden via repo_root parameter in tool calls)", repoRoot)
+
+	// Create git.FileResolver with Neo4j-backed resolution
+	fileResolver := git.NewFileResolver(repoRoot, graphClient)
+
+	// Wrap it with adapter to match tools.IdentityResolver interface
+	resolver := mcpinternal.NewFileResolverAdapter(fileResolver, repoRoot)
+	log.Println("✅ File identity resolver created (using git.FileResolver + Neo4j)")
+
+	// 6. Create diff atomizer (optional, requires GEMINI_API_KEY)
 	var diffAtomizer *mcpinternal.DiffAtomizer
 	if geminiAPIKey != "" {
 		log.Println("Creating LLM client for diff analysis...")

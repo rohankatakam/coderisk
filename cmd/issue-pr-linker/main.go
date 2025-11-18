@@ -39,14 +39,15 @@ Requirements:
   - Repository must be already ingested via 'crisk init'
 
 Example:
-  issue-pr-linker --repo omnara-ai/omnara --days 90
-  issue-pr-linker --repo myorg/myrepo --days 180 --dry-run`,
+  issue-pr-linker --repo omnara-ai/omnara              # Full history
+  issue-pr-linker --repo myorg/myrepo --days 90         # Last 90 days only (for testing)
+  issue-pr-linker --repo myorg/myrepo --days 180 --dry-run  # Dry run with last 180 days`,
 	RunE: runLinker,
 }
 
 func init() {
 	rootCmd.Flags().StringVar(&repoFullName, "repo", "", "Repository full name (owner/repo)")
-	rootCmd.Flags().IntVar(&days, "days", 90, "Time window for DORA metrics (0 = all history)")
+	rootCmd.Flags().IntVar(&days, "days", 0, "Time window for DORA metrics (0 = all history, default: 0)")
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Dry run mode (don't write to database)")
 
 	rootCmd.MarkFlagRequired("repo")

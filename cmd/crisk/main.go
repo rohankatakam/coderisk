@@ -65,6 +65,7 @@ Git commit: ` + GitCommit + `
 
 	// Add essential commands only
 	rootCmd.AddCommand(initCmd)   // Initialize repo with graph construction
+	rootCmd.AddCommand(ingestCmd) // Build graph from staged data
 	rootCmd.AddCommand(checkCmd)  // Check files for risk
 	// Note: login, logout, whoami are cloud auth commands (added via init())
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/rohankatakam/coderisk/internal/database"
 	"github.com/rohankatakam/coderisk/internal/github"
 	"github.com/rohankatakam/coderisk/internal/graph"
+	"github.com/rohankatakam/coderisk/internal/ingestion"
 	"github.com/rohankatakam/coderisk/internal/linking"
 	"github.com/rohankatakam/coderisk/internal/llm"
 	"github.com/spf13/cobra"
@@ -41,11 +42,11 @@ Usage:
 
 Examples:
   cd ~/projects/my-repo
-  crisk init                  # Default: last 90 days, 100% confidence graph only
-  crisk init --days 30        # Last 30 days
-  crisk init --days 180       # Last 180 days
-  crisk init --all            # Full repository history
-  crisk init --llm            # Include LLM-based ASSOCIATED_WITH extraction (requires API key)
+  crisk init                  # Default: full repository history, 100% confidence graph only
+  crisk init --days 30        # Last 30 days only (for testing/debugging)
+  crisk init --days 180       # Last 180 days only (for testing/debugging)
+  crisk init --all            # Full repository history (same as default)
+  crisk init --llm            # Full history + LLM-based ASSOCIATED_WITH extraction (requires API key)
 
 Requirements:
   • Must be run inside a cloned GitHub repository
@@ -61,9 +62,9 @@ Configuration:
 }
 
 func init() {
-	// Add time window flags per IMPLEMENTATION_GAP_ANALYSIS.md
-	initCmd.Flags().Int("days", 90, "Ingest PRs merged in last N days (default: 90)")
-	initCmd.Flags().Bool("all", false, "Ingest entire repository history")
+	// Time window flags - default to full history ingestion
+	initCmd.Flags().Int("days", 0, "Ingest PRs merged in last N days (0 = full history, default: 0)")
+	initCmd.Flags().Bool("all", false, "Ingest entire repository history (same as --days=0)")
 	initCmd.Flags().Bool("llm", false, "Enable LLM-based ASSOCIATED_WITH edge extraction (requires API key)")
 	initCmd.Flags().Bool("enable-atomization", false, "Enable Pipeline 2 code-block atomization (requires --llm)")
 }
@@ -215,7 +216,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Connect to PostgreSQL
-	fmt.Printf("\n[0/5] Connecting to databases...\n")
+	fmt.Printf("\n[0/6] Connecting to databases...\n")
 	stagingDB, err := database.NewStagingClient(
 		ctx,
 		cfg.Storage.PostgresHost,
@@ -246,11 +247,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Connected to Neo4j\n")
 
 	// Use the already-cloned repository
-	fmt.Printf("\n[1/4] Using repository at %s...\n", repoPath)
+	fmt.Printf("\n[1/6] Using repository at %s...\n", repoPath)
 	fmt.Printf("  ✓ Skipping clone (using existing repository)\n")
 
 	// Fetch GitHub data → PostgreSQL
-	fmt.Printf("\n[2/4] Fetching GitHub API data...\n")
+	fmt.Printf("\n[2/6] Fetching GitHub API data...\n")
 	fetchStart := time.Now()
 
 	// Get time window flags
@@ -260,6 +261,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// If --all flag is set, use 0 days (meaning no time limit)
 	if allHistory {
 		days = 0
+	}
+
+	// Display time window message
+	if days == 0 {
 		fmt.Printf("  ℹ️  Fetching entire repository history (no time limit)\n")
 	} else {
 		fmt.Printf("  ℹ️  Fetching last %d days of history\n", days)
@@ -276,12 +281,44 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    Commits: %d | Issues: %d | PRs: %d | Branches: %d\n",
 		stats.Commits, stats.Issues, stats.PRs, stats.Branches)
 
+	// NEW PHASE: Pipeline 1.0 - Build File Identity Map
+	// This must happen BEFORE graph construction so we can use canonical paths
+	// when creating File and CodeBlock nodes
+	fmt.Printf("\n[3/6] Building file identity map (tracing file renames)...\n")
+	identityStart := time.Now()
+
+	// Create file identity mapper
+	identityMapper := ingestion.NewFileIdentityMapper(repoPath, repoID)
+
+	// Build identity map by tracing all files at HEAD
+	identityMap, err := identityMapper.BuildIdentityMap(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to build file identity map: %w", err)
+	}
+
+	// Store identity map in PostgreSQL
+	identityRepo := database.NewFileIdentityRepository(stagingDB.DB())
+
+	// First, clean up any existing identity mappings for this repo (fresh start)
+	if err := identityRepo.DeleteByRepoID(ctx, repoID); err != nil {
+		fmt.Printf("  ⚠️  Failed to clean existing identity mappings: %v\n", err)
+	}
+
+	// Insert new identity mappings
+	if err := identityRepo.BatchInsert(ctx, repoID, identityMap); err != nil {
+		return fmt.Errorf("failed to store file identity mappings: %w", err)
+	}
+
+	identityDuration := time.Since(identityStart)
+	fmt.Printf("  ✓ File identity map built in %v\n", identityDuration)
+	fmt.Printf("    Traced %d source files across their complete rename history\n", len(identityMap))
+
 	// Check if --llm flag is enabled
 	enableLLM, _ := cmd.Flags().GetBool("llm")
 
 	// Stage: Extract issue-commit-PR relationships using LLM (only if --llm flag is set)
 	if enableLLM {
-		fmt.Printf("\n[3/4] Extracting issue-commit-PR relationships (LLM analysis)...\n")
+		fmt.Printf("\n[4/6] Extracting issue-commit-PR relationships (LLM analysis)...\n")
 		extractStart := time.Now()
 
 		// Create LLM client
@@ -342,11 +379,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  ⚠️  LLM extraction skipped (API key not configured)\n")
 		}
 	} else {
-		fmt.Printf("\n[3/4] LLM extraction skipped (use --llm flag to enable)\n")
+		fmt.Printf("\n[4/6] LLM extraction skipped (use --llm flag to enable)\n")
 	}
 
 	// Stage: Build graph from PostgreSQL → Neo4j (100% confidence graph)
-	fmt.Printf("\n[4/4] Building 100%% confidence graph from GitHub data...\n")
+	fmt.Printf("\n[5/6] Building 100%% confidence graph from GitHub data...\n")
 	graphStart := time.Now()
 
 	// Create graph builder
@@ -368,7 +405,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if !enableLLM {
 			fmt.Printf("\n  ⚠️  Pipeline 2 requires --llm flag (skipping atomization)\n")
 		} else {
-			fmt.Printf("\n[Pipeline 2] Code-block atomization...\n")
+			fmt.Printf("\n[6/6] Pipeline 2: Code-block atomization...\n")
 			atomizationStart := time.Now()
 
 			if err := runPipeline2(ctx, stagingDB, graphBackend, repoID, repoPath); err != nil {
