@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -58,6 +59,8 @@ type CodeBlockIncident struct {
 // Reference: AGENT-P3C §1 - Link Issues to CodeBlocks
 // Strategy: Find issues that were CLOSED_BY or REFERENCED by commits that MODIFIED_BLOCK specific blocks
 func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, error) {
+	log.Printf("  🔍 Querying issue → commit → code block relationships...")
+
 	// Query to find issues linked to commits that modified code blocks
 	// We use the github_issue_timeline table which tracks both closed and referenced events
 	query := `
@@ -108,8 +111,11 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 	defer rows.Close()
 
 	linksCreated := 0
+	batchSize := 10
+	rowCount := 0
 
 	for rows.Next() {
+		rowCount++
 		var codeBlockID, issueID int64
 		var fixCommitSHA string
 		var fixedAt sql.NullTime
@@ -124,15 +130,33 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 		// Fetch issue metadata for new schema columns
 		var issueCreatedAt time.Time
 		var issueClosedAt sql.NullTime
-		var issueLabels []string
+		var labelsJSON []byte
 		issueQuery := `
-			SELECT created_at, closed_at, labels
+			SELECT created_at, closed_at, COALESCE(labels::text, '[]')::jsonb
 			FROM github_issues
 			WHERE id = $1
 		`
-		err = t.db.QueryRowContext(ctx, issueQuery, issueID).Scan(&issueCreatedAt, &issueClosedAt, &issueLabels)
+		err = t.db.QueryRowContext(ctx, issueQuery, issueID).Scan(&issueCreatedAt, &issueClosedAt, &labelsJSON)
 		if err != nil {
 			return linksCreated, fmt.Errorf("failed to fetch issue metadata for issue_id=%d: %w", issueID, err)
+		}
+
+		// Parse labels from JSONB
+		var issueLabels []string
+		if len(labelsJSON) > 0 && string(labelsJSON) != "null" {
+			// Simple JSON array parsing (labels are just strings)
+			labelsStr := string(labelsJSON)
+			labelsStr = strings.TrimPrefix(labelsStr, "[")
+			labelsStr = strings.TrimSuffix(labelsStr, "]")
+			if labelsStr != "" {
+				parts := strings.Split(labelsStr, ",")
+				for _, part := range parts {
+					label := strings.Trim(strings.TrimSpace(part), "\"")
+					if label != "" {
+						issueLabels = append(issueLabels, label)
+					}
+				}
+			}
 		}
 
 		// Determine incident_type from labels
@@ -158,17 +182,21 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 			}
 		}
 
-		// Insert into code_block_incidents table using NEW schema
+		// Insert into code_block_incidents table using BOTH old and new schema
+		// Note: Table has both code_block_id and block_id for backward compatibility
+		// Unique constraint is on (code_block_id, issue_id)
 		insertQuery := `
 			INSERT INTO code_block_incidents (
-				repo_id, block_id, issue_id,
+				repo_id, code_block_id, block_id, issue_id,
 				confidence, evidence_source, evidence_text,
-				commit_sha, incident_date, resolution_date, incident_type,
+				fix_commit_sha, commit_sha, incident_date, resolution_date, incident_type,
 				created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-			ON CONFLICT (block_id, issue_id)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+			ON CONFLICT (code_block_id, issue_id)
 			DO UPDATE SET
+				block_id = EXCLUDED.block_id,
 				commit_sha = EXCLUDED.commit_sha,
+				fix_commit_sha = EXCLUDED.fix_commit_sha,
 				incident_date = EXCLUDED.incident_date,
 				resolution_date = EXCLUDED.resolution_date,
 				incident_type = EXCLUDED.incident_type,
@@ -198,32 +226,44 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 		}
 
 		_, err = t.db.ExecContext(ctx, insertQuery,
-			t.repoID, codeBlockID, issueID,
-			0.80, // Confidence: 0.80 for timeline-based linking (referenced events are 100% reliable)
-			"timeline_event",
-			evidenceText,
-			fixCommitSHA,
-			issueCreatedAt,    // incident_date: when issue was created
-			resolutionDate,    // resolution_date: when issue was closed
-			incidentType,      // incident_type: derived from labels
+			t.repoID,      // $1
+			codeBlockID,   // $2 code_block_id
+			codeBlockID,   // $3 block_id (same value)
+			issueID,       // $4
+			0.80,          // $5 Confidence: 0.80 for timeline-based linking
+			"timeline_event", // $6
+			evidenceText,  // $7
+			fixCommitSHA,  // $8 fix_commit_sha (varchar40)
+			fixCommitSHA,  // $9 commit_sha (text, same value)
+			issueCreatedAt,    // $10 incident_date
+			resolutionDate,    // $11 resolution_date
+			incidentType,      // $12 incident_type
 		)
 		if err != nil {
 			return linksCreated, fmt.Errorf("failed to insert incident link: %w", err)
 		}
 
 		linksCreated++
+
+		// Log progress every batchSize links
+		if linksCreated%batchSize == 0 {
+			log.Printf("    → Created %d incident links (processed %d rows)...", linksCreated, rowCount)
+		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return linksCreated, fmt.Errorf("error iterating rows: %w", err)
 	}
 
+	log.Printf("  ✓ Finished processing %d rows, created %d incident links", rowCount, linksCreated)
 	return linksCreated, nil
 }
 
 // CalculateIncidentCounts updates the incident_count field for all code blocks
 // Reference: AGENT-P3C §2 - Count Incidents Per Block
 func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, error) {
+	log.Printf("  🔢 Calculating incident counts for all code blocks...")
+
 	// Update incident counts for blocks with incidents
 	updateQuery := `
 		UPDATE code_blocks cb
@@ -250,6 +290,8 @@ func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, 
 		return 0, fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
+	log.Printf("    → Updated %d blocks with incident counts", blocksUpdated)
+
 	// Set zero incidents for blocks without incidents
 	zeroQuery := `
 		UPDATE code_blocks
@@ -273,6 +315,9 @@ func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, 
 		return int(blocksUpdated), fmt.Errorf("failed to get zero rows affected: %w", err)
 	}
 
+	log.Printf("    → Set incident_count=0 for %d blocks without incidents", zeroBlocks)
+	log.Printf("  ✓ Total blocks updated: %d", blocksUpdated+zeroBlocks)
+
 	return int(blocksUpdated + zeroBlocks), nil
 }
 
@@ -282,6 +327,8 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context) (int
 	if t.llm == nil || !t.llm.IsEnabled() {
 		return 0, fmt.Errorf("llm client not enabled")
 	}
+
+	log.Printf("  🤖 Generating LLM temporal summaries for high-incident blocks...")
 
 	// Find blocks with incidents that don't have summaries yet
 	query := `
@@ -305,6 +352,27 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context) (int
 	defer rows.Close()
 
 	summariesGenerated := 0
+	blocksToProcess := 0
+
+	// Count blocks first
+	for rows.Next() {
+		blocksToProcess++
+	}
+	rows.Close()
+
+	if blocksToProcess == 0 {
+		log.Printf("    → No blocks with incidents found")
+		return 0, nil
+	}
+
+	log.Printf("    → Found %d blocks with incidents (processing top 50)", blocksToProcess)
+
+	// Re-query to process
+	rows, err = t.db.QueryContext(ctx, query, t.repoID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to re-query blocks for summaries: %w", err)
+	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var blockID int64
@@ -357,21 +425,34 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context) (int
 		// Generate temporal summary using LLM
 		summary, err := t.generateSummaryForBlock(ctx, blockName, filePath, blockType, issues)
 		if err != nil {
-			fmt.Printf("Warning: Failed to generate summary for block %d: %v\n", blockID, err)
+			log.Printf("    ⚠️  Warning: Failed to generate summary for block %d: %v", blockID, err)
 			continue
 		}
 
 		// Store summary in a new field (we'll need to add this to the schema if it doesn't exist)
-		// For now, we'll just print it
-		fmt.Printf("Temporal summary for %s (%s): %s\n", blockName, filePath, summary)
+		// For now, we'll just log it
+		log.Printf("    ✓ Generated summary for %s (%s): %s", blockName, filePath, summary[:min(80, len(summary))])
 		summariesGenerated++
+
+		if summariesGenerated%10 == 0 {
+			log.Printf("      → Progress: %d/%d summaries generated", summariesGenerated, blocksToProcess)
+		}
 	}
 
 	if err := rows.Err(); err != nil {
 		return summariesGenerated, fmt.Errorf("error iterating block rows: %w", err)
 	}
 
+	log.Printf("  ✓ Generated %d temporal summaries", summariesGenerated)
 	return summariesGenerated, nil
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // generateSummaryForBlock generates an LLM summary of incident patterns
