@@ -41,6 +41,26 @@ func (e *Extractor) ExtractCodeBlocks(ctx context.Context, commit CommitData) (*
 	// 1. Parse diff to extract file paths and line numbers (BEFORE LLM)
 	parsedFiles := ParseDiff(commit.DiffContent)
 
+	// 1b. Filter to code files only (skip docs, config, binary files)
+	codeFiles := make(map[string]*DiffFileChange)
+	for filePath, change := range parsedFiles {
+		if IsCodeFile(filePath) {
+			codeFiles[filePath] = change
+		}
+	}
+
+	// If no code files remain after filtering, return empty event log
+	if len(codeFiles) == 0 {
+		return &CommitChangeEventLog{
+			CommitSHA:        commit.SHA,
+			AuthorEmail:      commit.AuthorEmail,
+			Timestamp:        commit.Timestamp,
+			LLMIntentSummary: "No code file changes detected (only config/docs/binary files)",
+			MentionedIssues:  []string{},
+			ChangeEvents:     []ChangeEvent{},
+		}, nil
+	}
+
 	// 2. Build LLM prompt (NO metadata or file paths in output)
 	prompt := fmt.Sprintf(AtomizationPromptTemplate,
 		commit.Message,
@@ -80,8 +100,8 @@ func (e *Extractor) ExtractCodeBlocks(ctx context.Context, commit CommitData) (*
 		}
 	}
 
-	// 7. Match LLM events to parsed files and enrich with file paths + line numbers
-	enrichedEvents := matchEventsToFiles(llmResponse.ChangeEvents, parsedFiles)
+	// 7. Match LLM events to CODE files only and enrich with file paths + line numbers
+	enrichedEvents := matchEventsToFiles(llmResponse.ChangeEvents, codeFiles)
 
 	// 8. Validate and filter events
 	validEvents := filterValidEvents(enrichedEvents)
@@ -162,6 +182,63 @@ func IsBinaryFile(filename string) bool {
 		}
 	}
 
+	return false
+}
+
+// IsCodeFile determines if a file should be processed for code block extraction
+// Filters out documentation, config files, binary files, and dotfiles
+// Returns true only for actual source code files
+func IsCodeFile(filename string) bool {
+	// Skip binary files
+	if IsBinaryFile(filename) {
+		return false
+	}
+
+	lowerFilename := strings.ToLower(filename)
+
+	// Skip documentation files
+	docExtensions := []string{".md", ".mdx", ".txt", ".rst", ".adoc"}
+	for _, ext := range docExtensions {
+		if strings.HasSuffix(lowerFilename, ext) {
+			return false
+		}
+	}
+
+	// Skip config files
+	configExtensions := []string{
+		".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+		".lock", ".sum", ".mod", ".env",
+	}
+	for _, ext := range configExtensions {
+		if strings.HasSuffix(lowerFilename, ext) {
+			return false
+		}
+	}
+
+	// Skip dotfiles (like .gitignore, .env, .pre-commit-config.yaml)
+	// Extract base filename after last slash
+	parts := strings.Split(filename, "/")
+	basename := parts[len(parts)-1]
+	if strings.HasPrefix(basename, ".") {
+		return false
+	}
+
+	// Allow known code file extensions
+	codeExtensions := []string{
+		".go", ".py", ".js", ".ts", ".tsx", ".jsx",
+		".java", ".c", ".cpp", ".h", ".hpp", ".cc", ".cxx",
+		".rs", ".rb", ".php", ".swift", ".kt", ".kts",
+		".scala", ".clj", ".cljs", ".ex", ".exs",
+		".sh", ".bash", ".zsh", ".ps1",
+		".cs", ".fs", ".vb", ".sql",
+	}
+	for _, ext := range codeExtensions {
+		if strings.HasSuffix(lowerFilename, ext) {
+			return true
+		}
+	}
+
+	// If no known code extension, default to false (conservative filtering)
 	return false
 }
 
@@ -338,6 +415,14 @@ func filterValidEvents(events []ChangeEvent) []ChangeEvent {
 		// Skip events without target file (should not happen with schema)
 		if event.TargetFile == "" {
 			continue
+		}
+
+		// Skip events with empty block names (except imports which use dependency_path)
+		// This filters out LLM extraction errors where block name was not identified
+		if event.Behavior != "ADD_IMPORT" && event.Behavior != "REMOVE_IMPORT" {
+			if strings.TrimSpace(event.TargetBlockName) == "" {
+				continue
+			}
 		}
 
 		// Filter or normalize block_type if present

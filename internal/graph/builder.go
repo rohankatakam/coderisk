@@ -452,7 +452,10 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64, repoFullName
 			return stats, err
 		}
 
+		log.Printf("  📥 Fetched %d unprocessed commits (batch size: %d)", len(commits), batchSize)
+
 		if len(commits) == 0 {
+			log.Printf("  ✓ All commits processed (no more unprocessed commits)")
 			break // All processed
 		}
 
@@ -475,22 +478,27 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64, repoFullName
 
 		// Create nodes
 		if len(allNodes) > 0 {
+			log.Printf("  🔨 Creating %d nodes in Neo4j...", len(allNodes))
 			if _, err := b.backend.CreateNodes(ctx, allNodes); err != nil {
 				return stats, fmt.Errorf("failed to create nodes: %w", err)
 			}
 			stats.Nodes += len(allNodes)
+			log.Printf("  ✓ Created %d nodes (total so far: %d)", len(allNodes), stats.Nodes)
 		}
 
 		// Create edges
 		if len(allEdges) > 0 {
+			log.Printf("  🔗 Creating %d edges in Neo4j...", len(allEdges))
 			if err := b.backend.CreateEdges(ctx, allEdges); err != nil {
 				return stats, fmt.Errorf("failed to create edges: %w", err)
 			}
 			stats.Edges += len(allEdges)
+			log.Printf("  ✓ Created %d edges (total so far: %d)", len(allEdges), stats.Edges)
 		}
 
 		// Mark as processed
 		if len(commitIDs) > 0 {
+			log.Printf("  💾 Marking %d commits as processed in PostgreSQL...", len(commitIDs))
 			if err := b.stagingDB.MarkCommitsProcessed(ctx, commitIDs); err != nil {
 				return stats, fmt.Errorf("failed to mark commits as processed: %w", err)
 			}

@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/rohankatakam/coderisk/internal/config"
@@ -68,8 +71,18 @@ func runIngest(cmd *cobra.Command, args []string) error {
 	startTime := time.Now()
 	ctx := context.Background()
 
+	// Setup logging to file
+	logFile, err := setupLogging()
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Failed to setup log file: %v\n", err)
+	} else {
+		defer logFile.Close()
+		fmt.Printf("📝 Logging to: %s\n", logFile.Name())
+	}
+
 	fmt.Printf("🚀 crisk-ingest - Graph Construction Service\n")
 	fmt.Printf("   Repository ID: %d\n", repoID)
+	fmt.Printf("   Timestamp: %s\n", startTime.Format(time.RFC3339))
 	fmt.Println()
 
 	// Load configuration
@@ -242,4 +255,28 @@ func createIndexes(ctx context.Context, backend graph.Backend) error {
 	}
 
 	return nil
+}
+
+func setupLogging() (*os.File, error) {
+	// Create logs directory if it doesn't exist
+	logDir := "/tmp/coderisk-logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
+	}
+
+	// Create log file with timestamp
+	timestamp := time.Now().Format("20060102_150405")
+	logPath := filepath.Join(logDir, fmt.Sprintf("crisk-ingest_%s.log", timestamp))
+
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %w", err)
+	}
+
+	// Setup multi-writer to write to both stdout and file
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(multiWriter)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	return logFile, nil
 }

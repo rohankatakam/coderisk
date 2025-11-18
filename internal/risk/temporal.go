@@ -121,18 +121,57 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 			return linksCreated, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		// Insert into code_block_incidents table
+		// Fetch issue metadata for new schema columns
+		var issueCreatedAt time.Time
+		var issueClosedAt sql.NullTime
+		var issueLabels []string
+		issueQuery := `
+			SELECT created_at, closed_at, labels
+			FROM github_issues
+			WHERE id = $1
+		`
+		err = t.db.QueryRowContext(ctx, issueQuery, issueID).Scan(&issueCreatedAt, &issueClosedAt, &issueLabels)
+		if err != nil {
+			return linksCreated, fmt.Errorf("failed to fetch issue metadata for issue_id=%d: %w", issueID, err)
+		}
+
+		// Determine incident_type from labels
+		incidentType := "unknown"
+		if len(issueLabels) > 0 {
+			// Prioritize critical labels
+			for _, label := range issueLabels {
+				labelLower := strings.ToLower(label)
+				if strings.Contains(labelLower, "bug") {
+					incidentType = "bug"
+					break
+				} else if strings.Contains(labelLower, "security") {
+					incidentType = "security"
+					break
+				} else if strings.Contains(labelLower, "critical") {
+					incidentType = "critical"
+					break
+				}
+			}
+			// If no priority label found, use first label
+			if incidentType == "unknown" && len(issueLabels) > 0 {
+				incidentType = issueLabels[0]
+			}
+		}
+
+		// Insert into code_block_incidents table using NEW schema
 		insertQuery := `
 			INSERT INTO code_block_incidents (
-				repo_id, code_block_id, issue_id,
+				repo_id, block_id, issue_id,
 				confidence, evidence_source, evidence_text,
-				fix_commit_sha, fixed_at,
+				commit_sha, incident_date, resolution_date, incident_type,
 				created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-			ON CONFLICT (code_block_id, issue_id)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+			ON CONFLICT (block_id, issue_id)
 			DO UPDATE SET
-				fix_commit_sha = EXCLUDED.fix_commit_sha,
-				fixed_at = EXCLUDED.fixed_at,
+				commit_sha = EXCLUDED.commit_sha,
+				incident_date = EXCLUDED.incident_date,
+				resolution_date = EXCLUDED.resolution_date,
+				incident_type = EXCLUDED.incident_type,
 				confidence = EXCLUDED.confidence,
 				evidence_source = EXCLUDED.evidence_source,
 				evidence_text = EXCLUDED.evidence_text
@@ -148,11 +187,14 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 				issueNumber, issueTitle, fixCommitSHA[:7])
 		}
 
-		var fixedAtTime interface{}
-		if fixedAt.Valid {
-			fixedAtTime = fixedAt.Time
+		// Use issue closed_at as resolution_date, or fixed_at as fallback
+		var resolutionDate interface{}
+		if issueClosedAt.Valid {
+			resolutionDate = issueClosedAt.Time
+		} else if fixedAt.Valid {
+			resolutionDate = fixedAt.Time
 		} else {
-			fixedAtTime = nil
+			resolutionDate = nil
 		}
 
 		_, err = t.db.ExecContext(ctx, insertQuery,
@@ -161,7 +203,9 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 			"timeline_event",
 			evidenceText,
 			fixCommitSHA,
-			fixedAtTime,
+			issueCreatedAt,    // incident_date: when issue was created
+			resolutionDate,    // resolution_date: when issue was closed
+			incidentType,      // incident_type: derived from labels
 		)
 		if err != nil {
 			return linksCreated, fmt.Errorf("failed to insert incident link: %w", err)
