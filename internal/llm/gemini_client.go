@@ -66,8 +66,8 @@ func (c *GeminiClient) Complete(ctx context.Context, systemPrompt, userPrompt st
 		MaxOutputTokens:   2000,
 	}
 
-	// Generate content
-	resp, err := c.client.Models.GenerateContent(ctx, c.model, genai.Text(userPrompt), genConfig)
+	// Generate content with retry logic
+	resp, err := c.generateContentWithRetry(ctx, c.model, genai.Text(userPrompt), genConfig)
 	if err != nil {
 		return "", fmt.Errorf("gemini completion failed: %w", err)
 	}
@@ -110,8 +110,8 @@ func (c *GeminiClient) CompleteJSON(ctx context.Context, systemPrompt, userPromp
 		ResponseMIMEType:  "application/json",
 	}
 
-	// Generate content
-	resp, err := c.client.Models.GenerateContent(ctx, c.model, genai.Text(userPrompt), genConfig)
+	// Generate content with retry logic
+	resp, err := c.generateContentWithRetry(ctx, c.model, genai.Text(userPrompt), genConfig)
 	if err != nil {
 		return "", fmt.Errorf("gemini json completion failed: %w", err)
 	}

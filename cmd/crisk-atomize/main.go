@@ -37,7 +37,7 @@ Transforms commits into semantic CodeBlock nodes using LLM analysis.
 This is the core differentiator that enables function-level risk assessment.
 
 Features:
-  • Chronological processing (ORDER BY author_date ASC)
+  • Topologically-ordered processing (ORDER BY topological_index ASC)
   • LLM diff analysis → CommitChangeEventLog JSON
   • Creates CodeBlock nodes with semantic relationships
   • Handles renames via RENAMED_FROM edges
@@ -136,10 +136,10 @@ func runAtomize(cmd *cobra.Command, args []string) error {
 	processStart := time.Now()
 
 	rows, err := stagingDB.Query(ctx, `
-		SELECT sha, message, author_email, author_date
+		SELECT sha, message, author_email, author_date, topological_index
 		FROM github_commits
 		WHERE repo_id = $1
-		ORDER BY author_date ASC
+		ORDER BY topological_index ASC NULLS LAST
 	`, repoID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch commits: %w", err)
@@ -150,8 +150,9 @@ func runAtomize(cmd *cobra.Command, args []string) error {
 	for rows.Next() {
 		var sha, message, authorEmail string
 		var authorDate time.Time
+		var topoIndex *int
 
-		if err := rows.Scan(&sha, &message, &authorEmail, &authorDate); err != nil {
+		if err := rows.Scan(&sha, &message, &authorEmail, &authorDate, &topoIndex); err != nil {
 			fmt.Printf("  ⚠️  Failed to scan commit: %v\n", err)
 			continue
 		}

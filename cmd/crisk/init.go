@@ -487,10 +487,10 @@ func runPipeline2(ctx context.Context, stagingDB *database.StagingClient, graphB
 	fmt.Printf("  Fetching commits for atomization...\n")
 
 	rows, err := stagingDB.Query(ctx, `
-		SELECT sha, message, author_email, author_date
+		SELECT sha, message, author_email, author_date, topological_index
 		FROM github_commits
 		WHERE repo_id = $1
-		ORDER BY author_date ASC
+		ORDER BY topological_index ASC NULLS LAST
 	`, repoID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch commits: %w", err)
@@ -501,8 +501,9 @@ func runPipeline2(ctx context.Context, stagingDB *database.StagingClient, graphB
 	for rows.Next() {
 		var sha, message, authorEmail string
 		var authorDate time.Time
+		var topoIndex *int
 
-		if err := rows.Scan(&sha, &message, &authorEmail, &authorDate); err != nil {
+		if err := rows.Scan(&sha, &message, &authorEmail, &authorDate, &topoIndex); err != nil {
 			fmt.Printf("  ⚠️  Failed to scan commit: %v\n", err)
 			continue
 		}

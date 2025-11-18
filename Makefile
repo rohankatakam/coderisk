@@ -6,7 +6,7 @@ BUILD_DIR=./bin
 CMD_DIR=./cmd
 
 # Microservice binaries
-SERVICES=crisk-stage crisk-ingest crisk-atomize crisk-index-incident crisk-index-ownership crisk-index-coupling crisk-init
+SERVICES=crisk-stage crisk-ingest crisk-atomize crisk-index-incident crisk-index-ownership crisk-index-coupling crisk-init crisk-sync
 
 # Version info
 GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
