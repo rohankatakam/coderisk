@@ -31,45 +31,88 @@ func NewProcessor(extractor *Extractor, db *sql.DB, neoDriver neo4j.DriverWithCo
 // ProcessCommitsChronologically processes all commits in chronological order
 // Reference: AGENT_P2B_PROCESSOR.md - Core processing logic
 func (p *Processor) ProcessCommitsChronologically(ctx context.Context, commits []CommitData, repoID int64) error {
-	log.Printf("Starting chronological processing of %d commits for repo %d", len(commits), repoID)
+	log.Printf("🔨 Starting chronological processing of %d commits for repo %d", len(commits), repoID)
 
 	// 1. Initialize state tracker
 	state := NewStateTracker()
 
 	// 2. Load existing code blocks from database (if any)
 	if err := p.dbWriter.LoadExistingBlocks(ctx, repoID, state); err != nil {
-		log.Printf("WARNING: Failed to load existing blocks: %v", err)
+		log.Printf("⚠️  WARNING: Failed to load existing blocks: %v", err)
 		// Continue anyway - this is just for incremental processing
 	}
-	log.Printf("Loaded %d existing code blocks into state", state.GetBlockCount())
+	log.Printf("  ✓ Loaded %d existing code blocks into state", state.GetBlockCount())
 
 	// 3. Process each commit in chronological order
 	successCount := 0
 	errorCount := 0
+	blocksCreated := 0
+	blocksModified := 0
+	blocksDeleted := 0
+	importsAdded := 0
+	importsRemoved := 0
 
+	// Track progress every 10 commits
+	batchSize := 10
 	for i, commit := range commits {
-		log.Printf("Processing commit %d/%d: %s (%s)", i+1, len(commits), commit.SHA, commit.Message[:min(50, len(commit.Message))])
+		if i%batchSize == 0 || i == len(commits)-1 {
+			log.Printf("  📥 Processing commit %d/%d: %s", i+1, len(commits), commit.SHA[:8])
+		}
 
 		// 3a. Extract events via LLM
 		eventLog, err := p.extractor.ExtractCodeBlocks(ctx, commit)
 		if err != nil {
-			log.Printf("WARNING: Failed to extract blocks from %s: %v", commit.SHA, err)
+			log.Printf("  ⚠️  WARNING: Failed to extract blocks from %s: %v", commit.SHA[:8], err)
 			errorCount++
 			continue // Skip failed commits
+		}
+
+		if i%batchSize == 0 || i == len(commits)-1 {
+			log.Printf("    → Extracted %d events (summary: %s)",
+				len(eventLog.ChangeEvents),
+				eventLog.LLMIntentSummary[:min(60, len(eventLog.LLMIntentSummary))])
 		}
 
 		// 3b. Process each event
 		for j, event := range eventLog.ChangeEvents {
 			if err := p.processEvent(ctx, &event, commit, state, repoID); err != nil {
-				log.Printf("WARNING: Failed to process event %d in commit %s: %v", j, commit.SHA, err)
+				log.Printf("  ⚠️  WARNING: Failed to process event %d in commit %s: %v", j, commit.SHA[:8], err)
 				errorCount++
 			} else {
 				successCount++
+				// Track event types
+				switch event.Behavior {
+				case "CREATE_BLOCK":
+					blocksCreated++
+				case "MODIFY_BLOCK":
+					blocksModified++
+				case "DELETE_BLOCK":
+					blocksDeleted++
+				case "ADD_IMPORT":
+					importsAdded++
+				case "REMOVE_IMPORT":
+					importsRemoved++
+				}
 			}
+		}
+
+		// Log cumulative progress every batchSize commits
+		if (i+1)%batchSize == 0 || i == len(commits)-1 {
+			log.Printf("  ✓ Progress: %d/%d commits | %d events | %d blocks created | %d modified",
+				i+1, len(commits), successCount, blocksCreated, blocksModified)
 		}
 	}
 
-	log.Printf("Chronological processing complete: %d events processed, %d errors", successCount, errorCount)
+	log.Printf("🎉 Chronological processing complete!")
+	log.Printf("  📊 Summary:")
+	log.Printf("     Total commits: %d", len(commits))
+	log.Printf("     Total events: %d (errors: %d)", successCount, errorCount)
+	log.Printf("     Blocks created: %d", blocksCreated)
+	log.Printf("     Blocks modified: %d", blocksModified)
+	log.Printf("     Blocks deleted: %d", blocksDeleted)
+	log.Printf("     Imports added: %d", importsAdded)
+	log.Printf("     Imports removed: %d", importsRemoved)
+	log.Printf("     Final block count: %d", state.GetBlockCount())
 	return nil
 }
 
