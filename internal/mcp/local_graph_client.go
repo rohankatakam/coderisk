@@ -35,18 +35,15 @@ func (c *LocalGraphClient) GetCodeBlocksForFile(ctx context.Context, filePath st
 	// CRITICAL: CodeBlock nodes are not linked to File nodes in current implementation
 	// Query CodeBlocks directly by file_path property
 	// IMPORTANT: b.db_id is the PostgreSQL integer ID used for temporal queries
+	// NOTE: Ownership data (original_author, staleness_days, etc.) must be fetched from PostgreSQL,
+	//       NOT from Neo4j. Neo4j only stores: id, name, block_type, file_path, language, db_id, repo_id
 	query := `
 		MATCH (b:CodeBlock)
 		WHERE b.file_path IN $paths AND b.repo_id = $repoID
 		RETURN b.db_id AS id,
 		       b.name AS name,
 		       b.block_type AS type,
-		       b.file_path AS path,
-		       b.original_author AS original_author,
-		       b.last_modifier AS last_modifier,
-		       b.staleness_days AS staleness_days,
-		       b.familiarity_map AS familiarity_map,
-		       b.semantic_importance AS semantic_importance
+		       b.file_path AS path
 	`
 
 	result, err := session.Run(ctx, query, map[string]interface{}{
@@ -58,15 +55,15 @@ func (c *LocalGraphClient) GetCodeBlocksForFile(ctx context.Context, filePath st
 	}
 
 	var blocks []tools.CodeBlock
+	var blockIDs []string // Track IDs for batch PostgreSQL lookup
+
 	for result.Next(ctx) {
 		record := result.Record()
 
 		// Handle NULL values gracefully
 		var id, name, blockType, path string
-		var originalAuthor, lastModifier, familiarityMap, semanticImportance string
-		var stalenessDays int64
 
-		// Required fields
+		// Required fields from Neo4j (only 4 values now)
 		// db_id is int64 from PostgreSQL, convert to string for consistency
 		if record.Values[0] != nil {
 			dbID := record.Values[0].(int64)
@@ -82,39 +79,37 @@ func (c *LocalGraphClient) GetCodeBlocksForFile(ctx context.Context, filePath st
 			path = record.Values[3].(string)
 		}
 
-		// Optional ownership fields
-		if record.Values[4] != nil {
-			originalAuthor = record.Values[4].(string)
-		}
-		if record.Values[5] != nil {
-			lastModifier = record.Values[5].(string)
-		}
-		if record.Values[6] != nil {
-			stalenessDays = record.Values[6].(int64)
-		}
-		if record.Values[7] != nil {
-			familiarityMap = record.Values[7].(string)
-		}
-		if record.Values[8] != nil {
-			semanticImportance = record.Values[8].(string)
-		}
-
 		blocks = append(blocks, tools.CodeBlock{
 			ID:   id,
 			Name: name,
 			Type: blockType,
 			Path: path,
-			OwnershipData: tools.OwnershipData{
-				OriginalAuthor:     originalAuthor,
-				LastModifier:       lastModifier,
-				StaleDays:          int(stalenessDays),
-				FamiliarityMap:     familiarityMap,
-				SemanticImportance: semanticImportance,
-			},
+			// Ownership data will be fetched from PostgreSQL below
 		})
+		blockIDs = append(blockIDs, id)
 	}
 
-	return blocks, result.Err()
+	if err := result.Err(); err != nil {
+		return nil, err
+	}
+
+	// Fetch ownership data from PostgreSQL for all blocks in one query
+	if len(blockIDs) > 0 {
+		ownership, err := c.getOwnershipDataBatch(ctx, blockIDs)
+		if err != nil {
+			// Non-fatal: continue with blocks but log the error
+			fmt.Printf("Warning: failed to fetch ownership data: %v\n", err)
+		} else {
+			// Merge ownership data into blocks
+			for i := range blocks {
+				if ownerData, ok := ownership[blocks[i].ID]; ok {
+					blocks[i].OwnershipData = ownerData
+				}
+			}
+		}
+	}
+
+	return blocks, nil
 }
 
 // ExecuteQuery implements git.GraphQueryer interface for Neo4j queries
@@ -293,6 +288,7 @@ func (c *LocalGraphClient) GetCodeBlocksByNames(ctx context.Context, filePathsWi
 
 	// Query for blocks that match any of the block names in any of the file paths
 	// IMPORTANT: b.db_id is the PostgreSQL integer ID used for temporal queries
+	// NOTE: Ownership data must be fetched from PostgreSQL separately
 	query := `
 		MATCH (b:CodeBlock)
 		WHERE b.file_path IN $paths
@@ -301,12 +297,7 @@ func (c *LocalGraphClient) GetCodeBlocksByNames(ctx context.Context, filePathsWi
 		RETURN b.db_id AS id,
 		       b.name AS name,
 		       b.block_type AS type,
-		       b.file_path AS path,
-		       b.original_author AS original_author,
-		       b.last_modifier AS last_modifier,
-		       b.staleness_days AS staleness_days,
-		       b.familiarity_map AS familiarity_map,
-		       b.semantic_importance AS semantic_importance
+		       b.file_path AS path
 	`
 
 	result, err := session.Run(ctx, query, map[string]interface{}{
@@ -319,15 +310,15 @@ func (c *LocalGraphClient) GetCodeBlocksByNames(ctx context.Context, filePathsWi
 	}
 
 	var blocks []tools.CodeBlock
+	var blockIDs []string
+
 	for result.Next(ctx) {
 		record := result.Record()
 
 		// Handle NULL values gracefully
 		var id, name, blockType, path string
-		var originalAuthor, lastModifier, familiarityMap, semanticImportance string
-		var stalenessDays int64
 
-		// Required fields
+		// Required fields from Neo4j (only 4 values now)
 		// db_id is int64 from PostgreSQL, convert to string for consistency
 		if record.Values[0] != nil {
 			dbID := record.Values[0].(int64)
@@ -343,38 +334,109 @@ func (c *LocalGraphClient) GetCodeBlocksByNames(ctx context.Context, filePathsWi
 			path = record.Values[3].(string)
 		}
 
-		// Optional ownership fields
-		if record.Values[4] != nil {
-			originalAuthor = record.Values[4].(string)
-		}
-		if record.Values[5] != nil {
-			lastModifier = record.Values[5].(string)
-		}
-		if record.Values[6] != nil {
-			stalenessDays = record.Values[6].(int64)
-		}
-		if record.Values[7] != nil {
-			familiarityMap = record.Values[7].(string)
-		}
-		if record.Values[8] != nil {
-			semanticImportance = record.Values[8].(string)
-		}
-
 		blocks = append(blocks, tools.CodeBlock{
 			ID:   id,
 			Name: name,
 			Type: blockType,
 			Path: path,
-			OwnershipData: tools.OwnershipData{
-				OriginalAuthor:     originalAuthor,
-				LastModifier:       lastModifier,
-				StaleDays:          int(stalenessDays),
-				FamiliarityMap:     familiarityMap,
-				SemanticImportance: semanticImportance,
-			},
+			// Ownership data will be fetched from PostgreSQL below
 		})
+		blockIDs = append(blockIDs, id)
 	}
 
-	return blocks, result.Err()
+	if err := result.Err(); err != nil {
+		return nil, err
+	}
+
+	// Fetch ownership data from PostgreSQL for all blocks in one query
+	if len(blockIDs) > 0 {
+		ownership, err := c.getOwnershipDataBatch(ctx, blockIDs)
+		if err != nil {
+			// Non-fatal: continue with blocks but log the error
+			fmt.Printf("Warning: failed to fetch ownership data: %v\n", err)
+		} else {
+			// Merge ownership data into blocks
+			for i := range blocks {
+				if ownerData, ok := ownership[blocks[i].ID]; ok {
+					blocks[i].OwnershipData = ownerData
+				}
+			}
+		}
+	}
+
+	return blocks, nil
+}
+
+// getOwnershipDataBatch fetches ownership data from PostgreSQL for multiple blocks in one query
+// Computes ownership from code_block_modifications table
+// Returns a map of blockID -> OwnershipData
+func (c *LocalGraphClient) getOwnershipDataBatch(ctx context.Context, blockIDs []string) (map[string]tools.OwnershipData, error) {
+	if len(blockIDs) == 0 {
+		return nil, nil
+	}
+
+	// Convert string IDs to int64 for PostgreSQL query
+	var intIDs []interface{}
+	for _, id := range blockIDs {
+		var intID int64
+		_, err := fmt.Sscanf(id, "%d", &intID)
+		if err != nil {
+			continue // Skip invalid IDs
+		}
+		intIDs = append(intIDs, intID)
+	}
+
+	if len(intIDs) == 0 {
+		return nil, nil
+	}
+
+	// Query code_block_modifications to compute ownership metrics
+	// - Original author: first developer to modify the block (earliest modified_at)
+	// - Last modifier: most recent developer to modify the block
+	// - Staleness: days since last modification
+	query := `
+		WITH block_stats AS (
+			SELECT
+				code_block_id,
+				FIRST_VALUE(developer_email) OVER (PARTITION BY code_block_id ORDER BY modified_at ASC) as first_author,
+				FIRST_VALUE(developer_email) OVER (PARTITION BY code_block_id ORDER BY modified_at DESC) as last_author,
+				MAX(modified_at) OVER (PARTITION BY code_block_id) as last_modified
+			FROM code_block_modifications
+			WHERE code_block_id = ANY($1)
+		)
+		SELECT DISTINCT
+			code_block_id,
+			first_author,
+			last_author,
+			EXTRACT(EPOCH FROM (NOW() - last_modified)) / 86400 as staleness_days
+		FROM block_stats
+	`
+
+	rows, err := c.pgPool.Query(ctx, query, intIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query code_block_modifications: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]tools.OwnershipData)
+	for rows.Next() {
+		var id int64
+		var originalAuthor, lastModifier string
+		var stalenessDays float64
+
+		if err := rows.Scan(&id, &originalAuthor, &lastModifier, &stalenessDays); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		result[fmt.Sprintf("%d", id)] = tools.OwnershipData{
+			OriginalAuthor: originalAuthor,
+			LastModifier:   lastModifier,
+			StaleDays:      int(stalenessDays),
+			// FamiliarityMap and SemanticImportance would require additional computation
+			// from modification history - can be added later if needed
+		}
+	}
+
+	return result, rows.Err()
 }
 

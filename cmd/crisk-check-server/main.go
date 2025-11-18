@@ -62,6 +62,11 @@ func main() {
 	graphClient := mcpinternal.NewLocalGraphClient(driver, pgPool)
 	log.Println("✅ Graph client created")
 
+	// 4b. Create repo resolver for dynamic repo_id lookup
+	log.Println("Creating repo resolver...")
+	repoResolver := mcpinternal.NewRepoResolver(pgPool)
+	log.Println("✅ Repo resolver created")
+
 	// 5. Create file identity resolver using git.FileResolver
 	// This uses the proven 2-level resolution strategy from `crisk check`
 	log.Println("Creating file identity resolver...")
@@ -144,8 +149,8 @@ func main() {
 		Warning      string                  `json:"warning,omitempty"`
 	}
 
-	// Create the tool instance with diff atomizer support
-	riskTool := tools.NewGetRiskSummaryTool(graphClient, resolver, diffAtomizer)
+	// Create the tool instance with diff atomizer and repo resolver support
+	riskTool := tools.NewGetRiskSummaryTool(graphClient, resolver, diffAtomizer, repoResolver)
 
 	// Register the tool with the SDK
 	mcp.AddTool(server, &mcp.Tool{
@@ -154,15 +159,21 @@ func main() {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args ToolArgs) (*mcp.CallToolResult, ToolOutput, error) {
 		// Log tool invocation
 		log.Printf("📞 Tool called: file_path=%s, analyze_all_changes=%v, diff_content_len=%d, repo_root=%s", args.FilePath, args.AnalyzeAllChanges, len(args.DiffContent), args.RepoRoot)
+
+		// Default repo_root to environment variable if not provided
+		effectiveRepoRoot := args.RepoRoot
+		if effectiveRepoRoot == "" {
+			effectiveRepoRoot = repoRoot // Use the global repoRoot from environment
+			log.Printf("→ Using default repo_root from environment: %s", effectiveRepoRoot)
+		}
+
 		// Convert args to map for existing Execute method
 		argsMap := map[string]interface{}{
 			"file_path": args.FilePath,
+			"repo_root": effectiveRepoRoot, // Always include repo_root for dynamic resolution
 		}
 		if args.DiffContent != "" {
 			argsMap["diff_content"] = args.DiffContent
-		}
-		if args.RepoRoot != "" {
-			argsMap["repo_root"] = args.RepoRoot
 		}
 		if args.AnalyzeAllChanges {
 			argsMap["analyze_all_changes"] = true

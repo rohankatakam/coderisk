@@ -61,19 +61,26 @@ func getUncommittedDiff(filePath, repoRoot string) (string, error) {
 	return string(output), nil
 }
 
+// RepoResolver interface for resolving repository ID from repo_root
+type RepoResolver interface {
+	ResolveRepoID(ctx context.Context, repoRoot string) (int, error)
+}
+
 // GetRiskSummaryTool implements the crisk.get_risk_summary tool
 type GetRiskSummaryTool struct {
 	graphClient      GraphClient
 	identityResolver IdentityResolver
-	diffAtomizer     DiffAtomizer // Optional: for diff-based analysis
+	diffAtomizer     DiffAtomizer     // Optional: for diff-based analysis
+	repoResolver     RepoResolver     // Optional: for dynamic repo_id resolution
 }
 
 // NewGetRiskSummaryTool creates a new GetRiskSummaryTool
-func NewGetRiskSummaryTool(graphClient GraphClient, identityResolver IdentityResolver, diffAtomizer DiffAtomizer) *GetRiskSummaryTool {
+func NewGetRiskSummaryTool(graphClient GraphClient, identityResolver IdentityResolver, diffAtomizer DiffAtomizer, repoResolver RepoResolver) *GetRiskSummaryTool {
 	return &GetRiskSummaryTool{
 		graphClient:      graphClient,
 		identityResolver: identityResolver,
 		diffAtomizer:     diffAtomizer,
+		repoResolver:     repoResolver,
 	}
 }
 
@@ -154,8 +161,23 @@ func (t *GetRiskSummaryTool) Execute(ctx context.Context, args map[string]interf
 	includeRiskScore, _ := args["include_risk_score"].(bool)
 	prioritizeRecent, _ := args["prioritize_recent"].(bool)
 
-	// Use repo_id from actual implementation
-	repoID := 4 // mcp-use repo_id
+	// Dynamically resolve repo_id from repo_root using git remote
+	var repoID int
+	if repoRoot != "" && t.repoResolver != nil {
+		var err error
+		repoID, err = t.repoResolver.ResolveRepoID(ctx, repoRoot)
+		if err != nil {
+			log.Printf("⚠️  Failed to resolve repo_id from repo_root=%s: %v (using fallback)", repoRoot, err)
+			// Fallback to hardcoded value if resolution fails
+			repoID = 11
+		} else {
+			log.Printf("✅ Resolved repo_id=%d from repo_root=%s", repoID, repoRoot)
+		}
+	} else {
+		// Fallback when repo_root not provided or resolver not available
+		log.Printf("⚠️  No repo_root provided or resolver unavailable, using fallback repo_id=11")
+		repoID = 11
+	}
 
 	var blocks []CodeBlock
 

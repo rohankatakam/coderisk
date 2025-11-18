@@ -5,6 +5,9 @@ BINARY_NAME=crisk
 BUILD_DIR=./bin
 CMD_DIR=./cmd
 
+# Microservice binaries
+SERVICES=crisk-stage crisk-ingest crisk-atomize crisk-index-incident crisk-index-ownership crisk-index-coupling crisk-init
+
 # Version info
 GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 GIT_TAG=$(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0-dev")
@@ -44,13 +47,29 @@ dev: clean build start init-db
 	@echo "📌 Binary location: ./bin/crisk (local build)"
 	@echo ""
 
-## build: Build CLI binary
+## build: Build all binaries (CLI + microservices)
 build:
-	@echo "🔨 Building $(BINARY_NAME)..."
+	@echo "🔨 Building CodeRisk binaries..."
 	@mkdir -p $(BUILD_DIR)
-	@CGO_ENABLED=1 go build -v -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
-	@echo "✅ Binary: $(BUILD_DIR)/$(BINARY_NAME)"
-	@echo "📌 Use: $(shell pwd)/bin/crisk"
+	@echo "   Building main CLI (crisk)..."
+	@CGO_ENABLED=1 go build -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)/crisk
+	@echo "   ✓ $(BUILD_DIR)/$(BINARY_NAME)"
+	@echo ""
+	@echo "   Building microservices..."
+	@for service in $(SERVICES); do \
+		echo "   Building $$service..."; \
+		CGO_ENABLED=1 go build -ldflags "$(VERSION_FLAGS)" -o $(BUILD_DIR)/$$service $(CMD_DIR)/$$service 2>&1 | grep -v "no Go files" || true; \
+		if [ -f $(BUILD_DIR)/$$service ]; then \
+			echo "   ✓ $(BUILD_DIR)/$$service"; \
+		else \
+			echo "   ✗ Failed to build $$service"; \
+			exit 1; \
+		fi; \
+	done
+	@echo ""
+	@echo "✅ All binaries built successfully!"
+	@echo "📌 Main CLI: $(shell pwd)/bin/crisk"
+	@echo "📌 Services: $(shell pwd)/bin/{crisk-stage,crisk-ingest,crisk-atomize,...}"
 
 ## rebuild: Quick rebuild (fast iteration)
 rebuild: build
