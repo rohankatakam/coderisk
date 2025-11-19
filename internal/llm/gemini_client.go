@@ -293,12 +293,14 @@ func (c *GeminiClient) generateContentWithRetry(ctx context.Context, model strin
 		// Make the API call
 		resp, err := c.client.Models.GenerateContent(ctx, model, contents, config)
 
-		// Check for rate limit errors (429)
+		// Check for rate limit errors (429) and transient API key errors (400 with INVALID_ARGUMENT)
 		if err != nil {
 			errMsg := err.Error()
 			is429 := contains(errMsg, "429") || contains(errMsg, "Resource exhausted") || contains(errMsg, "RESOURCE_EXHAUSTED")
+			// Google sometimes returns "API key expired" for rate limits (misleading error)
+			isTransientAPIKeyError := contains(errMsg, "API_KEY_INVALID") && contains(errMsg, "API key expired")
 
-			if is429 && attempt < maxRetries {
+			if (is429 || isTransientAPIKeyError) && attempt < maxRetries {
 				// Calculate exponential backoff: 5s, 10s, 20s, 40s, 80s
 				delay := baseDelay * (1 << uint(attempt))
 				c.logger.Warn("rate limit encountered, retrying with backoff",
@@ -317,8 +319,8 @@ func (c *GeminiClient) generateContentWithRetry(ctx context.Context, model strin
 				}
 			}
 
-			// Non-429 error or exhausted retries
-			if is429 {
+			// Non-429/non-transient error or exhausted retries
+			if is429 || isTransientAPIKeyError {
 				totalWaitTime := int((baseDelay * ((1 << uint(maxRetries)) - 1)).Seconds())
 				return nil, fmt.Errorf("RATE_LIMIT_EXHAUSTED: Resource exhausted after %d retries (waited %ds total). "+
 					"This indicates Gemini API quota limits. Consider: "+

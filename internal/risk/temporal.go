@@ -3,6 +3,7 @@ package risk
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -132,7 +133,7 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 		var issueClosedAt sql.NullTime
 		var labelsJSON []byte
 		issueQuery := `
-			SELECT created_at, closed_at, COALESCE(labels::text, '[]')::jsonb
+			SELECT created_at, closed_at, COALESCE(labels, '[]'::jsonb)
 			FROM github_issues
 			WHERE id = $1
 		`
@@ -141,21 +142,12 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 			return linksCreated, fmt.Errorf("failed to fetch issue metadata for issue_id=%d: %w", issueID, err)
 		}
 
-		// Parse labels from JSONB
+		// Parse labels from JSONB using proper JSON unmarshaling
 		var issueLabels []string
 		if len(labelsJSON) > 0 && string(labelsJSON) != "null" {
-			// Simple JSON array parsing (labels are just strings)
-			labelsStr := string(labelsJSON)
-			labelsStr = strings.TrimPrefix(labelsStr, "[")
-			labelsStr = strings.TrimSuffix(labelsStr, "]")
-			if labelsStr != "" {
-				parts := strings.Split(labelsStr, ",")
-				for _, part := range parts {
-					label := strings.Trim(strings.TrimSpace(part), "\"")
-					if label != "" {
-						issueLabels = append(issueLabels, label)
-					}
-				}
+			if err := json.Unmarshal(labelsJSON, &issueLabels); err != nil {
+				log.Printf("    ⚠️  Warning: Failed to parse labels for issue_id=%d: %v", issueID, err)
+				issueLabels = []string{} // Default to empty array on parse error
 			}
 		}
 
@@ -182,62 +174,61 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 			}
 		}
 
-		// Insert into code_block_incidents table using BOTH old and new schema
-		// Note: Table has both code_block_id and block_id for backward compatibility
-		// Unique constraint is on (code_block_id, issue_id)
+		// Insert into code_block_incidents table
+		// Note: Populating BOTH old (code_block_id, confidence, evidence_source) and new (block_id, etc.) columns
+		// for schema compatibility during migration period
+		// Reference: DATA_SCHEMA_REFERENCE.md line 337 - new schema uses block_id
+		// UNIQUE constraint is on (block_id, issue_id) per line 348
 		insertQuery := `
 			INSERT INTO code_block_incidents (
 				repo_id, code_block_id, block_id, issue_id,
-				confidence, evidence_source, evidence_text,
-				fix_commit_sha, commit_sha, incident_date, resolution_date, incident_type,
+				confidence, evidence_source, fix_commit_sha, fixed_at,
+				commit_sha, incident_date, resolution_date, incident_type,
 				created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
-			ON CONFLICT (code_block_id, issue_id)
+			) VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+			ON CONFLICT (block_id, issue_id)
 			DO UPDATE SET
-				block_id = EXCLUDED.block_id,
 				commit_sha = EXCLUDED.commit_sha,
-				fix_commit_sha = EXCLUDED.fix_commit_sha,
 				incident_date = EXCLUDED.incident_date,
 				resolution_date = EXCLUDED.resolution_date,
 				incident_type = EXCLUDED.incident_type,
 				confidence = EXCLUDED.confidence,
 				evidence_source = EXCLUDED.evidence_source,
-				evidence_text = EXCLUDED.evidence_text
+				fix_commit_sha = EXCLUDED.fix_commit_sha,
+				fixed_at = EXCLUDED.fixed_at
 		`
 
-		// Create evidence text based on event type
-		var evidenceText string
-		if eventType == "closed" {
-			evidenceText = fmt.Sprintf("Issue #%d '%s' was closed by commit %s which modified this code block",
-				issueNumber, issueTitle, fixCommitSHA[:7])
+		// Use issue closed_at as resolution_date, or fixed_at as fallback
+		var resolutionDate sql.NullTime
+		if issueClosedAt.Valid {
+			resolutionDate = issueClosedAt
+		} else if fixedAt.Valid {
+			resolutionDate = fixedAt
 		} else {
-			evidenceText = fmt.Sprintf("Issue #%d '%s' was referenced by commit %s which modified this code block",
-				issueNumber, issueTitle, fixCommitSHA[:7])
+			resolutionDate = sql.NullTime{Valid: false}
 		}
 
-		// Use issue closed_at as resolution_date, or fixed_at as fallback
-		var resolutionDate interface{}
-		if issueClosedAt.Valid {
-			resolutionDate = issueClosedAt.Time
-		} else if fixedAt.Valid {
-			resolutionDate = fixedAt.Time
-		} else {
-			resolutionDate = nil
+		// Default confidence = 0.85 (mid-high confidence that commit fixed the issue)
+		// evidence_source = "commit_close" or "commit_reference"
+		confidence := 0.85
+		evidenceSource := "commit_close"
+		if eventType == "referenced" {
+			confidence = 0.75 // Lower confidence for references vs closes
+			evidenceSource = "commit_reference"
 		}
 
 		_, err = t.db.ExecContext(ctx, insertQuery,
-			t.repoID,      // $1
-			codeBlockID,   // $2 code_block_id
-			codeBlockID,   // $3 block_id (same value)
-			issueID,       // $4
-			0.80,          // $5 Confidence: 0.80 for timeline-based linking
-			"timeline_event", // $6
-			evidenceText,  // $7
-			fixCommitSHA,  // $8 fix_commit_sha (varchar40)
-			fixCommitSHA,  // $9 commit_sha (text, same value)
-			issueCreatedAt,    // $10 incident_date
-			resolutionDate,    // $11 resolution_date
-			incidentType,      // $12 incident_type
+			t.repoID,          // $1
+			codeBlockID,       // $2 (used for BOTH code_block_id and block_id)
+			issueID,           // $3
+			confidence,        // $4 confidence (old schema)
+			evidenceSource,    // $5 evidence_source (old schema)
+			fixCommitSHA,      // $6 fix_commit_sha (old schema)
+			resolutionDate,    // $7 fixed_at (old schema)
+			fixCommitSHA,      // $8 commit_sha (new schema)
+			issueCreatedAt,    // $9 incident_date (new schema)
+			resolutionDate,    // $10 resolution_date (new schema)
+			incidentType,      // $11 incident_type (new schema)
 		)
 		if err != nil {
 			return linksCreated, fmt.Errorf("failed to insert incident link: %w", err)
