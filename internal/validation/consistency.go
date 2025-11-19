@@ -21,12 +21,12 @@ type ValidationResult struct {
 // ConsistencyValidator validates data consistency between Postgres and Neo4j
 type ConsistencyValidator struct {
 	db     *sql.DB
-	driver neo4j.Driver
+	driver neo4j.DriverWithContext
 	logger *slog.Logger
 }
 
 // NewConsistencyValidator creates a new consistency validator
-func NewConsistencyValidator(db *sql.DB, driver neo4j.Driver) *ConsistencyValidator {
+func NewConsistencyValidator(db *sql.DB, driver neo4j.DriverWithContext) *ConsistencyValidator {
 	return &ConsistencyValidator{
 		db:     db,
 		driver: driver,
@@ -58,6 +58,13 @@ func (v *ConsistencyValidator) ValidateAfterIngest(ctx context.Context, repoID i
 		return nil, fmt.Errorf("failed to validate issues: %w", err)
 	}
 	results = append(results, issueResult)
+
+	// Validate CodeBlocks
+	codeBlockResult, err := v.validateCodeBlocks(ctx, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate code blocks: %w", err)
+	}
+	results = append(results, codeBlockResult)
 
 	return results, nil
 }
@@ -210,18 +217,18 @@ func (v *ConsistencyValidator) validateCodeBlocks(ctx context.Context, repoID in
 
 // countNeo4jNodes is a helper to count nodes of a specific label
 func (v *ConsistencyValidator) countNeo4jNodes(ctx context.Context, label string, repoID int64) (int64, error) {
-	session := v.driver.NewSession(neo4j.SessionConfig{})
-	defer session.Close()
+	session := v.driver.NewSession(ctx, neo4j.SessionConfig{})
+	defer session.Close(ctx)
 
 	query := fmt.Sprintf("MATCH (n:%s {repo_id: $repoID}) RETURN count(n) as count", label)
 
-	result, err := session.Run(query, map[string]interface{}{"repoID": repoID})
+	result, err := session.Run(ctx, query, map[string]any{"repoID": repoID})
 	if err != nil {
 		return 0, fmt.Errorf("neo4j query failed: %w", err)
 	}
 
 	var count int64 = 0
-	if result.Next() {
+	if result.Next(ctx) {
 		record := result.Record()
 		if countVal, ok := record.Get("count"); ok {
 			count = countVal.(int64)

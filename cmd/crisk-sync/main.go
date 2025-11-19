@@ -10,6 +10,7 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/database"
+	"github.com/rohankatakam/coderisk/internal/sync"
 	"github.com/rohankatakam/coderisk/internal/validation"
 	"github.com/spf13/cobra"
 )
@@ -155,11 +156,11 @@ func runSync(cmd *cobra.Command, args []string) error {
 	var exitCode int
 	switch mode {
 	case "incremental":
-		exitCode, err = syncIncremental(ctx, stagingDB.DB(), neoDriver.(neo4j.Driver), repoID, dryRun)
+		exitCode, err = syncIncremental(ctx, stagingDB.DB(), neoDriver, repoID, dryRun)
 	case "full":
-		exitCode, err = syncFull(ctx, stagingDB.DB(), neoDriver.(neo4j.Driver), repoID, dryRun)
+		exitCode, err = syncFull(ctx, stagingDB.DB(), neoDriver, repoID, dryRun)
 	case "validate-only":
-		exitCode, err = validateOnlyMode(ctx, stagingDB.DB(), neoDriver.(neo4j.Driver), repoID)
+		exitCode, err = validateOnlyMode(ctx, stagingDB.DB(), neoDriver, repoID)
 	default:
 		return fmt.Errorf("invalid mode: %s (must be incremental, full, or validate-only)", mode)
 	}
@@ -176,7 +177,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func syncIncremental(ctx context.Context, db *sql.DB, driver neo4j.Driver, repoID int64, dryRun bool) (int, error) {
+func syncIncremental(ctx context.Context, db *sql.DB, driver neo4j.DriverWithContext, repoID int64, dryRun bool) (int, error) {
 	validator := validation.NewConsistencyValidator(db, driver)
 
 	// Run validation first
@@ -212,18 +213,55 @@ func syncIncremental(ctx context.Context, db *sql.DB, driver neo4j.Driver, repoI
 		return 0, nil // Success (dry run)
 	}
 
-	// TODO: Implement actual incremental sync
-	// 1. Query Postgres for entity IDs
-	// 2. Query Neo4j for existing entity IDs
-	// 3. Compute delta (missing IDs)
-	// 4. Create missing nodes/edges in Neo4j from Postgres data
-	fmt.Printf("\n⚠️  Incremental sync not yet fully implemented\n")
-	fmt.Printf("   Use --mode full for complete rebuild\n")
+	// Perform incremental sync
+	fmt.Printf("\n🔄 Starting incremental sync...\n")
 
-	return 1, nil // Warning
+	// Get Neo4j database name from config
+	cfg, err := config.Load("")
+	if err != nil {
+		return 2, fmt.Errorf("failed to load config for Neo4j database: %w", err)
+	}
+
+	// Sync CodeBlocks
+	blockSyncer := sync.NewCodeBlockSyncer(db, driver, cfg.Neo4j.Database)
+	blocksSynced, err := blockSyncer.SyncMissingBlocks(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("CodeBlock sync failed: %w", err)
+	}
+
+	// TODO: Add more syncers for other entities (Commits, Files, etc.)
+
+	// Run validation again to verify
+	fmt.Printf("\n📊 Validating post-sync state...\n")
+	finalResults, err := validator.ValidateAfterIngest(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("post-sync validation failed: %w", err)
+	}
+
+	validation.LogResults(finalResults)
+
+	// Summary
+	fmt.Printf("\n✅ Incremental sync complete:\n")
+	fmt.Printf("   CodeBlocks synced: %d\n", blocksSynced)
+
+	// Determine exit code based on final variance
+	minVariance := 100.0
+	for _, r := range finalResults {
+		if r.VariancePercent < minVariance {
+			minVariance = r.VariancePercent
+		}
+	}
+
+	if minVariance >= 95.0 {
+		return 0, nil // Success
+	} else if minVariance >= 90.0 {
+		return 1, nil // Warning
+	} else {
+		return 2, nil // Failure
+	}
 }
 
-func syncFull(ctx context.Context, db *sql.DB, driver neo4j.Driver, repoID int64, dryRun bool) (int, error) {
+func syncFull(ctx context.Context, db *sql.DB, driver neo4j.DriverWithContext, repoID int64, dryRun bool) (int, error) {
 	fmt.Printf("⚠️  FULL REBUILD: This will delete all Neo4j data for repo_id=%d\n", repoID)
 
 	if dryRun {
@@ -236,18 +274,18 @@ func syncFull(ctx context.Context, db *sql.DB, driver neo4j.Driver, repoID int64
 
 	// Step 1: Clear Neo4j data for this repo
 	fmt.Printf("\n  Clearing Neo4j data for repo_id=%d...\n", repoID)
-	session := driver.NewSession(neo4j.SessionConfig{})
-	defer session.Close()
+	session := driver.NewSession(ctx, neo4j.SessionConfig{})
+	defer session.Close(ctx)
 
-	result, err := session.Run(
+	result, err := session.Run(ctx,
 		"MATCH (n {repo_id: $repoID}) DETACH DELETE n RETURN count(n) as deleted",
-		map[string]interface{}{"repoID": repoID},
+		map[string]any{"repoID": repoID},
 	)
 	if err != nil {
 		return 2, fmt.Errorf("failed to clear Neo4j data: %w", err)
 	}
 
-	if result.Next() {
+	if result.Next(ctx) {
 		deleted := result.Record().Values[0].(int64)
 		fmt.Printf("  ✓ Deleted %d nodes\n", deleted)
 	}
@@ -263,7 +301,7 @@ func syncFull(ctx context.Context, db *sql.DB, driver neo4j.Driver, repoID int64
 	return 1, nil // Warning
 }
 
-func validateOnlyMode(ctx context.Context, db *sql.DB, driver neo4j.Driver, repoID int64) (int, error) {
+func validateOnlyMode(ctx context.Context, db *sql.DB, driver neo4j.DriverWithContext, repoID int64) (int, error) {
 	validator := validation.NewConsistencyValidator(db, driver)
 
 	// Run validation
