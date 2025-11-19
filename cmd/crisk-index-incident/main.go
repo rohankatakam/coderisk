@@ -53,11 +53,13 @@ Output: CodeBlocks with temporal_summary property`,
 var (
 	repoID  int64
 	verbose bool
+	force   bool
 )
 
 func init() {
 	rootCmd.Flags().Int64Var(&repoID, "repo-id", 0, "Repository ID from PostgreSQL (required)")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	rootCmd.Flags().BoolVar(&force, "force", false, "Force reprocessing of all blocks (ignore temporal_indexed_at)")
 
 	rootCmd.MarkFlagRequired("repo-id")
 
@@ -168,7 +170,7 @@ func runIndexIncident(cmd *cobra.Command, args []string) error {
 	// Step 3: Generate temporal summaries using LLM and sync to Neo4j
 	fmt.Printf("[5/5] Generating temporal summaries...\n")
 	if llmClient != nil && llmClient.IsEnabled() {
-		summaryCount, err := calc.GenerateTemporalSummaries(ctx)
+		summaryCount, err := calc.GenerateTemporalSummaries(ctx, force)
 		if err != nil {
 			fmt.Printf("  ⚠️  Warning: Failed to generate summaries: %v\n", err)
 		} else {

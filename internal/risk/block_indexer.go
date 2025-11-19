@@ -2,25 +2,28 @@ package risk
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/llm"
 )
 
 // BlockIndexer orchestrates ownership property calculations for CodeBlocks
 // Reference: AGENT_P3A_OWNERSHIP.md - Main indexer orchestrator
+// Reference: DATA_SCHEMA_REFERENCE.md lines 947-950 - PostgreSQL + Neo4j dual-write
 type BlockIndexer struct {
 	calculator *OwnershipCalculator
 	logger     *slog.Logger
 }
 
-// NewBlockIndexer creates a new block indexer
-func NewBlockIndexer(driver neo4j.DriverWithContext, database string, llmClient *llm.Client) *BlockIndexer {
+// NewBlockIndexer creates a new block indexer with PostgreSQL + Neo4j support
+func NewBlockIndexer(db *sql.DB, neo4jBackend *graph.Neo4jBackend, driver neo4j.DriverWithContext, database string, llmClient *llm.Client) *BlockIndexer {
 	return &BlockIndexer{
-		calculator: NewOwnershipCalculator(driver, database, llmClient),
+		calculator: NewOwnershipCalculator(db, neo4jBackend, driver, database, llmClient),
 		logger:     slog.Default().With("component", "block_indexer"),
 	}
 }
@@ -153,41 +156,49 @@ func (idx *BlockIndexer) IndexOwnershipIncremental(ctx context.Context, repoID i
 }
 
 // GetIndexingStats returns statistics about the current indexing state
+// Following Postgres-First Write Protocol: Query PostgreSQL (source of truth)
 func (idx *BlockIndexer) GetIndexingStats(ctx context.Context, repoID int64) (map[string]int, error) {
 	stats := make(map[string]int)
 
-	// Count total blocks
-	totalBlocks, err := idx.countBlocksWithProperty(ctx, repoID, "")
+	// Query PostgreSQL for ownership stats (source of truth)
+	query := `
+		SELECT
+			COUNT(*) as total_blocks,
+			COUNT(original_author_email) as with_original_author,
+			COUNT(last_modifier_email) as with_last_modifier,
+			COUNT(familiarity_map) as with_familiarity_map,
+			COUNT(*) - COUNT(original_author_email) as missing_original_author,
+			COUNT(*) - COUNT(last_modifier_email) as missing_last_modifier,
+			COUNT(*) - COUNT(familiarity_map) as missing_familiarity_map
+		FROM code_blocks
+		WHERE repo_id = $1
+	`
+
+	row := idx.calculator.db.QueryRowContext(ctx, query, repoID)
+
+	var totalBlocks, withOriginalAuthor, withLastModifier, withFamiliarityMap int
+	var missingOriginalAuthor, missingLastModifier, missingFamiliarityMap int
+
+	err := row.Scan(
+		&totalBlocks,
+		&withOriginalAuthor,
+		&withLastModifier,
+		&withFamiliarityMap,
+		&missingOriginalAuthor,
+		&missingLastModifier,
+		&missingFamiliarityMap,
+	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query PostgreSQL stats: %w", err)
 	}
+
 	stats["total_blocks"] = totalBlocks
-
-	// Count blocks with original_author
-	withOriginalAuthor, err := idx.countBlocksWithProperty(ctx, repoID, "original_author")
-	if err != nil {
-		return nil, err
-	}
 	stats["with_original_author"] = withOriginalAuthor
-
-	// Count blocks with last_modifier
-	withLastModifier, err := idx.countBlocksWithProperty(ctx, repoID, "last_modifier")
-	if err != nil {
-		return nil, err
-	}
 	stats["with_last_modifier"] = withLastModifier
-
-	// Count blocks with familiarity_map
-	withFamiliarityMap, err := idx.countBlocksWithProperty(ctx, repoID, "familiarity_map")
-	if err != nil {
-		return nil, err
-	}
 	stats["with_familiarity_map"] = withFamiliarityMap
-
-	// Calculate missing
-	stats["missing_original_author"] = totalBlocks - withOriginalAuthor
-	stats["missing_last_modifier"] = totalBlocks - withLastModifier
-	stats["missing_familiarity_map"] = totalBlocks - withFamiliarityMap
+	stats["missing_original_author"] = missingOriginalAuthor
+	stats["missing_last_modifier"] = missingLastModifier
+	stats["missing_familiarity_map"] = missingFamiliarityMap
 
 	return stats, nil
 }
@@ -235,4 +246,10 @@ func (idx *BlockIndexer) countBlocksWithProperty(ctx context.Context, repoID int
 	}
 
 	return int(result.(int64)), nil
+}
+
+// MarkOwnershipIndexed delegates to the underlying calculator
+// Updates ownership_indexed_at timestamp for idempotency tracking
+func (idx *BlockIndexer) MarkOwnershipIndexed(ctx context.Context, repoID int64) error {
+	return idx.calculator.MarkOwnershipIndexed(ctx, repoID)
 }

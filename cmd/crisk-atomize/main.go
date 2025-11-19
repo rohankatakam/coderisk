@@ -57,12 +57,14 @@ var (
 	repoID   int64
 	repoPath string
 	verbose  bool
+	force    bool
 )
 
 func init() {
 	rootCmd.Flags().Int64Var(&repoID, "repo-id", 0, "Repository ID from PostgreSQL (required)")
 	rootCmd.Flags().StringVar(&repoPath, "repo-path", "", "Local repository path (required)")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	rootCmd.Flags().BoolVar(&force, "force", false, "Force reprocessing of all commits (ignore atomized_at)")
 
 	rootCmd.MarkFlagRequired("repo-id")
 	rootCmd.MarkFlagRequired("repo-path")
@@ -148,12 +150,24 @@ func runAtomize(cmd *cobra.Command, args []string) error {
 	fmt.Printf("[4/4] Processing commits chronologically...\n")
 	processStart := time.Now()
 
-	rows, err := stagingDB.Query(ctx, `
+	// Build query with idempotency filter (skip already-atomized commits)
+	query := `
 		SELECT sha, message, author_email, author_date, topological_index
 		FROM github_commits
-		WHERE repo_id = $1
-		ORDER BY topological_index ASC NULLS LAST
-	`, repoID)
+		WHERE repo_id = $1`
+
+	if !force {
+		query += ` AND atomized_at IS NULL`
+		fmt.Printf("  ℹ️  Idempotency mode: Processing only commits not yet atomized\n")
+		fmt.Printf("      (Use --force to reprocess all commits)\n")
+	} else {
+		fmt.Printf("  ⚠️  Force mode: Reprocessing ALL commits\n")
+	}
+
+	query += `
+		ORDER BY topological_index ASC NULLS LAST`
+
+	rows, err := stagingDB.Query(ctx, query, repoID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch commits: %w", err)
 	}

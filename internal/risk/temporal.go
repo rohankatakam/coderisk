@@ -79,17 +79,17 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 			  AND gi.repo_id = $1
 		),
 		issue_fix_blocks AS (
-			-- Join with code block modifications to find which blocks were modified by related commits
+			-- Join with code block changes to find which blocks were modified by related commits
 			SELECT DISTINCT
 				irc.issue_id,
-				cbm.code_block_id,
+				cbc.block_id AS code_block_id,
 				irc.commit_sha AS fix_commit_sha,
 				irc.event_at AS fixed_at,
 				irc.event_type
 			FROM issue_related_commits irc
-			JOIN code_block_modifications cbm ON cbm.commit_sha = irc.commit_sha
-			JOIN code_blocks cb ON cb.id = cbm.code_block_id
-			WHERE cb.repo_id = $1
+			JOIN code_block_changes cbc ON cbc.commit_sha = irc.commit_sha
+			JOIN code_blocks cb ON cb.id = cbc.block_id
+			WHERE cb.repo_id = $1 AND cbc.repo_id = $1
 		)
 		SELECT
 			ifb.code_block_id,
@@ -175,27 +175,20 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 		}
 
 		// Insert into code_block_incidents table
-		// Note: Populating BOTH old (code_block_id, confidence, evidence_source) and new (block_id, etc.) columns
-		// for schema compatibility during migration period
-		// Reference: DATA_SCHEMA_REFERENCE.md line 337 - new schema uses block_id
+		// Reference: DATA_SCHEMA_REFERENCE.md line 337 - schema uses block_id
 		// UNIQUE constraint is on (block_id, issue_id) per line 348
 		insertQuery := `
 			INSERT INTO code_block_incidents (
-				repo_id, code_block_id, block_id, issue_id,
-				confidence, evidence_source, fix_commit_sha, fixed_at,
+				repo_id, block_id, issue_id,
 				commit_sha, incident_date, resolution_date, incident_type,
 				created_at
-			) VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
 			ON CONFLICT (block_id, issue_id)
 			DO UPDATE SET
 				commit_sha = EXCLUDED.commit_sha,
 				incident_date = EXCLUDED.incident_date,
 				resolution_date = EXCLUDED.resolution_date,
-				incident_type = EXCLUDED.incident_type,
-				confidence = EXCLUDED.confidence,
-				evidence_source = EXCLUDED.evidence_source,
-				fix_commit_sha = EXCLUDED.fix_commit_sha,
-				fixed_at = EXCLUDED.fixed_at
+				incident_type = EXCLUDED.incident_type
 		`
 
 		// Use issue closed_at as resolution_date, or fixed_at as fallback
@@ -208,27 +201,14 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 			resolutionDate = sql.NullTime{Valid: false}
 		}
 
-		// Default confidence = 0.85 (mid-high confidence that commit fixed the issue)
-		// evidence_source = "commit_close" or "commit_reference"
-		confidence := 0.85
-		evidenceSource := "commit_close"
-		if eventType == "referenced" {
-			confidence = 0.75 // Lower confidence for references vs closes
-			evidenceSource = "commit_reference"
-		}
-
 		_, err = t.db.ExecContext(ctx, insertQuery,
-			t.repoID,          // $1
-			codeBlockID,       // $2 (used for BOTH code_block_id and block_id)
-			issueID,           // $3
-			confidence,        // $4 confidence (old schema)
-			evidenceSource,    // $5 evidence_source (old schema)
-			fixCommitSHA,      // $6 fix_commit_sha (old schema)
-			resolutionDate,    // $7 fixed_at (old schema)
-			fixCommitSHA,      // $8 commit_sha (new schema)
-			issueCreatedAt,    // $9 incident_date (new schema)
-			resolutionDate,    // $10 resolution_date (new schema)
-			incidentType,      // $11 incident_type (new schema)
+			t.repoID,        // $1 repo_id
+			codeBlockID,     // $2 block_id
+			issueID,         // $3 issue_id
+			fixCommitSHA,    // $4 commit_sha
+			issueCreatedAt,  // $5 incident_date
+			resolutionDate,  // $6 resolution_date
+			incidentType,    // $7 incident_type
 		)
 		if err != nil {
 			return linksCreated, fmt.Errorf("failed to insert incident link: %w", err)
@@ -242,18 +222,18 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 				MATCH (i:Issue {number: $issueNumber, repo_id: $repoID})
 				MATCH (b:CodeBlock {db_id: $blockID, repo_id: $repoID})
 				MERGE (i)-[r:FIXED_BY_BLOCK]->(b)
-				SET r.confidence = $confidence,
-				    r.commit_sha = $commitSHA,
+				SET r.commit_sha = $commitSHA,
 				    r.incident_date = datetime($incidentDate),
+				    r.incident_type = $incidentType,
 				    r.created_at = datetime()
 			`
 			params := map[string]interface{}{
 				"issueNumber":  issueNumber,
 				"blockID":      codeBlockID,
 				"repoID":       t.repoID,
-				"confidence":   confidence,
 				"commitSHA":    fixCommitSHA,
 				"incidentDate": issueCreatedAt.Format(time.RFC3339),
+				"incidentType": incidentType,
 			}
 			queries := []graph.QueryWithParams{{Query: neo4jQuery, Params: params}}
 			if err := t.neo4j.ExecuteBatchWithParams(ctx, queries); err != nil {
@@ -291,18 +271,18 @@ func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, 
 			incident_count = (
 				SELECT COUNT(*)
 				FROM code_block_incidents cbi
-				WHERE cbi.code_block_id = cb.id
+				WHERE cbi.block_id = cb.id
 			),
 			last_incident_date = (
 				SELECT MAX(incident_date)
 				FROM code_block_incidents cbi
-				WHERE cbi.code_block_id = cb.id
+				WHERE cbi.block_id = cb.id
 			)
 		WHERE cb.repo_id = $1
 		  AND EXISTS (
 			SELECT 1
 			FROM code_block_incidents cbi
-			WHERE cbi.code_block_id = cb.id
+			WHERE cbi.block_id = cb.id
 		  )
 	`
 
@@ -327,7 +307,7 @@ func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, 
 		  AND NOT EXISTS (
 			SELECT 1
 			FROM code_block_incidents cbi
-			WHERE cbi.code_block_id = code_blocks.id
+			WHERE cbi.block_id = code_blocks.id
 		  )
 	`
 
@@ -373,24 +353,39 @@ func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, 
 
 // GenerateTemporalSummaries creates LLM-generated summaries for blocks with incidents
 // Reference: AGENT-P3C §4 - LLM Temporal Summary
-func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context) (int, error) {
+// Idempotency: Only processes blocks that need summaries (no temporal_indexed_at or stale)
+func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context, force bool) (int, error) {
 	if t.llm == nil || !t.llm.IsEnabled() {
 		return 0, fmt.Errorf("llm client not enabled")
 	}
 
 	log.Printf("  🤖 Generating LLM temporal summaries for high-incident blocks...")
 
-	// Find blocks with incidents that don't have summaries yet
+	// Find blocks with incidents that need summaries (idempotent)
 	query := `
 		SELECT DISTINCT
 			cb.id,
 			cb.block_name,
 			cb.file_path,
 			cb.block_type,
-			cb.incident_count
+			cb.incident_count,
+			cb.last_incident_date
 		FROM code_blocks cb
 		WHERE cb.repo_id = $1
-		  AND cb.incident_count > 0
+		  AND cb.incident_count > 0`
+
+	if !force {
+		// Idempotency: Only process blocks without summaries or with stale summaries
+		query += `
+		  AND (cb.temporal_indexed_at IS NULL
+		       OR cb.temporal_indexed_at < cb.last_incident_date)`
+		log.Printf("  ℹ️  Idempotency mode: Processing only blocks needing temporal summaries")
+		log.Printf("      (Use --force to reprocess all blocks)")
+	} else {
+		log.Printf("  ⚠️  Force mode: Reprocessing ALL blocks with incidents")
+	}
+
+	query += `
 		ORDER BY cb.incident_count DESC
 		LIMIT 50  -- Process top 50 high-incident blocks
 	`
@@ -424,12 +419,20 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context) (int
 	}
 	defer rows.Close()
 
+	// Rate limiting configuration for Gemini Tier 1
+	// Tier 1 limits: 2,000 RPM (~33 req/sec)
+	// Safe batch: 10 requests per 6 seconds (~100 req/min, leaving 95% headroom)
+	const batchSize = 10
+	const batchDelaySeconds = 6
+	batchCount := 0
+
 	for rows.Next() {
 		var blockID int64
 		var blockName, filePath, blockType string
 		var incidentCount int
+		var lastIncidentDate sql.NullTime
 
-		if err := rows.Scan(&blockID, &blockName, &filePath, &blockType, &incidentCount); err != nil {
+		if err := rows.Scan(&blockID, &blockName, &filePath, &blockType, &incidentCount, &lastIncidentDate); err != nil {
 			return summariesGenerated, fmt.Errorf("failed to scan block row: %w", err)
 		}
 
@@ -443,7 +446,7 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context) (int
 				gi.closed_at
 			FROM code_block_incidents cbi
 			JOIN github_issues gi ON gi.id = cbi.issue_id
-			WHERE cbi.code_block_id = $1
+			WHERE cbi.block_id = $1
 			ORDER BY gi.created_at DESC
 		`
 
@@ -481,9 +484,11 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context) (int
 
 		// Store temporal_summary in code_blocks table (PostgreSQL)
 		// Reference: DATA_SCHEMA_REFERENCE.md line 934 - Populate temporal_summary
+		// Also update temporal_indexed_at for idempotency tracking
 		updateSummaryQuery := `
 			UPDATE code_blocks
-			SET temporal_summary = $1
+			SET temporal_summary = $1,
+			    temporal_indexed_at = NOW()
 			WHERE id = $2
 		`
 		_, err = t.db.ExecContext(ctx, updateSummaryQuery, summary, blockID)
@@ -514,6 +519,15 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context) (int
 
 		log.Printf("    ✓ Generated and stored summary for %s (%s): %s", blockName, filePath, summary[:min(80, len(summary))])
 		summariesGenerated++
+		batchCount++
+
+		// Rate limiting: Add delay after processing each batch
+		// This prevents burst traffic that exceeds Gemini RPM limits
+		if batchCount >= batchSize && summariesGenerated < blocksToProcess {
+			log.Printf("      → Rate limit: Processed batch of %d blocks, waiting %d seconds before next batch...", batchSize, batchDelaySeconds)
+			time.Sleep(time.Duration(batchDelaySeconds) * time.Second)
+			batchCount = 0
+		}
 
 		if summariesGenerated%10 == 0 {
 			log.Printf("      → Progress: %d/%d summaries generated and stored", summariesGenerated, blocksToProcess)
@@ -587,13 +601,13 @@ func (t *TemporalCalculator) CreateNeo4jEdges(ctx context.Context) (int, error) 
 func (t *TemporalCalculator) GetIncidentStatistics(ctx context.Context) (map[string]interface{}, error) {
 	query := `
 		SELECT
-			COUNT(DISTINCT cbi.code_block_id) AS blocks_with_incidents,
+			COUNT(DISTINCT cbi.block_id) AS blocks_with_incidents,
 			COUNT(DISTINCT cbi.issue_id) AS total_unique_issues,
 			COUNT(*) AS total_incident_links,
 			AVG(cb.incident_count) AS avg_incidents_per_block,
 			MAX(cb.incident_count) AS max_incidents_per_block
 		FROM code_block_incidents cbi
-		JOIN code_blocks cb ON cb.id = cbi.code_block_id
+		JOIN code_blocks cb ON cb.id = cbi.block_id
 		WHERE cbi.repo_id = $1
 	`
 
@@ -696,14 +710,13 @@ func (t *TemporalCalculator) GetBlockIncidents(ctx context.Context, blockID int6
 			gi.state,
 			gi.created_at,
 			gi.closed_at,
-			cbi.confidence,
-			cbi.evidence_source,
-			cbi.evidence_text,
-			cbi.fix_commit_sha,
-			cbi.fixed_at
+			cbi.commit_sha,
+			cbi.incident_date,
+			cbi.resolution_date,
+			cbi.incident_type
 		FROM code_block_incidents cbi
 		JOIN github_issues gi ON gi.id = cbi.issue_id
-		WHERE cbi.code_block_id = $1
+		WHERE cbi.block_id = $1
 		ORDER BY gi.created_at DESC
 	`
 
@@ -716,31 +729,31 @@ func (t *TemporalCalculator) GetBlockIncidents(ctx context.Context, blockID int6
 	var results []map[string]interface{}
 	for rows.Next() {
 		var number int
-		var title, state, evidenceSource, evidenceText, fixCommitSHA string
+		var title, state, commitSHA, incidentType string
 		var createdAt time.Time
-		var closedAt, fixedAt sql.NullTime
-		var confidence float64
+		var closedAt, incidentDate, resolutionDate sql.NullTime
 
-		if err := rows.Scan(&number, &title, &state, &createdAt, &closedAt, &confidence, &evidenceSource, &evidenceText, &fixCommitSHA, &fixedAt); err != nil {
+		if err := rows.Scan(&number, &title, &state, &createdAt, &closedAt, &commitSHA, &incidentDate, &resolutionDate, &incidentType); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
 		result := map[string]interface{}{
-			"number":          number,
-			"title":           title,
-			"state":           state,
-			"created_at":      createdAt,
-			"confidence":      confidence,
-			"evidence_source": evidenceSource,
-			"evidence_text":   evidenceText,
-			"fix_commit_sha":  fixCommitSHA,
+			"number":        number,
+			"title":         title,
+			"state":         state,
+			"created_at":    createdAt,
+			"commit_sha":    commitSHA,
+			"incident_type": incidentType,
 		}
 
 		if closedAt.Valid {
 			result["closed_at"] = closedAt.Time
 		}
-		if fixedAt.Valid {
-			result["fixed_at"] = fixedAt.Time
+		if incidentDate.Valid {
+			result["incident_date"] = incidentDate.Time
+		}
+		if resolutionDate.Valid {
+			result["resolution_date"] = resolutionDate.Time
 		}
 
 		results = append(results, result)

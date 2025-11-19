@@ -4,10 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"path/filepath"
+	"time"
 
 	_ "github.com/lib/pq"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/rohankatakam/coderisk/internal/config"
+	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/llm"
 	"github.com/rohankatakam/coderisk/internal/risk"
 	"github.com/spf13/cobra"
@@ -47,11 +53,13 @@ Output: Coupling edges and risk scores`,
 var (
 	repoID  int64
 	verbose bool
+	force   bool
 )
 
 func init() {
 	rootCmd.Flags().Int64Var(&repoID, "repo-id", 0, "Repository ID from PostgreSQL (required)")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	rootCmd.Flags().BoolVar(&force, "force", false, "Force recalculation of all coupling data")
 
 	rootCmd.MarkFlagRequired("repo-id")
 
@@ -62,10 +70,21 @@ Git commit: ` + GitCommit + `
 }
 
 func runIndexCoupling(cmd *cobra.Command, args []string) error {
+	startTime := time.Now()
 	ctx := context.Background()
+
+	// Setup logging to file
+	logFile, err := setupLogging()
+	if err != nil {
+		fmt.Printf("⚠️  Warning: Failed to setup log file: %v\n", err)
+	} else {
+		defer logFile.Close()
+		fmt.Printf("📝 Logging to: %s\n", logFile.Name())
+	}
 
 	fmt.Printf("🚀 crisk-index-coupling - Coupling Indexing Service\n")
 	fmt.Printf("   Repository ID: %d\n", repoID)
+	fmt.Printf("   Timestamp: %s\n", startTime.Format(time.RFC3339))
 	fmt.Println()
 
 	// Load configuration
@@ -87,7 +106,7 @@ func runIndexCoupling(cmd *cobra.Command, args []string) error {
 	}
 
 	// Connect to PostgreSQL
-	fmt.Printf("[1/3] Connecting to PostgreSQL...\n")
+	fmt.Printf("[1/5] Connecting to PostgreSQL...\n")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
@@ -99,8 +118,37 @@ func runIndexCoupling(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  ✓ Connected to PostgreSQL\n\n")
 
+	// Connect to Neo4j using graph backend
+	fmt.Printf("[2/5] Connecting to Neo4j...\n")
+	neo4jBackend, err := graph.NewNeo4jBackend(
+		ctx,
+		cfg.Neo4j.URI,
+		cfg.Neo4j.User,
+		cfg.Neo4j.Password,
+		cfg.Neo4j.Database,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Neo4j backend: %w", err)
+	}
+	defer neo4jBackend.Close(ctx)
+	fmt.Printf("  ✓ Connected to Neo4j\n\n")
+
+	// Also connect legacy Neo4j driver for backward compatibility
+	driver, err := neo4j.NewDriverWithContext(
+		cfg.Neo4j.URI,
+		neo4j.BasicAuth(cfg.Neo4j.User, cfg.Neo4j.Password, ""),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create Neo4j driver: %w", err)
+	}
+	defer driver.Close(ctx)
+
+	if err := driver.VerifyConnectivity(ctx); err != nil {
+		return fmt.Errorf("failed to verify Neo4j connectivity: %w", err)
+	}
+
 	// Create LLM client (optional)
-	fmt.Printf("[2/3] Initializing LLM client...\n")
+	fmt.Printf("[3/5] Initializing LLM client...\n")
 	var llmClient *llm.Client
 	if os.Getenv("GEMINI_API_KEY") != "" {
 		llmClient, err = llm.NewClient(ctx, cfg)
@@ -117,11 +165,11 @@ func runIndexCoupling(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  ⚠️  LLM client disabled (GEMINI_API_KEY not set)\n\n")
 	}
 
-	// Create coupling calculator
-	calc := risk.NewCouplingCalculator(db, llmClient, repoID)
+	// Create coupling calculator with Neo4j support
+	calc := risk.NewCouplingCalculator(db, neo4jBackend, driver, cfg.Neo4j.Database, llmClient, repoID)
 
-	// Calculate co-changes
-	fmt.Printf("[3/3] Calculating co-change relationships...\n")
+	// Phase 1: Calculate co-changes
+	fmt.Printf("[4/5] Calculating co-change relationships...\n")
 	fmt.Printf("  Strategy: Find CodeBlocks modified together in commits\n")
 	fmt.Printf("  Threshold: ≥50%% co-change rate\n\n")
 
@@ -129,7 +177,33 @@ func runIndexCoupling(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to calculate co-changes: %w", err)
 	}
-	fmt.Printf("  ✓ Created %d co-change edges\n\n", edgesCreated)
+	fmt.Printf("  ✓ Created %d co-change edges in PostgreSQL\n", edgesCreated)
+
+	// Phase 2: Update coupling aggregates
+	fmt.Printf("\n[5/5] Updating coupling aggregates and risk scores...\n\n")
+
+	blocksUpdated, err := calc.UpdateCouplingAggregates(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to update coupling aggregates: %w", err)
+	}
+	fmt.Printf("  ✓ Updated %d blocks with coupling aggregates\n\n", blocksUpdated)
+
+	// Phase 3: Calculate final risk scores
+	scoresCalculated, err := calc.CalculateRiskScores(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to calculate risk scores: %w", err)
+	}
+	fmt.Printf("  ✓ Calculated risk scores for %d blocks\n\n", scoresCalculated)
+
+	// Mark all blocks as coupling-indexed (idempotency tracking)
+	if force {
+		fmt.Printf("  ⚠️  Force mode: Recalculated all coupling data\n")
+	}
+	fmt.Printf("  Updating coupling_indexed_at timestamps...\n")
+	if err := calc.MarkCouplingIndexed(ctx); err != nil {
+		fmt.Printf("  ⚠️  Warning: Failed to update timestamps: %v\n", err)
+	}
+	fmt.Println()
 
 	// Get statistics
 	fmt.Printf("📊 Co-Change Statistics:\n")
@@ -168,7 +242,36 @@ func runIndexCoupling(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n✅ Coupling indexing complete\n")
+	fmt.Printf("\n📊 Summary:\n")
+	fmt.Printf("   Total time: %v\n", time.Since(startTime))
+	fmt.Printf("   Co-change edges: %d\n", edgesCreated)
+	fmt.Printf("   Blocks with coupling data: %d\n", blocksUpdated)
+	fmt.Printf("   Risk scores calculated: %d\n", scoresCalculated)
 	fmt.Printf("\n🚀 All indexing services complete! Repository is ready for risk analysis.\n")
 
 	return nil
+}
+
+func setupLogging() (*os.File, error) {
+	// Create logs directory if it doesn't exist
+	logDir := "/tmp/coderisk-logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
+	}
+
+	// Create log file with timestamp
+	timestamp := time.Now().Format("20060102_150405")
+	logPath := filepath.Join(logDir, fmt.Sprintf("crisk-index-coupling_%s.log", timestamp))
+
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %w", err)
+	}
+
+	// Setup multi-writer to write to both stdout and file
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(multiWriter)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	return logFile, nil
 }

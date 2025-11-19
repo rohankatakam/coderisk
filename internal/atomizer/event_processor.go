@@ -74,10 +74,12 @@ func (p *Processor) ProcessCommitsChronologically(ctx context.Context, commits [
 		}
 
 		// 3b. Process each event
+		commitHasErrors := false
 		for j, event := range eventLog.ChangeEvents {
-			if err := p.processEvent(ctx, &event, commit, state, repoID); err != nil {
+			if err := p.processEvent(ctx, &event, eventLog, commit, state, repoID); err != nil {
 				log.Printf("  ⚠️  WARNING: Failed to process event %d in commit %s: %v", j, commit.SHA[:8], err)
 				errorCount++
+				commitHasErrors = true
 			} else {
 				successCount++
 				// Track event types
@@ -93,6 +95,15 @@ func (p *Processor) ProcessCommitsChronologically(ctx context.Context, commits [
 				case "REMOVE_IMPORT":
 					importsRemoved++
 				}
+			}
+		}
+
+		// 3c. Mark commit as atomized (idempotency tracking)
+		// Only mark as atomized if commit processed successfully (even if some events had warnings)
+		if !commitHasErrors {
+			if err := p.dbWriter.MarkCommitAtomized(ctx, commit.SHA, repoID); err != nil {
+				log.Printf("  ⚠️  WARNING: Failed to mark commit %s as atomized: %v", commit.SHA[:8], err)
+				// Continue anyway - this is just for idempotency tracking
 			}
 		}
 
@@ -118,18 +129,18 @@ func (p *Processor) ProcessCommitsChronologically(ctx context.Context, commits [
 
 // processEvent handles a single ChangeEvent
 // Reference: AGENT_P2B_PROCESSOR.md - Event type dispatch
-func (p *Processor) processEvent(ctx context.Context, event *ChangeEvent, commit CommitData, state *StateTracker, repoID int64) error {
+func (p *Processor) processEvent(ctx context.Context, event *ChangeEvent, eventLog *CommitChangeEventLog, commit CommitData, state *StateTracker, repoID int64) error {
 	switch event.Behavior {
 	case "CREATE_BLOCK":
-		return p.handleCreateBlock(ctx, event, commit, state, repoID)
+		return p.handleCreateBlock(ctx, event, eventLog, commit, state, repoID)
 	case "MODIFY_BLOCK":
-		return p.handleModifyBlock(ctx, event, commit, state, repoID)
+		return p.handleModifyBlock(ctx, event, eventLog, commit, state, repoID)
 	case "DELETE_BLOCK":
-		return p.handleDeleteBlock(ctx, event, commit, state, repoID)
+		return p.handleDeleteBlock(ctx, event, eventLog, commit, state, repoID)
 	case "ADD_IMPORT":
-		return p.handleAddImport(ctx, event, commit, state, repoID)
+		return p.handleAddImport(ctx, event, eventLog, commit, state, repoID)
 	case "REMOVE_IMPORT":
-		return p.handleRemoveImport(ctx, event, commit, state, repoID)
+		return p.handleRemoveImport(ctx, event, eventLog, commit, state, repoID)
 	default:
 		return fmt.Errorf("unknown behavior: %s", event.Behavior)
 	}
@@ -138,7 +149,7 @@ func (p *Processor) processEvent(ctx context.Context, event *ChangeEvent, commit
 // handleCreateBlock processes a CREATE_BLOCK event
 // Reference: AGENT_P2B_PROCESSOR.md - CREATE_BLOCK handling
 // Edge case: If block already exists, treat as MODIFY
-func (p *Processor) handleCreateBlock(ctx context.Context, event *ChangeEvent, commit CommitData, state *StateTracker, repoID int64) error {
+func (p *Processor) handleCreateBlock(ctx context.Context, event *ChangeEvent, eventLog *CommitChangeEventLog, commit CommitData, state *StateTracker, repoID int64) error {
 	// Check if block already exists (edge case)
 	if blockID, exists := state.GetBlockID(event.TargetFile, event.TargetBlockName); exists {
 		log.Printf("WARNING: CREATE_BLOCK for existing block %s:%s (treating as MODIFY)", event.TargetFile, event.TargetBlockName)
@@ -148,8 +159,8 @@ func (p *Processor) handleCreateBlock(ctx context.Context, event *ChangeEvent, c
 			return fmt.Errorf("failed to update existing block: %w", err)
 		}
 
-		// Create modification record
-		if err := p.dbWriter.CreateModification(ctx, blockID, repoID, commit.SHA, commit.AuthorEmail, commit.Timestamp, "modify"); err != nil {
+		// Create change record using LLM summary
+		if err := p.dbWriter.CreateModification(ctx, blockID, repoID, event, commit.SHA, commit.AuthorEmail, commit.Timestamp, eventLog.LLMIntentSummary); err != nil {
 			return fmt.Errorf("failed to create modification: %w", err)
 		}
 
@@ -170,8 +181,8 @@ func (p *Processor) handleCreateBlock(ctx context.Context, event *ChangeEvent, c
 	// Track in state
 	state.SetBlockID(event.TargetFile, event.TargetBlockName, blockID)
 
-	// Create modification record (creation is a modification)
-	if err := p.dbWriter.CreateModification(ctx, blockID, repoID, commit.SHA, commit.AuthorEmail, commit.Timestamp, "create"); err != nil {
+	// Create change record (creation is a change event)
+	if err := p.dbWriter.CreateModification(ctx, blockID, repoID, event, commit.SHA, commit.AuthorEmail, commit.Timestamp, eventLog.LLMIntentSummary); err != nil {
 		return fmt.Errorf("failed to create modification record: %w", err)
 	}
 
@@ -197,14 +208,14 @@ func (p *Processor) handleCreateBlock(ctx context.Context, event *ChangeEvent, c
 // handleModifyBlock processes a MODIFY_BLOCK event
 // Reference: AGENT_P2B_PROCESSOR.md - MODIFY_BLOCK handling
 // Edge case: If block doesn't exist, create it (late detection)
-func (p *Processor) handleModifyBlock(ctx context.Context, event *ChangeEvent, commit CommitData, state *StateTracker, repoID int64) error {
+func (p *Processor) handleModifyBlock(ctx context.Context, event *ChangeEvent, eventLog *CommitChangeEventLog, commit CommitData, state *StateTracker, repoID int64) error {
 	// Check if block exists
 	blockID, exists := state.GetBlockID(event.TargetFile, event.TargetBlockName)
 
 	if !exists {
 		log.Printf("WARNING: MODIFY_BLOCK for non-existent block %s:%s (creating it)", event.TargetFile, event.TargetBlockName)
 		// Treat as CREATE
-		return p.handleCreateBlock(ctx, event, commit, state, repoID)
+		return p.handleCreateBlock(ctx, event, eventLog, commit, state, repoID)
 	}
 
 	// Update code block metadata
@@ -212,8 +223,8 @@ func (p *Processor) handleModifyBlock(ctx context.Context, event *ChangeEvent, c
 		return fmt.Errorf("failed to update code block: %w", err)
 	}
 
-	// Create modification record
-	if err := p.dbWriter.CreateModification(ctx, blockID, repoID, commit.SHA, commit.AuthorEmail, commit.Timestamp, "modify"); err != nil {
+	// Create change record
+	if err := p.dbWriter.CreateModification(ctx, blockID, repoID, event, commit.SHA, commit.AuthorEmail, commit.Timestamp, eventLog.LLMIntentSummary); err != nil {
 		return fmt.Errorf("failed to create modification: %w", err)
 	}
 
@@ -228,7 +239,7 @@ func (p *Processor) handleModifyBlock(ctx context.Context, event *ChangeEvent, c
 // handleDeleteBlock processes a DELETE_BLOCK event
 // Reference: AGENT_P2B_PROCESSOR.md - DELETE_BLOCK edge case
 // Soft delete: Mark as deleted but keep in graph
-func (p *Processor) handleDeleteBlock(ctx context.Context, event *ChangeEvent, commit CommitData, state *StateTracker, repoID int64) error {
+func (p *Processor) handleDeleteBlock(ctx context.Context, event *ChangeEvent, eventLog *CommitChangeEventLog, commit CommitData, state *StateTracker, repoID int64) error {
 	blockID, exists := state.GetBlockID(event.TargetFile, event.TargetBlockName)
 
 	if !exists {
@@ -241,8 +252,8 @@ func (p *Processor) handleDeleteBlock(ctx context.Context, event *ChangeEvent, c
 		return fmt.Errorf("failed to mark block as deleted: %w", err)
 	}
 
-	// Create modification record for deletion
-	if err := p.dbWriter.CreateModification(ctx, blockID, repoID, commit.SHA, commit.AuthorEmail, commit.Timestamp, "delete"); err != nil {
+	// Create change record for deletion
+	if err := p.dbWriter.CreateModification(ctx, blockID, repoID, event, commit.SHA, commit.AuthorEmail, commit.Timestamp, eventLog.LLMIntentSummary); err != nil {
 		return fmt.Errorf("failed to create deletion modification: %w", err)
 	}
 
@@ -259,7 +270,7 @@ func (p *Processor) handleDeleteBlock(ctx context.Context, event *ChangeEvent, c
 
 // handleAddImport processes an ADD_IMPORT event
 // Reference: AGENT_P2B_PROCESSOR.md - Import dependency tracking
-func (p *Processor) handleAddImport(ctx context.Context, event *ChangeEvent, commit CommitData, state *StateTracker, repoID int64) error {
+func (p *Processor) handleAddImport(ctx context.Context, event *ChangeEvent, eventLog *CommitChangeEventLog, commit CommitData, state *StateTracker, repoID int64) error {
 	// For now, we skip import tracking as it requires more context
 	// This would need to resolve dependency_path to actual code blocks
 	log.Printf("INFO: ADD_IMPORT event (not yet implemented): %s imports %s", event.TargetFile, event.DependencyPath)
@@ -268,7 +279,7 @@ func (p *Processor) handleAddImport(ctx context.Context, event *ChangeEvent, com
 
 // handleRemoveImport processes a REMOVE_IMPORT event
 // Reference: AGENT_P2B_PROCESSOR.md - Import dependency tracking
-func (p *Processor) handleRemoveImport(ctx context.Context, event *ChangeEvent, commit CommitData, state *StateTracker, repoID int64) error {
+func (p *Processor) handleRemoveImport(ctx context.Context, event *ChangeEvent, eventLog *CommitChangeEventLog, commit CommitData, state *StateTracker, repoID int64) error {
 	// For now, we skip import tracking as it requires more context
 	log.Printf("INFO: REMOVE_IMPORT event (not yet implemented): %s removes import %s", event.TargetFile, event.DependencyPath)
 	return nil

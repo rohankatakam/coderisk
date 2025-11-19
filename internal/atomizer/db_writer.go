@@ -65,33 +65,82 @@ func (w *DBWriter) CreateCodeBlock(ctx context.Context, event *ChangeEvent, comm
 	return blockID, nil
 }
 
-// CreateModification records a modification event for a code block
-// Reference: migrations/001_code_block_schema.sql - code_block_modifications table
-func (w *DBWriter) CreateModification(ctx context.Context, blockID int64, repoID int64, commitSHA, authorEmail string, timestamp time.Time, modType string) error {
-	// Parse additions/deletions from old_version and new_version if available
-	additions := 0
-	deletions := 0
+// CreateModification records a change event to code_block_changes table
+// Reference: DATA_SCHEMA_REFERENCE.md lines 282-301 - code_block_changes table schema
+// Reference: AGENT_P2B_PROCESSOR.md - Change event tracking
+func (w *DBWriter) CreateModification(ctx context.Context, blockID int64, repoID int64, event *ChangeEvent, commitSHA, authorEmail string, timestamp time.Time, changeSummary string) error {
+	// Calculate lines added/deleted from old_version and new_version
+	linesAdded := 0
+	linesDeleted := 0
+
+	// TODO: Parse old_version and new_version to calculate line changes
+	// For now, use basic heuristics
+	if event.NewVersion != "" && event.OldVersion != "" {
+		oldLines := strings.Count(event.OldVersion, "\n") + 1
+		newLines := strings.Count(event.NewVersion, "\n") + 1
+		if newLines > oldLines {
+			linesAdded = newLines - oldLines
+		} else {
+			linesDeleted = oldLines - newLines
+		}
+	}
+
+	// canonical_file_path = commit_time_path for now (will be resolved by identity mapper later)
+	canonicalFilePath := event.TargetFile
+	commitTimePath := event.TargetFile
+
+	// Convert behavior to change_type per DATA_SCHEMA_REFERENCE.md
+	changeType := ""
+	switch event.Behavior {
+	case "CREATE_BLOCK":
+		changeType = "created"
+	case "MODIFY_BLOCK":
+		changeType = "modified"
+	case "DELETE_BLOCK":
+		changeType = "deleted"
+	case "RENAME_BLOCK":
+		changeType = "renamed"
+	default:
+		changeType = "modified" // fallback
+	}
 
 	query := `
-		INSERT INTO code_block_modifications (
-			code_block_id, commit_sha, developer_email,
-			change_type, modified_at, additions, deletions, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-		ON CONFLICT (code_block_id, commit_sha) DO NOTHING
+		INSERT INTO code_block_changes (
+			repo_id, commit_sha, block_id,
+			canonical_file_path, commit_time_path,
+			block_type, block_name, change_type,
+			old_name, lines_added, lines_deleted,
+			complexity_delta, change_summary, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+		ON CONFLICT (repo_id, commit_sha, COALESCE(block_id, 0)) DO UPDATE SET
+			canonical_file_path = EXCLUDED.canonical_file_path,
+			commit_time_path = EXCLUDED.commit_time_path,
+			block_type = EXCLUDED.block_type,
+			block_name = EXCLUDED.block_name,
+			change_type = EXCLUDED.change_type,
+			lines_added = EXCLUDED.lines_added,
+			lines_deleted = EXCLUDED.lines_deleted,
+			change_summary = EXCLUDED.change_summary
 	`
 
 	_, err := w.db.ExecContext(ctx, query,
-		blockID,
+		repoID,
 		commitSHA,
-		authorEmail,
-		modType,
-		timestamp,
-		additions,
-		deletions,
+		blockID,
+		canonicalFilePath,
+		commitTimePath,
+		event.BlockType,
+		event.TargetBlockName,
+		changeType, // converted from CREATE_BLOCK -> created, etc.
+		nil,        // old_name (for renames - not yet implemented)
+		linesAdded,
+		linesDeleted,
+		0,              // complexity_delta (not yet calculated)
+		changeSummary,  // LLM summary of the change
 	)
 
 	if err != nil {
-		return fmt.Errorf("failed to create modification for block %d: %w", blockID, err)
+		return fmt.Errorf("failed to create change event for block %d: %w", blockID, err)
 	}
 
 	return nil
@@ -234,4 +283,31 @@ func detectLanguage(filePath string) string {
 	}
 
 	return "unknown"
+}
+
+// MarkCommitAtomized updates the atomized_at timestamp for a commit
+// This enables idempotency - the commit won't be reprocessed on subsequent runs
+// Reference: Migration 009 - Idempotency tracking
+func (w *DBWriter) MarkCommitAtomized(ctx context.Context, commitSHA string, repoID int64) error {
+	query := `
+		UPDATE github_commits
+		SET atomized_at = NOW()
+		WHERE repo_id = $1 AND sha = $2
+	`
+
+	result, err := w.db.ExecContext(ctx, query, repoID, commitSHA)
+	if err != nil {
+		return fmt.Errorf("failed to update atomized_at for commit %s: %w", commitSHA, err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("commit %s not found in repo %d", commitSHA, repoID)
+	}
+
+	return nil
 }
