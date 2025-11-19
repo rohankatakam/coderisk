@@ -234,6 +234,34 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 			return linksCreated, fmt.Errorf("failed to insert incident link: %w", err)
 		}
 
+		// Create FIXED_BY_BLOCK edge in Neo4j
+		// Reference: DATA_SCHEMA_REFERENCE.md line 940 - Create FIXED_BY_BLOCK edges
+		// Note: Issue nodes use 'number' property, CodeBlock nodes use 'db_id' for PostgreSQL ID
+		if t.neo4j != nil {
+			neo4jQuery := `
+				MATCH (i:Issue {number: $issueNumber, repo_id: $repoID})
+				MATCH (b:CodeBlock {db_id: $blockID, repo_id: $repoID})
+				MERGE (i)-[r:FIXED_BY_BLOCK]->(b)
+				SET r.confidence = $confidence,
+				    r.commit_sha = $commitSHA,
+				    r.incident_date = datetime($incidentDate),
+				    r.created_at = datetime()
+			`
+			params := map[string]interface{}{
+				"issueNumber":  issueNumber,
+				"blockID":      codeBlockID,
+				"repoID":       t.repoID,
+				"confidence":   confidence,
+				"commitSHA":    fixCommitSHA,
+				"incidentDate": issueCreatedAt.Format(time.RFC3339),
+			}
+			queries := []graph.QueryWithParams{{Query: neo4jQuery, Params: params}}
+			if err := t.neo4j.ExecuteBatchWithParams(ctx, queries); err != nil {
+				log.Printf("    ⚠️  Warning: Failed to create FIXED_BY_BLOCK edge for issue %d -> block %d: %v", issueID, codeBlockID, err)
+				// Continue processing - Neo4j failure shouldn't block PostgreSQL updates
+			}
+		}
+
 		linksCreated++
 
 		// Log progress every batchSize links
@@ -250,19 +278,26 @@ func (t *TemporalCalculator) LinkIssuesViaCommits(ctx context.Context) (int, err
 	return linksCreated, nil
 }
 
-// CalculateIncidentCounts updates the incident_count field for all code blocks
+// CalculateIncidentCounts updates the incident_count and last_incident_date fields for all code blocks
 // Reference: AGENT-P3C §2 - Count Incidents Per Block
+// Reference: DATA_SCHEMA_REFERENCE.md line 932-933 - Populate incident_count and last_incident_date
 func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, error) {
-	log.Printf("  🔢 Calculating incident counts for all code blocks...")
+	log.Printf("  🔢 Calculating incident counts and last incident dates for all code blocks...")
 
-	// Update incident counts for blocks with incidents
+	// Update incident counts AND last_incident_date for blocks with incidents
 	updateQuery := `
 		UPDATE code_blocks cb
-		SET incident_count = (
-			SELECT COUNT(*)
-			FROM code_block_incidents cbi
-			WHERE cbi.code_block_id = cb.id
-		)
+		SET
+			incident_count = (
+				SELECT COUNT(*)
+				FROM code_block_incidents cbi
+				WHERE cbi.code_block_id = cb.id
+			),
+			last_incident_date = (
+				SELECT MAX(incident_date)
+				FROM code_block_incidents cbi
+				WHERE cbi.code_block_id = cb.id
+			)
 		WHERE cb.repo_id = $1
 		  AND EXISTS (
 			SELECT 1
@@ -281,9 +316,9 @@ func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, 
 		return 0, fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
-	log.Printf("    → Updated %d blocks with incident counts", blocksUpdated)
+	log.Printf("    → Updated %d blocks with incident counts and last incident dates", blocksUpdated)
 
-	// Set zero incidents for blocks without incidents
+	// Set zero incidents for blocks without incidents (last_incident_date remains NULL)
 	zeroQuery := `
 		UPDATE code_blocks
 		SET incident_count = 0
@@ -308,6 +343,30 @@ func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, 
 
 	log.Printf("    → Set incident_count=0 for %d blocks without incidents", zeroBlocks)
 	log.Printf("  ✓ Total blocks updated: %d", blocksUpdated+zeroBlocks)
+
+	// Sync incident_count and last_incident_date to Neo4j CodeBlock nodes
+	// Reference: DATA_SCHEMA_REFERENCE.md line 938-939 - Add incident_count property to Neo4j
+	if t.neo4j != nil {
+		log.Printf("  🔄 Syncing incident counts to Neo4j...")
+		neo4jQuery := `
+			MATCH (b:CodeBlock {repo_id: $repoID})
+			WITH b
+			MATCH (i:Issue)-[:FIXED_BY_BLOCK]->(b)
+			WITH b, count(i) as incident_count, max(i.created_at) as last_incident_date
+			SET b.incident_count = incident_count,
+			    b.last_incident_date = last_incident_date
+			RETURN count(b) as updated_count
+		`
+		params := map[string]interface{}{
+			"repoID": t.repoID,
+		}
+		queries := []graph.QueryWithParams{{Query: neo4jQuery, Params: params}}
+		if err := t.neo4j.ExecuteBatchWithParams(ctx, queries); err != nil {
+			log.Printf("    ⚠️  Warning: Failed to sync incident counts to Neo4j: %v", err)
+		} else {
+			log.Printf("    → Synced incident counts to Neo4j CodeBlock nodes")
+		}
+	}
 
 	return int(blocksUpdated + zeroBlocks), nil
 }
@@ -420,13 +479,44 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context) (int
 			continue
 		}
 
-		// Store summary in a new field (we'll need to add this to the schema if it doesn't exist)
-		// For now, we'll just log it
-		log.Printf("    ✓ Generated summary for %s (%s): %s", blockName, filePath, summary[:min(80, len(summary))])
+		// Store temporal_summary in code_blocks table (PostgreSQL)
+		// Reference: DATA_SCHEMA_REFERENCE.md line 934 - Populate temporal_summary
+		updateSummaryQuery := `
+			UPDATE code_blocks
+			SET temporal_summary = $1
+			WHERE id = $2
+		`
+		_, err = t.db.ExecContext(ctx, updateSummaryQuery, summary, blockID)
+		if err != nil {
+			log.Printf("    ⚠️  Warning: Failed to store summary for block %d: %v", blockID, err)
+			continue
+		}
+
+		// Sync temporal_summary to Neo4j CodeBlock node
+		// Reference: DATA_SCHEMA_REFERENCE.md line 939 - Add temporal_summary property to Neo4j
+		// Note: CodeBlock nodes use 'db_id' for PostgreSQL ID
+		if t.neo4j != nil {
+			neo4jQuery := `
+				MATCH (b:CodeBlock {db_id: $blockID, repo_id: $repoID})
+				SET b.temporal_summary = $summary
+			`
+			params := map[string]interface{}{
+				"blockID": blockID,
+				"repoID":  t.repoID,
+				"summary": summary,
+			}
+			queries := []graph.QueryWithParams{{Query: neo4jQuery, Params: params}}
+			if err := t.neo4j.ExecuteBatchWithParams(ctx, queries); err != nil {
+				log.Printf("    ⚠️  Warning: Failed to sync summary to Neo4j for block %d: %v", blockID, err)
+				// Continue processing - Neo4j failure shouldn't block PostgreSQL updates
+			}
+		}
+
+		log.Printf("    ✓ Generated and stored summary for %s (%s): %s", blockName, filePath, summary[:min(80, len(summary))])
 		summariesGenerated++
 
 		if summariesGenerated%10 == 0 {
-			log.Printf("      → Progress: %d/%d summaries generated", summariesGenerated, blocksToProcess)
+			log.Printf("      → Progress: %d/%d summaries generated and stored", summariesGenerated, blocksToProcess)
 		}
 	}
 

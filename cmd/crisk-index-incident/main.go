@@ -12,6 +12,7 @@ import (
 
 	_ "github.com/lib/pq"
 	"github.com/rohankatakam/coderisk/internal/config"
+	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/rohankatakam/coderisk/internal/llm"
 	"github.com/rohankatakam/coderisk/internal/risk"
 	"github.com/spf13/cobra"
@@ -115,8 +116,23 @@ func runIndexIncident(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  ✓ Connected to PostgreSQL\n\n")
 
+	// Connect to Neo4j for graph updates
+	fmt.Printf("[2/5] Connecting to Neo4j...\n")
+	neo4jBackend, err := graph.NewNeo4jBackend(
+		ctx,
+		cfg.Neo4j.URI,
+		cfg.Neo4j.User,
+		cfg.Neo4j.Password,
+		cfg.Neo4j.Database,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Neo4j: %w", err)
+	}
+	defer neo4jBackend.Close(ctx)
+	fmt.Printf("  ✓ Connected to Neo4j\n\n")
+
 	// Create LLM client for summarization
-	fmt.Printf("[2/4] Initializing LLM client...\n")
+	fmt.Printf("[3/5] Initializing LLM client...\n")
 	llmClient, err := llm.NewClient(ctx, cfg)
 	if err != nil {
 		fmt.Printf("  ⚠️  LLM client creation failed: %v\n", err)
@@ -127,35 +143,36 @@ func runIndexIncident(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  ⚠️  LLM client not enabled, summaries will be skipped\n\n")
 	}
 
-	// Create temporal calculator
-	calc := risk.NewTemporalCalculator(db, nil, llmClient, repoID)
+	// Create temporal calculator with Neo4j support
+	calc := risk.NewTemporalCalculator(db, neo4jBackend, llmClient, repoID)
 
 	// Step 1: Link incidents to blocks via commits
-	fmt.Printf("[3/4] Linking incidents to CodeBlocks...\n")
+	fmt.Printf("[4/5] Linking incidents to CodeBlocks...\n")
 	fmt.Printf("  Strategy: Issue → (closed by) → Commit → (modified) → CodeBlock\n")
+	fmt.Printf("  Creating FIXED_BY_BLOCK edges in Neo4j graph\n")
 
 	linkedCount, err := calc.LinkIssuesViaCommits(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to link incidents: %w", err)
 	}
-	fmt.Printf("  ✓ Created %d incident links\n\n", linkedCount)
+	fmt.Printf("  ✓ Created %d incident links (PostgreSQL + Neo4j)\n\n", linkedCount)
 
-	// Step 2: Calculate incident counts
-	fmt.Printf("  Calculating incident counts for all blocks...\n")
+	// Step 2: Calculate incident counts and sync to Neo4j
+	fmt.Printf("  Calculating incident counts and syncing to Neo4j...\n")
 	blocksUpdated, err := calc.CalculateIncidentCounts(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to calculate counts: %w", err)
 	}
-	fmt.Printf("  ✓ Updated %d blocks with incident counts\n\n", blocksUpdated)
+	fmt.Printf("  ✓ Updated %d blocks with incident counts (PostgreSQL + Neo4j)\n\n", blocksUpdated)
 
-	// Step 3: Generate temporal summaries using LLM
-	fmt.Printf("[4/4] Generating temporal summaries...\n")
+	// Step 3: Generate temporal summaries using LLM and sync to Neo4j
+	fmt.Printf("[5/5] Generating temporal summaries...\n")
 	if llmClient != nil && llmClient.IsEnabled() {
 		summaryCount, err := calc.GenerateTemporalSummaries(ctx)
 		if err != nil {
 			fmt.Printf("  ⚠️  Warning: Failed to generate summaries: %v\n", err)
 		} else {
-			fmt.Printf("  ✓ Generated %d temporal summaries\n\n", summaryCount)
+			fmt.Printf("  ✓ Generated %d temporal summaries (PostgreSQL + Neo4j)\n\n", summaryCount)
 		}
 	} else {
 		fmt.Printf("  ⚠️  Skipping temporal summaries (LLM not enabled)\n\n")
