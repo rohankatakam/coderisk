@@ -222,21 +222,105 @@ func syncIncremental(ctx context.Context, db *sql.DB, driver neo4j.DriverWithCon
 		return 2, fmt.Errorf("failed to load config for Neo4j database: %w", err)
 	}
 
-	// Sync CodeBlocks
+	// Phase 1: Sync Nodes (foundation - referenced before referencing)
+	fmt.Printf("\n📦 Phase 1: Syncing Nodes\n")
+
+	// 1.1 Developers
+	devSyncer := sync.NewDeveloperSyncer(db, driver, cfg.Neo4j.Database)
+	devsSynced, err := devSyncer.SyncMissingDevelopers(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("Developer sync failed: %w", err)
+	}
+
+	// 1.2 Commits
+	commitSyncer := sync.NewCommitSyncer(db, driver, cfg.Neo4j.Database)
+	commitsSynced, err := commitSyncer.SyncMissingCommits(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("Commit sync failed: %w", err)
+	}
+
+	// 1.3 Files
+	fileSyncer := sync.NewFileSyncer(db, driver, cfg.Neo4j.Database)
+	filesSynced, err := fileSyncer.SyncMissingFiles(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("File sync failed: %w", err)
+	}
+
+	// 1.4 Issues
+	issueSyncer := sync.NewIssueSyncer(db, driver, cfg.Neo4j.Database)
+	issuesSynced, err := issueSyncer.SyncMissingIssues(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("Issue sync failed: %w", err)
+	}
+
+	// 1.5 PRs
+	prSyncer := sync.NewPRSyncer(db, driver, cfg.Neo4j.Database)
+	prsSynced, err := prSyncer.SyncMissingPRs(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("PR sync failed: %w", err)
+	}
+
+	// 1.6 CodeBlocks
 	blockSyncer := sync.NewCodeBlockSyncer(db, driver, cfg.Neo4j.Database)
 	blocksSynced, err := blockSyncer.SyncMissingBlocks(ctx, repoID)
 	if err != nil {
 		return 2, fmt.Errorf("CodeBlock sync failed: %w", err)
 	}
 
-	// Sync Commit→CodeBlock edges (MODIFIED_BLOCK, CREATED_BLOCK, DELETED_BLOCK)
-	edgeSyncer := sync.NewCommitBlockEdgeSyncer(db, driver, cfg.Neo4j.Database)
-	edgesSynced, err := edgeSyncer.SyncMissingEdges(ctx, repoID)
+	// Phase 2: Sync Edges (after all nodes exist)
+	fmt.Printf("\n🔗 Phase 2: Syncing Edges\n")
+
+	// 2.1 crisk-ingest edges (AUTHORED, MODIFIED, CREATED, MERGED_AS, REFERENCES, CLOSED_BY)
+	ingestEdgeSyncer := sync.NewIngestEdgeSyncer(db, driver, cfg.Neo4j.Database)
+	ingestEdgesSynced, err := ingestEdgeSyncer.SyncAllIngestEdges(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("crisk-ingest edge sync failed: %w", err)
+	}
+
+	// 2.2 crisk-atomize commit→block edges (MODIFIED_BLOCK, CREATED_BLOCK, DELETED_BLOCK)
+	commitBlockEdgeSyncer := sync.NewCommitBlockEdgeSyncer(db, driver, cfg.Neo4j.Database)
+	commitBlockEdgesSynced, err := commitBlockEdgeSyncer.SyncMissingEdges(ctx, repoID)
 	if err != nil {
 		return 2, fmt.Errorf("Commit→CodeBlock edge sync failed: %w", err)
 	}
 
-	// TODO: Add more syncers for other entities (Commits, Files, etc.)
+	// 2.3 crisk-atomize semantic edges (CONTAINS, RENAMED_FROM, IMPORTS_FROM)
+	atomizeEdgeSyncer := sync.NewAtomizeEdgeSyncer(db, driver, cfg.Neo4j.Database)
+	atomizeEdgesSynced, err := atomizeEdgeSyncer.SyncAllAtomizeEdges(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("crisk-atomize edge sync failed: %w", err)
+	}
+
+	// 2.4 crisk-index-incident edges (FIXED_BY_BLOCK)
+	incidentEdgeSyncer := sync.NewIncidentEdgeSyncer(db, driver, cfg.Neo4j.Database)
+	incidentEdgesSynced, err := incidentEdgeSyncer.SyncFixedByBlockEdges(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("FIXED_BY_BLOCK edge sync failed: %w", err)
+	}
+
+	// 2.5 crisk-index-coupling edges (CO_CHANGES_WITH)
+	couplingEdgeSyncer := sync.NewCouplingEdgeSyncer(db, driver, cfg.Neo4j.Database)
+	couplingEdgesSynced, err := couplingEdgeSyncer.SyncCoChangesWithEdges(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("CO_CHANGES_WITH edge sync failed: %w", err)
+	}
+
+	// Phase 3: Sync Properties (enrichment)
+	fmt.Printf("\n📊 Phase 3: Syncing Properties\n")
+
+	// 3.1 Incident properties on CodeBlock
+	incidentPropSyncer := sync.NewIncidentPropSyncer(db, driver, cfg.Neo4j.Database)
+	incidentPropsSynced, err := incidentPropSyncer.SyncIncidentProperties(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("Incident property sync failed: %w", err)
+	}
+
+	// 3.2 Ownership properties on CodeBlock
+	ownershipPropSyncer := sync.NewOwnershipPropSyncer(db, driver, cfg.Neo4j.Database)
+	ownershipPropsSynced, err := ownershipPropSyncer.SyncOwnershipProperties(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("Ownership property sync failed: %w", err)
+	}
 
 	// Run validation again to verify
 	fmt.Printf("\n📊 Validating post-sync state...\n")
@@ -248,9 +332,27 @@ func syncIncremental(ctx context.Context, db *sql.DB, driver neo4j.DriverWithCon
 	validation.LogResults(finalResults)
 
 	// Summary
+	totalNodesSynced := devsSynced + commitsSynced + filesSynced + issuesSynced + prsSynced + blocksSynced
+	totalEdgesSynced := ingestEdgesSynced + commitBlockEdgesSynced + atomizeEdgesSynced + incidentEdgesSynced + couplingEdgesSynced
+	totalPropsSynced := incidentPropsSynced + ownershipPropsSynced
+
 	fmt.Printf("\n✅ Incremental sync complete:\n")
-	fmt.Printf("   CodeBlocks synced: %d\n", blocksSynced)
-	fmt.Printf("   Commit→CodeBlock edges synced: %d\n", edgesSynced)
+	fmt.Printf("\n📦 Nodes: %d total\n", totalNodesSynced)
+	fmt.Printf("   Developers: %d\n", devsSynced)
+	fmt.Printf("   Commits: %d\n", commitsSynced)
+	fmt.Printf("   Files: %d\n", filesSynced)
+	fmt.Printf("   Issues: %d\n", issuesSynced)
+	fmt.Printf("   PRs: %d\n", prsSynced)
+	fmt.Printf("   CodeBlocks: %d\n", blocksSynced)
+	fmt.Printf("\n🔗 Edges: %d total\n", totalEdgesSynced)
+	fmt.Printf("   crisk-ingest edges: %d\n", ingestEdgesSynced)
+	fmt.Printf("   Commit→CodeBlock edges: %d\n", commitBlockEdgesSynced)
+	fmt.Printf("   crisk-atomize edges: %d\n", atomizeEdgesSynced)
+	fmt.Printf("   FIXED_BY_BLOCK edges: %d\n", incidentEdgesSynced)
+	fmt.Printf("   CO_CHANGES_WITH edges: %d\n", couplingEdgesSynced)
+	fmt.Printf("\n📊 Properties: %d blocks updated\n", totalPropsSynced)
+	fmt.Printf("   Incident properties: %d blocks\n", incidentPropsSynced)
+	fmt.Printf("   Ownership properties: %d blocks\n", ownershipPropsSynced)
 
 	// Determine exit code based on final variance
 	minVariance := 100.0

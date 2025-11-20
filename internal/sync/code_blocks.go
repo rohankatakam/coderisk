@@ -89,19 +89,20 @@ func (s *CodeBlockSyncer) SyncMissingBlocks(ctx context.Context, repoID int64) (
 			// Create CodeBlock node with MERGE (idempotent)
 			query := `
 				MERGE (cb:CodeBlock {id: $compositeID, repo_id: $repoID})
-				SET cb.file_path = $filePath,
+				SET cb.db_id = $dbID,
+				    cb.file_path = $filePath,
 				    cb.block_name = $blockName,
 				    cb.block_type = $blockType,
 				    cb.start_line = $startLine,
 				    cb.end_line = $endLine,
 				    cb.incident_count = $incidentCount,
-				    cb.last_incident_date = $lastIncidentDate
+				    cb.last_incident_date = CASE WHEN $lastIncidentDate IS NOT NULL THEN datetime($lastIncidentDate) ELSE NULL END
 				RETURN cb.id as id`
 
-			// Convert nil pointers to null for Neo4j
+			// Convert nil pointers to null for Neo4j, format timestamps as RFC3339 strings
 			var lastIncidentDate interface{}
 			if block.LastIncidentDate != nil {
-				lastIncidentDate = *block.LastIncidentDate
+				lastIncidentDate = block.LastIncidentDate.Format(time.RFC3339)
 			} else {
 				lastIncidentDate = nil
 			}
@@ -109,6 +110,7 @@ func (s *CodeBlockSyncer) SyncMissingBlocks(ctx context.Context, repoID int64) (
 			params := map[string]any{
 				"compositeID":      compositeID,
 				"repoID":           block.RepoID,
+				"dbID":             block.ID,
 				"filePath":         block.FilePath,
 				"blockName":        block.BlockName,
 				"blockType":        block.BlockType,
