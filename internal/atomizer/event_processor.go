@@ -90,6 +90,8 @@ func (p *Processor) ProcessCommitsChronologically(ctx context.Context, commits [
 					blocksModified++
 				case "DELETE_BLOCK":
 					blocksDeleted++
+				case "RENAME_BLOCK":
+					blocksModified++ // Count renames as modifications
 				case "ADD_IMPORT":
 					importsAdded++
 				case "REMOVE_IMPORT":
@@ -137,6 +139,8 @@ func (p *Processor) processEvent(ctx context.Context, event *ChangeEvent, eventL
 		return p.handleModifyBlock(ctx, event, eventLog, commit, state, repoID)
 	case "DELETE_BLOCK":
 		return p.handleDeleteBlock(ctx, event, eventLog, commit, state, repoID)
+	case "RENAME_BLOCK":
+		return p.handleRenameBlock(ctx, event, eventLog, commit, state, repoID)
 	case "ADD_IMPORT":
 		return p.handleAddImport(ctx, event, eventLog, commit, state, repoID)
 	case "REMOVE_IMPORT":
@@ -150,9 +154,9 @@ func (p *Processor) processEvent(ctx context.Context, event *ChangeEvent, eventL
 // Reference: AGENT_P2B_PROCESSOR.md - CREATE_BLOCK handling
 // Edge case: If block already exists, treat as MODIFY
 func (p *Processor) handleCreateBlock(ctx context.Context, event *ChangeEvent, eventLog *CommitChangeEventLog, commit CommitData, state *StateTracker, repoID int64) error {
-	// Check if block already exists (edge case)
+	// Check if block already exists in state (edge case)
 	if blockID, exists := state.GetBlockID(event.TargetFile, event.TargetBlockName); exists {
-		log.Printf("WARNING: CREATE_BLOCK for existing block %s:%s (treating as MODIFY)", event.TargetFile, event.TargetBlockName)
+		log.Printf("WARNING: CREATE_BLOCK for existing block %s:%s in state (treating as MODIFY)", event.TargetFile, event.TargetBlockName)
 
 		// Update existing block
 		if err := p.dbWriter.UpdateCodeBlock(ctx, blockID, commit.SHA, commit.AuthorEmail, commit.Timestamp); err != nil {
@@ -166,6 +170,32 @@ func (p *Processor) handleCreateBlock(ctx context.Context, event *ChangeEvent, e
 
 		// Create MODIFIED_BLOCK edge in Neo4j
 		if err := p.graphWriter.CreateModifiedBlockEdge(ctx, commit.SHA, blockID, repoID, commit.Timestamp); err != nil {
+			log.Printf("WARNING: Failed to create MODIFIED_BLOCK edge: %v", err)
+		}
+
+		return nil
+	}
+
+	// Check if block already exists in database (for idempotency)
+	dbBlockID, err := p.dbWriter.FindCodeBlock(ctx, repoID, event.TargetFile, event.TargetBlockName)
+	if err == nil && dbBlockID > 0 {
+		log.Printf("WARNING: CREATE_BLOCK for existing block %s:%s in database (treating as MODIFY)", event.TargetFile, event.TargetBlockName)
+
+		// Add to state tracker
+		state.SetBlockID(event.TargetFile, event.TargetBlockName, dbBlockID)
+
+		// Update existing block
+		if err := p.dbWriter.UpdateCodeBlock(ctx, dbBlockID, commit.SHA, commit.AuthorEmail, commit.Timestamp); err != nil {
+			return fmt.Errorf("failed to update existing block: %w", err)
+		}
+
+		// Create change record using LLM summary
+		if err := p.dbWriter.CreateModification(ctx, dbBlockID, repoID, event, commit.SHA, commit.AuthorEmail, commit.Timestamp, eventLog.LLMIntentSummary); err != nil {
+			return fmt.Errorf("failed to create modification: %w", err)
+		}
+
+		// Create MODIFIED_BLOCK edge in Neo4j
+		if err := p.graphWriter.CreateModifiedBlockEdge(ctx, commit.SHA, dbBlockID, repoID, commit.Timestamp); err != nil {
 			log.Printf("WARNING: Failed to create MODIFIED_BLOCK edge: %v", err)
 		}
 
@@ -232,6 +262,141 @@ func (p *Processor) handleModifyBlock(ctx context.Context, event *ChangeEvent, e
 	if err := p.graphWriter.CreateModifiedBlockEdge(ctx, commit.SHA, blockID, repoID, commit.Timestamp); err != nil {
 		log.Printf("WARNING: Failed to create MODIFIED_BLOCK edge: %v", err)
 	}
+
+	return nil
+}
+
+// handleRenameBlock processes a RENAME_BLOCK event
+// Tracks function renames in function_identity_map for git log --follow functionality
+func (p *Processor) handleRenameBlock(ctx context.Context, event *ChangeEvent, eventLog *CommitChangeEventLog, commit CommitData, state *StateTracker, repoID int64) error {
+	// Validate event
+	if err := event.ValidateEvent(); err != nil {
+		return err
+	}
+
+	// Look up old block using state tracker first
+	oldBlockID, exists := state.GetBlockID(event.TargetFile, event.OldBlockName)
+
+	if !exists {
+		// Try database lookup as fallback
+		query := `
+			SELECT id, signature
+			FROM code_blocks
+			WHERE repo_id = $1
+			  AND canonical_file_path = $2
+			  AND block_name = $3
+			  AND current_status = 'active'
+		`
+
+		var oldSignature string
+		err := p.db.QueryRowContext(ctx, query,
+			repoID,
+			event.TargetFile,
+			event.OldBlockName,
+		).Scan(&oldBlockID, &oldSignature)
+
+		if err == sql.ErrNoRows {
+			// Old block not found - fallback to DELETE + CREATE
+			log.Printf("⚠️  WARNING: Rename target not found, treating as DELETE+CREATE - old_name: %s, new_name: %s, file: %s",
+				event.OldBlockName, event.TargetBlockName, event.TargetFile)
+
+			// Delete old (if exists in state)
+			deleteEvent := &ChangeEvent{
+				Behavior:        "DELETE_BLOCK",
+				TargetFile:      event.TargetFile,
+				TargetBlockName: event.OldBlockName,
+			}
+			_ = p.handleDeleteBlock(ctx, deleteEvent, eventLog, commit, state, repoID)
+
+			// Create new
+			createEvent := &ChangeEvent{
+				Behavior:        "CREATE_BLOCK",
+				TargetFile:      event.TargetFile,
+				TargetBlockName: event.TargetBlockName,
+				Signature:       event.Signature,
+				BlockType:       event.BlockType,
+				NewVersion:      event.NewVersion,
+			}
+			return p.handleCreateBlock(ctx, createEvent, eventLog, commit, state, repoID)
+		} else if err != nil {
+			return fmt.Errorf("failed to look up old block: %w", err)
+		}
+	}
+
+	// Normalize new signature
+	normalizedSig := NormalizeSignature(event.Signature)
+
+	// Update code_blocks table
+	updateQuery := `
+		UPDATE code_blocks
+		SET block_name = $1,
+			signature = $2,
+			historical_block_names = COALESCE(historical_block_names, '[]'::jsonb) || jsonb_build_array($3),
+			last_modified_commit = $4,
+			updated_at = NOW()
+		WHERE id = $5
+	`
+
+	_, err := p.db.ExecContext(ctx, updateQuery,
+		event.TargetBlockName,
+		normalizedSig,
+		event.OldBlockName,
+		commit.SHA,
+		oldBlockID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update block: %w", err)
+	}
+
+	// Update state tracker with new name
+	state.DeleteBlock(event.TargetFile, event.OldBlockName)
+	state.SetBlockID(event.TargetFile, event.TargetBlockName, oldBlockID)
+
+	// Insert into function_identity_map
+	identityQuery := `
+		INSERT INTO function_identity_map
+			(repo_id, block_id, historical_name, signature, commit_sha, rename_date)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+
+	// Use commit timestamp as rename_date
+	_, err = p.db.ExecContext(ctx, identityQuery,
+		repoID,
+		oldBlockID,
+		event.OldBlockName,
+		event.Signature, // Use original signature (not normalized) for historical tracking
+		commit.SHA,
+		commit.Timestamp,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert identity map: %w", err)
+	}
+
+	// Create code_block_changes entry
+	changeQuery := `
+		INSERT INTO code_block_changes
+			(block_id, commit_sha, change_type, old_version, new_version)
+		VALUES ($1, $2, 'renamed', $3, $4)
+	`
+
+	_, err = p.db.ExecContext(ctx, changeQuery,
+		oldBlockID,
+		commit.SHA,
+		event.OldVersion,
+		event.NewVersion,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create change entry: %w", err)
+	}
+
+	// Create RENAMED_BLOCK edge in Neo4j (if graphWriter supports it)
+	// Note: This may need to be implemented in graphWriter
+	if err := p.graphWriter.CreateModifiedBlockEdge(ctx, commit.SHA, oldBlockID, repoID, commit.Timestamp); err != nil {
+		log.Printf("⚠️  WARNING: Failed to create RENAMED_BLOCK edge: %v", err)
+	}
+
+	log.Printf("✓ Function renamed: %s → %s (block_id: %d, commit: %s)",
+		event.OldBlockName, event.TargetBlockName, oldBlockID, commit.SHA[:8])
 
 	return nil
 }

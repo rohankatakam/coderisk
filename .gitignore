@@ -115,6 +115,7 @@ service-account.json
 *.swp
 *.orig
 *~
+backups/
 
 # Archives (unless specifically needed)
 *.tar

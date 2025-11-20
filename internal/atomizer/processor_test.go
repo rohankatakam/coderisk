@@ -170,8 +170,14 @@ func TestDBWriter(t *testing.T) {
 	} else {
 		assert.Greater(t, blockID, int64(0))
 
-		// Test creating a modification
-		err = writer.CreateModification(ctx, blockID, repoID, commitSHA, authorEmail, timestamp, "create")
+		// Test creating a modification (change event)
+		event := &ChangeEvent{
+			Behavior:        "CREATE_BLOCK",
+			TargetFile:      "test.go",
+			TargetBlockName: "TestFunc",
+			BlockType:       "function",
+		}
+		err = writer.CreateModification(ctx, blockID, repoID, event, commitSHA, authorEmail, timestamp, "Test commit")
 		assert.NoError(t, err)
 	}
 }

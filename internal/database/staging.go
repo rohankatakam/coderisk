@@ -652,7 +652,7 @@ func (c *StagingClient) StoreTimelineEvent(ctx context.Context, event TimelineEv
 			actor_login, actor_id, raw_data, fetched_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
-		ON CONFLICT (issue_id, event_type, created_at, source_sha, source_number) DO NOTHING
+		ON CONFLICT (issue_id, event_type, created_at, COALESCE(source_sha, ''), COALESCE(source_number, 0)) DO NOTHING
 	`
 
 	_, err := c.db.ExecContext(ctx, query,
@@ -747,7 +747,7 @@ func (c *StagingClient) StoreIssueCommitRefs(ctx context.Context, refs []IssueCo
 			evidence, extracted_at, created_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-		ON CONFLICT (repo_id, issue_number, commit_sha, pr_number, detection_method)
+		ON CONFLICT (repo_id, issue_number, COALESCE(commit_sha, ''), COALESCE(pr_number, 0), COALESCE(detection_method, ''))
 		DO UPDATE SET
 			confidence = GREATEST(github_issue_commit_refs.confidence, EXCLUDED.confidence),
 			evidence = EXCLUDED.evidence,

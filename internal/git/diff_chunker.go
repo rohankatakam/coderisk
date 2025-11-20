@@ -6,15 +6,38 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
+)
+
+// Language-specific function detection patterns
+var functionPatterns = map[string]*regexp.Regexp{
+	"go":         regexp.MustCompile(`^func\s+(\w+|\(\w+\s+\*?\w+\))\s+\w+`),
+	"python":     regexp.MustCompile(`^def\s+\w+\s*\(`),
+	"javascript": regexp.MustCompile(`^(function\s+\w+|const\s+\w+\s*=\s*(function|\())`),
+	"typescript": regexp.MustCompile(`^(function\s+\w+|const\s+\w+\s*=\s*(function|\()|export\s+(async\s+)?function)`),
+	"java":       regexp.MustCompile(`^\s*(public|private|protected|static|final)+.*\{$`),
+	"ruby":       regexp.MustCompile(`^\s*def\s+\w+`),
+	"rust":       regexp.MustCompile(`^\s*(pub\s+)?fn\s+\w+`),
+	"c":          regexp.MustCompile(`^\w+\s+\w+\s*\([^\)]*\)\s*\{$`),
+	"cpp":        regexp.MustCompile(`^\w+\s+\w+\s*\([^\)]*\)\s*\{$`),
+}
+
+const (
+	maxChunkSize         = 100 * 1024 // 100KB per chunk
+	maxChunksPerFile     = 10         // Budget per file
+	defaultLinesPerChunk = 3000       // Fallback line-based chunking
 )
 
 // DiffChunk represents a logical chunk from git diff output
 type DiffChunk struct {
-	FilePath  string // File path (canonical)
-	StartLine int    // Starting line number in new version
-	EndLine   int    // Ending line number in new version
-	Content   string // Raw diff content including @@ headers
-	SizeBytes int    // Size in bytes
+	FilePath   string   // File path (canonical)
+	StartLine  int      // Starting line number in new version
+	EndLine    int      // Ending line number in new version
+	Content    string   // Raw diff content including @@ headers
+	SizeBytes  int      // Size in bytes
+	Lines      []string // Lines of content (for new files)
+	FileHeader string   // For context (synthesized @@ headers)
 }
 
 // DiffChunker extracts manageable chunks from git diff output
@@ -376,4 +399,125 @@ func (e *DiffExcerpt) FormatExcerpt() string {
 		e.TotalLines, len(e.FirstLines)+len(e.MiddleLines)+len(e.LastLines)))
 
 	return b.String()
+}
+
+// ExtractChunksForNewFile splits ADD files by function boundaries
+func ExtractChunksForNewFile(fileContent, language string, maxChunks int) []DiffChunk {
+	lines := strings.Split(fileContent, "\n")
+
+	// Get language-specific pattern
+	pattern, ok := functionPatterns[strings.ToLower(language)]
+	if !ok {
+		// Fallback to line-based splitting
+		log.Infof("Using line-based chunking for language: %s", language)
+		return splitByLines(lines, defaultLinesPerChunk, maxChunks)
+	}
+
+	// Find function boundaries
+	functionStarts := []int{0} // Start with beginning of file
+
+	for i, line := range lines {
+		// Skip leading whitespace for matching (but preserve in output)
+		trimmed := strings.TrimLeft(line, " \t")
+
+		// Match top-level functions only (no leading whitespace)
+		if line == trimmed && pattern.MatchString(trimmed) {
+			functionStarts = append(functionStarts, i)
+		}
+	}
+
+	// Add end of file marker
+	functionStarts = append(functionStarts, len(lines))
+
+	// Group lines into function blocks
+	var chunks []DiffChunk
+	currentChunk := DiffChunk{Lines: []string{}}
+	currentSize := 0
+
+	for i := 0; i < len(functionStarts)-1; i++ {
+		start := functionStarts[i]
+		end := functionStarts[i+1]
+
+		functionLines := lines[start:end]
+		functionSize := 0
+		for _, line := range functionLines {
+			functionSize += len(line)
+		}
+
+		// If adding this function exceeds chunk size, flush current chunk
+		if currentSize+functionSize > maxChunkSize && len(currentChunk.Lines) > 0 {
+			currentChunk.EndLine = start - 1
+			chunks = append(chunks, currentChunk)
+			currentChunk = DiffChunk{Lines: []string{}, StartLine: start}
+			currentSize = 0
+		}
+
+		// If function itself exceeds max chunk size, split it
+		if functionSize > maxChunkSize {
+			// Split large function by lines
+			subChunks := splitByLines(functionLines, defaultLinesPerChunk, -1)
+			for _, subChunk := range subChunks {
+				subChunk.StartLine += start
+				subChunk.EndLine += start
+				chunks = append(chunks, subChunk)
+			}
+			continue
+		}
+
+		// Add function to current chunk
+		currentChunk.Lines = append(currentChunk.Lines, functionLines...)
+		currentSize += functionSize
+
+		// If we haven't set start line yet, set it now
+		if currentChunk.StartLine == 0 {
+			currentChunk.StartLine = start
+		}
+	}
+
+	// Flush last chunk
+	if len(currentChunk.Lines) > 0 {
+		currentChunk.EndLine = len(lines) - 1
+		chunks = append(chunks, currentChunk)
+	}
+
+	// Enforce max chunks budget
+	if maxChunks > 0 && len(chunks) > maxChunks {
+		log.Warnf("File truncated: %d chunks → %d (max budget)", len(chunks), maxChunks)
+		chunks = chunks[:maxChunks]
+	}
+
+	// Add synthesized @@ headers for LLM context
+	for i := range chunks {
+		chunks[i].FileHeader = fmt.Sprintf("@@ -%d,%d +%d,%d @@",
+			chunks[i].StartLine, len(chunks[i].Lines),
+			chunks[i].StartLine, len(chunks[i].Lines))
+	}
+
+	return chunks
+}
+
+// splitByLines is fallback chunking for unknown languages
+func splitByLines(lines []string, linesPerChunk int, maxChunks int) []DiffChunk {
+	var chunks []DiffChunk
+
+	for i := 0; i < len(lines); i += linesPerChunk {
+		end := i + linesPerChunk
+		if end > len(lines) {
+			end = len(lines)
+		}
+
+		chunk := DiffChunk{
+			Lines:     lines[i:end],
+			StartLine: i,
+			EndLine:   end - 1,
+		}
+		chunks = append(chunks, chunk)
+
+		// Check max chunks limit
+		if maxChunks > 0 && len(chunks) >= maxChunks {
+			break
+		}
+	}
+
+	return chunks
 }

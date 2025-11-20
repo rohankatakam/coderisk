@@ -27,15 +27,19 @@ func NewDBWriter(db *sql.DB) *DBWriter {
 func (w *DBWriter) CreateCodeBlock(ctx context.Context, event *ChangeEvent, commitSHA, authorEmail string, timestamp time.Time, repoID int64) (int64, error) {
 	// Use TargetFile as both canonical_file_path and path_at_creation
 	// canonical_file_path will be updated by file identity resolution later
+
+	// Normalize signature for consistent storage
+	normalizedSig := NormalizeSignature(event.Signature)
+
 	query := `
 		INSERT INTO code_blocks (
 			repo_id, file_path, block_name, block_type,
 			language, first_seen_sha, current_status,
 			canonical_file_path, path_at_creation,
-			start_line, end_line,
+			start_line, end_line, signature,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, $10, NOW(), NOW())
-		ON CONFLICT (repo_id, canonical_file_path, block_name)
+		) VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, $10, $11, NOW(), NOW())
+		ON CONFLICT (repo_id, canonical_file_path, block_name, signature)
 		DO UPDATE SET
 			updated_at = NOW(),
 			file_path = EXCLUDED.file_path,
@@ -56,6 +60,7 @@ func (w *DBWriter) CreateCodeBlock(ctx context.Context, event *ChangeEvent, comm
 		event.TargetFile,        // path_at_creation
 		event.StartLine,         // start_line
 		event.EndLine,           // end_line
+		normalizedSig,           // signature
 	).Scan(&blockID)
 
 	if err != nil {
@@ -261,20 +266,24 @@ func detectLanguage(filePath string) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
 
 	languageMap := map[string]string{
-		".go":   "go",
-		".py":   "python",
-		".js":   "javascript",
-		".ts":   "typescript",
-		".tsx":  "typescript",
-		".jsx":  "javascript",
-		".java": "java",
-		".c":    "c",
-		".cpp":  "cpp",
-		".cs":   "csharp",
-		".rb":   "ruby",
-		".php":  "php",
-		".rs":   "rust",
-		".kt":   "kotlin",
+		".go":    "go",
+		".py":    "python",
+		".js":    "javascript",
+		".ts":    "typescript",
+		".tsx":   "typescript",
+		".jsx":   "javascript",
+		".java":  "java",
+		".c":     "c",
+		".cpp":   "cpp",
+		".cc":    "cpp",
+		".cxx":   "cpp",
+		".h":     "c",
+		".hpp":   "cpp",
+		".cs":    "csharp",
+		".rb":    "ruby",
+		".php":   "php",
+		".rs":    "rust",
+		".kt":    "kotlin",
 		".swift": "swift",
 	}
 
@@ -283,6 +292,30 @@ func detectLanguage(filePath string) string {
 	}
 
 	return "unknown"
+}
+
+// FindCodeBlock searches for an existing code block in the database
+// Returns block ID if found, 0 if not found, error on database failure
+// Used for idempotent CREATE_BLOCK handling
+func (w *DBWriter) FindCodeBlock(ctx context.Context, repoID int64, filePath, blockName string) (int64, error) {
+	query := `
+		SELECT id
+		FROM code_blocks
+		WHERE repo_id = $1 AND file_path = $2 AND block_name = $3
+		LIMIT 1
+	`
+
+	var blockID int64
+	err := w.db.QueryRowContext(ctx, query, repoID, filePath, blockName).Scan(&blockID)
+	if err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			// Not found - this is OK, return 0
+			return 0, nil
+		}
+		return 0, fmt.Errorf("failed to query code block: %w", err)
+	}
+
+	return blockID, nil
 }
 
 // MarkCommitAtomized updates the atomized_at timestamp for a commit

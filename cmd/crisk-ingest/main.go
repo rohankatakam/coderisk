@@ -11,6 +11,7 @@ import (
 
 	"github.com/rohankatakam/coderisk/internal/config"
 	"github.com/rohankatakam/coderisk/internal/database"
+	gitops "github.com/rohankatakam/coderisk/internal/git"
 	"github.com/rohankatakam/coderisk/internal/graph"
 	"github.com/spf13/cobra"
 )
@@ -98,7 +99,7 @@ func runIngest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Connect to PostgreSQL
-	fmt.Printf("[1/4] Connecting to databases...\n")
+	fmt.Printf("[1/6] Connecting to databases...\n")
 	stagingDB, err := database.NewStagingClient(
 		ctx,
 		cfg.Storage.PostgresHost,
@@ -129,7 +130,7 @@ func runIngest(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ✓ Connected to Neo4j\n\n")
 
 	// Verify staged data
-	fmt.Printf("[2/4] Verifying staged data...\n")
+	fmt.Printf("[2/6] Verifying staged data...\n")
 	stats, err := verifyStagedData(ctx, stagingDB, repoID)
 	if err != nil {
 		return err
@@ -152,8 +153,19 @@ func runIngest(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  Using repository path: %s\n\n", repoPath)
 
+	// Compute topological ordering BEFORE building graph
+	fmt.Printf("[3/6] Computing topological ordering...\n")
+	topoStart := time.Now()
+
+	if err := computeTopologicalOrdering(ctx, stagingDB, repoID, repoPath); err != nil {
+		return fmt.Errorf("topological ordering failed: %w", err)
+	}
+
+	topoDuration := time.Since(topoStart)
+	fmt.Printf("  ✓ Topological ordering computed in %v\n\n", topoDuration)
+
 	// Build graph
-	fmt.Printf("[3/4] Building 100%% confidence graph...\n")
+	fmt.Printf("[4/6] Building 100%% confidence graph...\n")
 	buildStart := time.Now()
 
 	builder := graph.NewBuilder(stagingDB, graphBackend)
@@ -167,7 +179,7 @@ func runIngest(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    Nodes: %d | Edges: %d\n\n", buildStats.Nodes, buildStats.Edges)
 
 	// Create indexes
-	fmt.Printf("[4/4] Creating database indexes...\n")
+	fmt.Printf("[5/6] Creating database indexes...\n")
 	indexStart := time.Now()
 
 	if err := createIndexes(ctx, graphBackend); err != nil {
@@ -279,4 +291,79 @@ func setupLogging() (*os.File, error) {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	return logFile, nil
+}
+
+// computeTopologicalOrdering computes and stores topological ordering for commits
+func computeTopologicalOrdering(ctx context.Context, stagingDB *database.StagingClient, repoID int64, repoPath string) error {
+	// Initialize topological sorter
+	sorter := gitops.NewTopologicalSorter(repoPath)
+
+	// Compute topological order
+	topoOrder, err := sorter.ComputeTopologicalOrder(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to compute topological order: %w", err)
+	}
+	fmt.Printf("  ✓ Computed ordering for %d commits\n", len(topoOrder))
+
+	// Compute parent SHAs hash for force-push detection
+	parentHash, err := sorter.ComputeParentSHAsHash(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to compute parent hash: %w", err)
+	}
+
+	// Update database: topological_index for commits
+	db := stagingDB.DB()
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	updateCount := 0
+	for sha, index := range topoOrder {
+		result, err := tx.Exec(
+			"UPDATE github_commits SET topological_index = $1 WHERE repo_id = $2 AND sha = $3",
+			index, repoID, sha)
+		if err != nil {
+			return fmt.Errorf("failed to update commit %s: %w", sha, err)
+		}
+
+		rows, _ := result.RowsAffected()
+		updateCount += int(rows)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	fmt.Printf("  ✓ Updated %d commits with topological indexes\n", updateCount)
+
+	// Update repository with parent_shas_hash
+	_, err = db.Exec(
+		"UPDATE github_repositories SET parent_shas_hash = $1 WHERE id = $2",
+		parentHash, repoID)
+	if err != nil {
+		return fmt.Errorf("failed to update repository: %w", err)
+	}
+
+	// Validation
+	var indexedCount int
+	row := stagingDB.QueryRow(ctx,
+		"SELECT COUNT(*) FROM github_commits WHERE repo_id = $1 AND topological_index IS NOT NULL",
+		repoID)
+	row.Scan(&indexedCount)
+
+	var totalCount int
+	row = stagingDB.QueryRow(ctx,
+		"SELECT COUNT(*) FROM github_commits WHERE repo_id = $1",
+		repoID)
+	row.Scan(&totalCount)
+
+	coverage := float64(indexedCount) / float64(totalCount) * 100
+	fmt.Printf("  ✓ Coverage: %d/%d commits (%.1f%%)\n", indexedCount, totalCount, coverage)
+
+	if coverage < 95.0 {
+		return fmt.Errorf("topological index coverage too low: %.1f%% (need >= 95%%)", coverage)
+	}
+
+	return nil
 }

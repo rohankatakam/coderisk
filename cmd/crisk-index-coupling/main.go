@@ -170,8 +170,14 @@ func runIndexCoupling(cmd *cobra.Command, args []string) error {
 
 	// Phase 1: Calculate co-changes
 	fmt.Printf("[4/5] Calculating co-change relationships...\n")
-	fmt.Printf("  Strategy: Find CodeBlocks modified together in commits\n")
-	fmt.Printf("  Threshold: ≥50%% co-change rate\n\n")
+	fmt.Printf("  Strategy: ULTRA-STRICT (Thesis-Aligned Blast Radius Warnings)\n")
+	fmt.Printf("  Filters:\n")
+	fmt.Printf("    • Co-change rate ≥95%% (blocks changed together 95%%+ of time)\n")
+	fmt.Printf("    • Minimum 10 absolute co-changes (statistical significance)\n")
+	fmt.Printf("    • BOTH blocks have incident_count ≥1 (only incident-prone blocks)\n")
+	fmt.Printf("    • 12-month rolling window (exclude stale relationships >365 days)\n")
+	fmt.Printf("  Storage: Static facts only (co_change_count, co_change_percentage)\n")
+	fmt.Printf("  Dynamic: Incident weights, recency, Top-K computed at query time\n\n")
 
 	edgesCreated, err := calc.CalculateCoChanges(ctx)
 	if err != nil {

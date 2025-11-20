@@ -444,7 +444,12 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 			// STEP 4: Create LLM client and investigator
 			slog.Info("STEP 4: Creating LLM investigator")
-			geminiClient, err := llm.NewGeminiClient(ctx, geminiAPIKey, "gemini-2.0-flash")
+			// Use Redis address from environment or default to docker-compose setup
+			redisAddr := os.Getenv("REDIS_ADDR")
+			if redisAddr == "" {
+				redisAddr = "localhost:6380" // Default from docker-compose.yml
+			}
+			geminiClient, err := llm.NewGeminiClient(ctx, geminiAPIKey, "gemini-2.0-flash", redisAddr)
 			if err != nil {
 				fmt.Printf("❌ LLM client error: %v\n", err)
 				slog.Error("failed to create LLM client", "error", err)

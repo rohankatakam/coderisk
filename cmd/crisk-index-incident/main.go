@@ -180,6 +180,14 @@ func runIndexIncident(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  ⚠️  Skipping temporal summaries (LLM not enabled)\n\n")
 	}
 
+	// Step 4: Mark ALL blocks as temporal-indexed (service completion marker)
+	fmt.Printf("  Marking all blocks as temporal-indexed...\n")
+	markedCount, err := calc.MarkBlocksAsIndexed(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to mark blocks as indexed: %w", err)
+	}
+	fmt.Printf("  ✓ Marked %d blocks with temporal_indexed_at timestamp\n\n", markedCount)
+
 	// Show statistics
 	fmt.Printf("📊 Incident Statistics:\n")
 	stats, err := calc.GetIncidentStatistics(ctx)

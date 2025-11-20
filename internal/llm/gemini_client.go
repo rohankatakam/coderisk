@@ -12,15 +12,17 @@ import (
 // GeminiClient wraps Google's Generative AI SDK
 // Supports Gemini models for directive agent workflows
 type GeminiClient struct {
-	client *genai.Client
-	model  string
-	logger *slog.Logger
+	client      *genai.Client
+	model       string
+	logger      *slog.Logger
+	rateLimiter *RateLimiter // Proactive rate limiter using Redis (optional)
 }
 
 // NewGeminiClient creates a new Gemini API client
 // apiKey: Google AI API key (from environment or config)
 // model: Model name (e.g., "gemini-2.0-flash-exp", "gemini-1.5-pro")
-func NewGeminiClient(ctx context.Context, apiKey, model string) (*GeminiClient, error) {
+// redisAddr: Redis address for rate limiting (e.g., "localhost:6380"), empty string disables rate limiting
+func NewGeminiClient(ctx context.Context, apiKey, model, redisAddr string) (*GeminiClient, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("gemini api key is required")
 	}
@@ -43,16 +45,60 @@ func NewGeminiClient(ctx context.Context, apiKey, model string) (*GeminiClient, 
 	logger := slog.Default().With("component", "gemini", "model", model)
 	logger.Info("gemini client initialized")
 
+	// Initialize rate limiter if Redis address provided
+	var rateLimiter *RateLimiter
+	if redisAddr != "" {
+		rl, err := NewRateLimiter(redisAddr)
+		if err != nil {
+			// Log warning but don't fail - fall back to reactive-only mode
+			logger.Warn("failed to initialize rate limiter, using reactive backoff only",
+				"error", err,
+				"redis_addr", redisAddr,
+			)
+			rateLimiter = nil
+		} else {
+			logger.Info("rate limiter enabled with proactive throttling", "redis_addr", redisAddr)
+			rateLimiter = rl
+		}
+	} else {
+		logger.Info("rate limiter disabled - using reactive backoff only")
+	}
+
 	return &GeminiClient{
-		client: client,
-		model:  model,
-		logger: logger,
+		client:      client,
+		model:       model,
+		logger:      logger,
+		rateLimiter: rateLimiter,
 	}, nil
+}
+
+// checkRateLimit performs proactive rate limit check before API call
+// Estimates token count and checks Redis counters
+// Automatically waits and retries if approaching limits
+func (c *GeminiClient) checkRateLimit(ctx context.Context, prompt string) error {
+	if c.rateLimiter == nil {
+		return nil // Rate limiting disabled
+	}
+
+	// Conservative token estimation: 4 characters per token
+	// This is a rough estimate - actual tokenization varies by content
+	estimatedTokens := int64(len(prompt) / 4)
+	if estimatedTokens < 10 {
+		estimatedTokens = 10 // Minimum estimate
+	}
+
+	// Use CheckAndIncrementWithRetry which handles waiting automatically
+	return c.rateLimiter.CheckAndIncrementWithRetry(ctx, estimatedTokens)
 }
 
 // Complete sends a prompt to Gemini and returns the text response
 // Uses standard text generation with system instruction support
 func (c *GeminiClient) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	// Proactive rate limit check
+	if err := c.checkRateLimit(ctx, systemPrompt+userPrompt); err != nil {
+		return "", fmt.Errorf("rate limit check failed: %w", err)
+	}
+
 	// Build system instruction if provided
 	var systemInstruction *genai.Content
 	if systemPrompt != "" {
@@ -97,6 +143,11 @@ func (c *GeminiClient) Complete(ctx context.Context, systemPrompt, userPrompt st
 // CompleteJSON sends a prompt to Gemini and requests JSON response
 // Uses Gemini's native JSON mode with MIME type specification
 func (c *GeminiClient) CompleteJSON(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	// Proactive rate limit check
+	if err := c.checkRateLimit(ctx, systemPrompt+userPrompt); err != nil {
+		return "", fmt.Errorf("rate limit check failed: %w", err)
+	}
+
 	// Build system instruction if provided
 	var systemInstruction *genai.Content
 	if systemPrompt != "" {
@@ -142,6 +193,11 @@ func (c *GeminiClient) CompleteJSON(ctx context.Context, systemPrompt, userPromp
 // Uses Gemini's native structured output (ResponseSchema) to guarantee schema compliance
 // This eliminates issues like timestamp="N/A" by enforcing server-side validation
 func (c *GeminiClient) CompleteWithSchema(ctx context.Context, systemPrompt, userPrompt string, schema *genai.Schema) (string, error) {
+	// Proactive rate limit check
+	if err := c.checkRateLimit(ctx, systemPrompt+userPrompt); err != nil {
+		return "", fmt.Errorf("rate limit check failed: %w", err)
+	}
+
 	// Build system instruction if provided
 	var systemInstruction *genai.Content
 	if systemPrompt != "" {
@@ -189,6 +245,11 @@ func (c *GeminiClient) CompleteWithSchema(ctx context.Context, systemPrompt, use
 // Returns the full response which may include tool calls
 // Tools should be defined using Gemini's tool/function declaration format
 func (c *GeminiClient) CompleteWithTools(ctx context.Context, systemPrompt, userPrompt string, tools []*genai.Tool) (*genai.GenerateContentResponse, error) {
+	// Proactive rate limit check (tools count as input tokens too)
+	if err := c.checkRateLimit(ctx, systemPrompt+userPrompt); err != nil {
+		return nil, fmt.Errorf("rate limit check failed: %w", err)
+	}
+
 	// Build system instruction if provided
 	var systemInstruction *genai.Content
 	if systemPrompt != "" {
@@ -227,6 +288,18 @@ func (c *GeminiClient) CompleteWithTools(ctx context.Context, systemPrompt, user
 // CompleteWithToolsAndHistory sends a multi-turn conversation with function calling
 // Supports full conversation history for multi-hop agent interactions
 func (c *GeminiClient) CompleteWithToolsAndHistory(ctx context.Context, systemPrompt string, history []*genai.Content, tools []*genai.Tool) (*genai.GenerateContentResponse, error) {
+	// Proactive rate limit check - estimate tokens from history
+	// For history, we'll use a simpler estimation by counting content parts
+	historySize := 0
+	for _, content := range history {
+		for _, part := range content.Parts {
+			historySize += len(part.Text)
+		}
+	}
+	if err := c.checkRateLimit(ctx, systemPrompt+fmt.Sprintf("%d", historySize)); err != nil {
+		return nil, fmt.Errorf("rate limit check failed: %w", err)
+	}
+
 	// Build system instruction if provided
 	var systemInstruction *genai.Content
 	if systemPrompt != "" {

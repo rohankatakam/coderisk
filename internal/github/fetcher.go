@@ -649,34 +649,72 @@ func (f *Fetcher) FetchContributors(ctx context.Context, repoID int64, owner, re
 	return count, nil
 }
 
-// FetchIssueTimelines fetches timeline events for all closed issues
+// FetchIssueTimelines fetches timeline events for all issues (idempotent)
 // Reference: GITHUB_API_ANALYSIS.md - Timeline API contains cross-references
 func (f *Fetcher) FetchIssueTimelines(ctx context.Context, repoID int64, owner, repo string) (int, error) {
-	// Fetch all issues from the database
+	// Fetch ALL issues from the database (not just unprocessed)
 	// Timeline events (especially cross-references) can occur on any issue, not just closed ones
 	// Reference: EDGE_CONFIDENCE_HIERARCHY.md - REFERENCES edges from cross-reference events
-	issues, err := f.stagingDB.FetchUnprocessedIssues(ctx, repoID, 1000)
+	// This function is idempotent - it checks if timeline events already exist before fetching
+	query := `
+		SELECT id, number
+		FROM github_issues
+		WHERE repo_id = $1
+		ORDER BY number
+	`
+
+	rows, err := f.stagingDB.Query(ctx, query, repoID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch issues: %w", err)
 	}
+	defer rows.Close()
 
 	issueCount := 0
-	for _, issue := range issues {
+	fetchedCount := 0
+
+	for rows.Next() {
+		var issueID int64
+		var issueNumber int
+		if err := rows.Scan(&issueID, &issueNumber); err != nil {
+			log.Printf("  ⚠️  Failed to scan issue: %v", err)
+			continue
+		}
+
+		issueCount++
+
+		// Check if timeline events already exist for this issue (idempotency check)
+		checkQuery := `SELECT EXISTS(SELECT 1 FROM github_issue_timeline WHERE issue_id = $1)`
+		var exists bool
+		if err := f.stagingDB.QueryRow(ctx, checkQuery, issueID).Scan(&exists); err != nil {
+			log.Printf("  ⚠️  Failed to check existing timeline for issue #%d: %v", issueNumber, err)
+			continue
+		}
+
+		if exists {
+			// Timeline already fetched, skip
+			continue
+		}
+
 		// Fetch timelines for ALL issues to capture:
 		// - closed events with commit_id → CLOSED_BY edges
 		// - cross-referenced events → REFERENCES edges (can happen on open issues)
-		if err := f.fetchIssueTimeline(ctx, repoID, owner, repo, issue.Number); err != nil {
-			log.Printf("  ⚠️  Failed to fetch timeline for issue #%d: %v", issue.Number, err)
+		if err := f.fetchIssueTimeline(ctx, issueID, owner, repo, issueNumber); err != nil {
+			log.Printf("  ⚠️  Failed to fetch timeline for issue #%d: %v", issueNumber, err)
 			continue
 		}
-		issueCount++
+		fetchedCount++
 	}
 
-	return issueCount, nil
+	if err := rows.Err(); err != nil {
+		return fetchedCount, fmt.Errorf("error iterating issues: %w", err)
+	}
+
+	log.Printf("  ℹ️  Checked %d issues, fetched timeline events for %d issues", issueCount, fetchedCount)
+	return fetchedCount, nil
 }
 
 // fetchIssueTimeline fetches timeline events for a single issue
-func (f *Fetcher) fetchIssueTimeline(ctx context.Context, repoID int64, owner, repo string, issueNumber int) error {
+func (f *Fetcher) fetchIssueTimeline(ctx context.Context, issueID int64, owner, repo string, issueNumber int) error {
 	if err := f.rateLimiter.Wait(ctx); err != nil {
 		return err
 	}
@@ -695,12 +733,6 @@ func (f *Fetcher) fetchIssueTimeline(ctx context.Context, repoID int64, owner, r
 		return fmt.Errorf("timeline API request failed: %w", err)
 	}
 
-	// Get issue ID from database
-	issueID, err := f.getIssueID(ctx, repoID, issueNumber)
-	if err != nil {
-		return fmt.Errorf("failed to get issue ID: %w", err)
-	}
-
 	// Store each timeline event
 	for _, event := range timelineEvents {
 		if err := f.storeTimelineEvent(ctx, issueID, event); err != nil {
@@ -712,24 +744,7 @@ func (f *Fetcher) fetchIssueTimeline(ctx context.Context, repoID int64, owner, r
 	return nil
 }
 
-// getIssueID retrieves the internal issue ID from the database
-func (f *Fetcher) getIssueID(ctx context.Context, repoID int64, issueNumber int) (int64, error) {
-	// Fetch all issues and find the matching one
-	// This is a workaround since we don't have direct database access method
-	// In production, we'd add a GetIssueID method to StagingClient
-	issues, err := f.stagingDB.FetchUnprocessedIssues(ctx, repoID, 1000)
-	if err != nil {
-		return 0, fmt.Errorf("failed to fetch issues: %w", err)
-	}
-
-	for _, issue := range issues {
-		if issue.Number == issueNumber {
-			return issue.ID, nil
-		}
-	}
-
-	return 0, fmt.Errorf("issue #%d not found", issueNumber)
-}
+// NOTE: getIssueID function removed - no longer needed since we fetch issue IDs directly in FetchIssueTimelines
 
 // storeTimelineEvent stores a single timeline event
 func (f *Fetcher) storeTimelineEvent(ctx context.Context, issueID int64, rawEvent map[string]interface{}) error {

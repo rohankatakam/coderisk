@@ -144,33 +144,36 @@ func (o *OwnershipCalculator) CalculateOriginalAuthor(ctx context.Context, repoI
 	}, nil
 }
 
-// CalculateLastModifierAndStaleness sets last_modifier and staleness_days properties
+// CalculateLastModifierAndStaleness sets last_modifier and last_modified_date properties
 // Reference: AGENT_P3A_OWNERSHIP.md - Last Modifier + Staleness query
-// Reference: DATA_SCHEMA_REFERENCE.md lines 263-264, 948-949 - Populate last_modifier_email and staleness_days
+// Reference: DATA_SCHEMA_REFERENCE.md lines 304-306, 881-883 - Populate last_modifier_email and last_modified_date (STATIC)
+// Reference: microservice_arch.md lines 105-147 - Static vs Dynamic Separation (staleness computed at query time)
 // Edge case: Block with no modifications (only creation): last_modifier = original_author
 // Following Postgres-First Write Protocol (microservice_arch.md Edge Case 4)
 func (o *OwnershipCalculator) CalculateLastModifierAndStaleness(ctx context.Context, repoID int64) (*OwnershipResult, error) {
 	start := time.Now()
-	log.Printf("  🔍 Calculating last modifiers and staleness...")
+	log.Printf("  🔍 Calculating last modifiers and last modified timestamps...")
 
 	// STEP 1: Write to PostgreSQL (source of truth)
 	// Find last modifier using most recent change from code_block_changes table
+	// CRITICAL: Use author_date (always populated) NOT committer_date (may be NULL)
+	// CRITICAL: Store last_modified_date (STATIC timestamp) NOT staleness_days (DYNAMIC property)
 	query := `
 		WITH last_changes AS (
 			SELECT DISTINCT ON (cbc.block_id)
 				cbc.block_id,
 				c.author_email AS last_modifier,
-				EXTRACT(DAY FROM (NOW() - c.committer_date))::INTEGER AS staleness_days
+				c.author_date AS last_modified_date
 			FROM code_block_changes cbc
 			JOIN code_blocks cb_inner ON cb_inner.id = cbc.block_id
 			JOIN github_commits c ON c.sha = cbc.commit_sha AND c.repo_id = cbc.repo_id
 			WHERE cb_inner.repo_id = $1
-			ORDER BY cbc.block_id, c.committer_date DESC
+			ORDER BY cbc.block_id, c.author_date DESC
 		)
 		UPDATE code_blocks cb
 		SET
 			last_modifier_email = lc.last_modifier,
-			staleness_days = lc.staleness_days
+			last_modified_date = lc.last_modified_date
 		FROM last_changes lc
 		WHERE cb.id = lc.block_id
 		  AND cb.repo_id = $1
@@ -189,16 +192,17 @@ func (o *OwnershipCalculator) CalculateLastModifierAndStaleness(ctx context.Cont
 	modifiedCount, _ := result.RowsAffected()
 
 	// Edge case: Blocks with no changes in code_block_changes - use first_seen_sha as fallback
+	// Use author_date from creation commit as last_modified_date
 	unmodifiedQuery := `
 		UPDATE code_blocks cb
 		SET
 			last_modifier_email = subq.last_modifier,
-			staleness_days = subq.staleness_days
+			last_modified_date = subq.last_modified_date
 		FROM (
 			SELECT
 				cb_inner.id,
 				gc.author_email AS last_modifier,
-				EXTRACT(DAY FROM (NOW() - gc.author_date))::INTEGER AS staleness_days
+				gc.author_date AS last_modified_date
 			FROM code_blocks cb_inner
 			JOIN github_commits gc ON gc.sha = cb_inner.first_seen_sha
 			WHERE cb_inner.repo_id = $1
@@ -222,14 +226,16 @@ func (o *OwnershipCalculator) CalculateLastModifierAndStaleness(ctx context.Cont
 	log.Printf("    → Updated %d blocks in PostgreSQL (%d modified, %d unmodified)", totalCount, modifiedCount, unmodifiedCount)
 
 	// STEP 2: Sync to Neo4j (derived cache)
+	// Store last_modified_date (STATIC timestamp) in Neo4j
+	// Staleness is computed dynamically at query time using duration.between()
 	if o.neo4j != nil {
-		// Sync modified blocks
+		// Sync modified blocks - store last_modified_date as static property
 		neo4jModifiedQuery := `
 			MATCH (b:CodeBlock {repo_id: $repoID})<-[:MODIFIED_BLOCK]-(c:Commit)<-[:AUTHORED]-(d:Developer)
-			WITH b, d, c ORDER BY c.timestamp DESC
+			WITH b, d, c ORDER BY c.author_date DESC
 			WITH b, head(collect(d)) AS lastDev, head(collect(c)) AS lastCommit
 			SET b.last_modifier_email = lastDev.email,
-			    b.staleness_days = duration.between(datetime({epochSeconds: lastCommit.committed_at}), datetime()).days
+			    b.last_modified_date = lastCommit.author_date
 			RETURN count(b) AS blocks_updated
 		`
 		params := map[string]interface{}{"repoID": repoID}
@@ -238,19 +244,19 @@ func (o *OwnershipCalculator) CalculateLastModifierAndStaleness(ctx context.Cont
 			log.Printf("    ⚠️  Warning: Failed to sync modified blocks to Neo4j: %v", err)
 		}
 
-		// Sync unmodified blocks
+		// Sync unmodified blocks - use creation commit's author_date
 		neo4jUnmodifiedQuery := `
 			MATCH (b:CodeBlock {repo_id: $repoID})<-[:CREATED_BLOCK]-(c:Commit)<-[:AUTHORED]-(d:Developer)
 			WHERE NOT EXISTS((b)<-[:MODIFIED_BLOCK]-())
 			SET b.last_modifier_email = d.email,
-			    b.staleness_days = duration.between(datetime({epochSeconds: c.committed_at}), datetime()).days
+			    b.last_modified_date = c.author_date
 			RETURN count(b) AS blocks_updated
 		`
 		queries = []graph.QueryWithParams{{Query: neo4jUnmodifiedQuery, Params: params}}
 		if err := o.neo4j.ExecuteBatchWithParams(ctx, queries); err != nil {
 			log.Printf("    ⚠️  Warning: Failed to sync unmodified blocks to Neo4j: %v", err)
 		} else {
-			log.Printf("    → Synced last modifiers and staleness to Neo4j")
+			log.Printf("    → Synced last modifiers and last_modified_date to Neo4j")
 		}
 	}
 
@@ -658,12 +664,13 @@ func (o *OwnershipCalculator) checkAPOCAvailable(ctx context.Context) (bool, err
 
 // VerifyOwnershipProperties checks that all CodeBlocks have ownership properties set
 // Reference: AGENT_P3A_OWNERSHIP.md - Verification query
+// Note: Validates STATIC properties only (staleness_days is computed dynamically)
 func (o *OwnershipCalculator) VerifyOwnershipProperties(ctx context.Context, repoID int64) (int, error) {
 	query := `
 		MATCH (b:CodeBlock {repo_id: $repoID})
 		WHERE b.original_author IS NULL
 		   OR b.last_modifier IS NULL
-		   OR b.staleness_days IS NULL
+		   OR b.last_modified_date IS NULL
 		RETURN count(b) AS incomplete_blocks
 	`
 

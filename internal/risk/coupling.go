@@ -60,8 +60,14 @@ type CoChangePair struct {
 }
 
 // CalculateCoChanges detects and creates co-change relationships between code blocks
-// Reference: AGENT-P3B §1 - Co-Change Detection
-// Only creates edges when co-change rate >= 0.5
+// Reference: AGENT-P3B §1 - Co-Change Detection + Ultra-Strict Strategy (microservice_arch.md §6)
+// ULTRA-STRICT FILTERING:
+//   - Co-change rate >= 95% (blocks changed together 95%+ of the time)
+//   - Minimum 10 absolute co-changes (statistical significance)
+//   - BOTH blocks must have incident_count >= 1 (only incident-prone blocks)
+//   - 12-month rolling window (exclude stale relationships >365 days)
+// STORES ONLY STATIC FACTS (co_change_count, co_change_percentage, computed_at, window_start/end)
+// DYNAMIC PROPERTIES (incident weights, recency multipliers, Top-K) computed at query time
 func (c *CouplingCalculator) CalculateCoChanges(ctx context.Context) (int, error) {
 	// Query to find commits that modified multiple blocks
 	// We'll find all pairs of blocks modified by the same commit
@@ -75,6 +81,7 @@ func (c *CouplingCalculator) CalculateCoChanges(ctx context.Context) (int, error
 			JOIN code_blocks cb ON cb.id = cbc.block_id
 			JOIN github_commits gc ON gc.sha = cbc.commit_sha AND gc.repo_id = cbc.repo_id
 			WHERE cb.repo_id = $1 AND cbc.repo_id = $1
+				AND gc.author_date >= NOW() - INTERVAL '365 days'  -- 12-month rolling window
 		),
 		co_change_pairs AS (
 			SELECT
@@ -87,6 +94,7 @@ func (c *CouplingCalculator) CalculateCoChanges(ctx context.Context) (int, error
 			JOIN block_commits bc2 ON bc1.commit_sha = bc2.commit_sha
 			WHERE bc1.code_block_id < bc2.code_block_id  -- Prevent duplicates and self-pairs
 			GROUP BY bc1.code_block_id, bc2.code_block_id
+			HAVING COUNT(DISTINCT bc1.commit_sha) >= 10  -- Minimum 10 absolute co-changes
 		),
 		block_total_changes AS (
 			SELECT
@@ -94,7 +102,9 @@ func (c *CouplingCalculator) CalculateCoChanges(ctx context.Context) (int, error
 				COUNT(*) AS total_changes
 			FROM code_block_changes cbc
 			JOIN code_blocks cb ON cb.id = cbc.block_id
+			JOIN github_commits gc ON gc.sha = cbc.commit_sha AND gc.repo_id = cbc.repo_id
 			WHERE cb.repo_id = $1 AND cbc.repo_id = $1
+				AND gc.author_date >= NOW() - INTERVAL '365 days'  -- Match window
 			GROUP BY cbc.block_id
 		)
 		SELECT
@@ -107,7 +117,11 @@ func (c *CouplingCalculator) CalculateCoChanges(ctx context.Context) (int, error
 			ccp.last_co_change_commit_sha
 		FROM co_change_pairs ccp
 		JOIN block_total_changes btc ON btc.code_block_id = ccp.block_a_id
-		WHERE CAST(ccp.co_change_count AS DECIMAL) / btc.total_changes >= 0.5  -- Only significant coupling
+		JOIN code_blocks cba ON cba.id = ccp.block_a_id
+		JOIN code_blocks cbb ON cbb.id = ccp.block_b_id
+		WHERE CAST(ccp.co_change_count AS DECIMAL) / btc.total_changes >= 0.95  -- 95% co-change threshold
+			AND COALESCE(cba.incident_count, 0) >= 1  -- Block A has incident history
+			AND COALESCE(cbb.incident_count, 0) >= 1  -- Block B has incident history
 		ORDER BY co_change_rate DESC
 	`
 

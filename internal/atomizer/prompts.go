@@ -22,21 +22,65 @@ OUTPUT SCHEMA: Return ONLY valid JSON (no markdown, no explanations):
     {
       "behavior": "CREATE_BLOCK",
       "target_block_name": "formatDate",
-      "block_type": "function"
+      "block_type": "function",
+      "signature": "(date: Date, format: string): string"
     }
   ]
 }
+
+SIGNATURE EXTRACTION (REQUIRED):
+- Extract full function signature with parameter types and return type
+- Format: "(param1: type1, param2: type2): returnType"
+- Examples by language:
+  * Go: "(ctx context.Context, id int64): error"
+  * Python: "(self, username: str, password: str): bool"
+  * TypeScript: "(data: UserData): Promise<void>"
+  * Java: "(String username, int userId): void"
+  * Ruby: "(username, password)"
+- If no parameters: "()"
+- If return type unknown: omit or use "void"
+- For overloaded functions, signature MUST distinguish them
+- Include signature field in ALL CREATE_BLOCK, MODIFY_BLOCK, and RENAME_BLOCK events
+
+RENAME DETECTION (NEW BEHAVIOR):
+- Detect when a function is RENAMED (not deleted and recreated)
+- Indicators:
+  * Function with name A disappears
+  * Function with name B appears
+  * Same signature (or very similar)
+  * Same file location
+  * Occurs in same diff hunk
+- Output for renames:
+  {
+    "behavior": "RENAME_BLOCK",
+    "old_block_name": "handleLogin",
+    "target_block_name": "processAuth",
+    "signature": "(username: string, password: string): boolean",
+    "block_type": "function",
+    "old_version": "function handleLogin(username: string, password: string): boolean { ... }",
+    "new_version": "function processAuth(username: string, password: string): boolean { ... }"
+  }
+- Do NOT output both DELETE + CREATE for renames
+- If uncertain, prefer MODIFY over RENAME
+
+BEHAVIOR SELECTION PRIORITY:
+1. RENAME_BLOCK - if function name changed but signature same
+2. MODIFY_BLOCK - if function body changed but name/signature same
+3. CREATE_BLOCK - if function first appears in this commit
+4. DELETE_BLOCK - if function removed in this commit
 
 RULES:
 - Extract function/method/class level blocks (ignore variables, constants, documentation files)
 - Detect import additions/removals from diff
 - Summarize the "why" from commit message
 - Return empty array if no code blocks changed
-- behavior: MUST be one of: CREATE_BLOCK, MODIFY_BLOCK, DELETE_BLOCK, ADD_IMPORT, REMOVE_IMPORT
+- behavior: MUST be one of: CREATE_BLOCK, MODIFY_BLOCK, DELETE_BLOCK, RENAME_BLOCK, ADD_IMPORT, REMOVE_IMPORT
 - block_type: MUST be one of: function, method, class, component (REQUIRED for block operations, OMIT for imports)
 - target_block_name: ONLY the short name of the function/method/class (max 100 chars, e.g., "formatDate", "UserClass")
+- signature: Function signature with parameter types and return type (REQUIRED for CREATE_BLOCK, MODIFY_BLOCK, RENAME_BLOCK)
+- old_block_name: Old function name (REQUIRED for RENAME_BLOCK only)
 - For ADD_IMPORT/REMOVE_IMPORT, include dependency_path instead of target_block_name
-- For MODIFY_BLOCK, you can optionally include old_version and new_version (code snippets)
+- For MODIFY_BLOCK and RENAME_BLOCK, you can optionally include old_version and new_version (code snippets)
 - Extract issue numbers from commit message (e.g., "Fixes #123" → ["#123"])
 - Keep llm_intent_summary concise (1-2 sentences max)
 - ONLY extract changes to code files (.go, .ts, .js, .py, etc) - ignore .md, .txt, and documentation files
@@ -54,7 +98,8 @@ Example 1 - Function Creation:
     {
       "behavior": "CREATE_BLOCK",
       "target_block_name": "formatDate",
-      "block_type": "function"
+      "block_type": "function",
+      "signature": "(date: Date, format: string): string"
     }
   ]
 }
@@ -79,7 +124,8 @@ Example 3 - Multiple Changes:
     {
       "behavior": "MODIFY_BLOCK",
       "target_block_name": "login",
-      "block_type": "function"
+      "block_type": "function",
+      "signature": "(username: string, password: string): Promise<AuthToken>"
     },
     {
       "behavior": "ADD_IMPORT",
@@ -89,6 +135,23 @@ Example 3 - Multiple Changes:
       "behavior": "DELETE_BLOCK",
       "target_block_name": "validateSession",
       "block_type": "function"
+    }
+  ]
+}
+
+Example 4 - Function Rename:
+{
+  "llm_intent_summary": "Rename authentication handler for clarity",
+  "mentioned_issues_in_msg": [],
+  "change_events": [
+    {
+      "behavior": "RENAME_BLOCK",
+      "old_block_name": "handleLogin",
+      "target_block_name": "processAuth",
+      "block_type": "function",
+      "signature": "(username: string, password: string): boolean",
+      "old_version": "function handleLogin(username: string, password: string): boolean { ... }",
+      "new_version": "function processAuth(username: string, password: string): boolean { ... }"
     }
   ]
 }

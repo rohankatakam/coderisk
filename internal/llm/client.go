@@ -92,7 +92,10 @@ func newGeminiClient(ctx context.Context, cfg *config.Config, logger *slog.Logge
 		model = "gemini-2.0-flash" // Default to production flash for speed and higher rate limits
 	}
 
-	geminiClient, err := NewGeminiClient(ctx, geminiKey, model)
+	// Determine Redis address for rate limiting
+	redisAddr := getRedisAddr(cfg)
+
+	geminiClient, err := NewGeminiClient(ctx, geminiKey, model, redisAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gemini client: %w", err)
 	}
@@ -163,6 +166,27 @@ func getGeminiKeySource(cfg *config.Config) string {
 	return "unknown"
 }
 
+// getRedisAddr returns Redis address for rate limiting
+// Priority: 1) REDIS_ADDR env var, 2) Config file, 3) Default docker-compose addr
+func getRedisAddr(cfg *config.Config) string {
+	// Check environment variable first
+	if addr := os.Getenv("REDIS_ADDR"); addr != "" {
+		return addr
+	}
+
+	// Check config file
+	if cfg.Cache.RedisHost != "" {
+		port := cfg.Cache.RedisPort
+		if port == 0 {
+			port = 6380 // Default external port from docker-compose.yml
+		}
+		return fmt.Sprintf("%s:%d", cfg.Cache.RedisHost, port)
+	}
+
+	// Default to docker-compose setup
+	return "localhost:6380"
+}
+
 // IsEnabled returns true if an LLM client is configured and ready
 func (c *Client) IsEnabled() bool {
 	return c.enabled
@@ -201,7 +225,12 @@ func (c *Client) CompleteWithDeepModel(ctx context.Context, systemPrompt, userPr
 	switch c.provider {
 	case ProviderGemini:
 		// For Gemini, create a new client with the deep model
-		geminiDeep, err := NewGeminiClient(context.Background(), os.Getenv("GEMINI_API_KEY"), c.deepModel)
+		// Use default Redis address from environment or docker-compose default
+		redisAddr := os.Getenv("REDIS_ADDR")
+		if redisAddr == "" {
+			redisAddr = "localhost:6380" // Default from docker-compose.yml
+		}
+		geminiDeep, err := NewGeminiClient(context.Background(), os.Getenv("GEMINI_API_KEY"), c.deepModel, redisAddr)
 		if err != nil {
 			return "", fmt.Errorf("failed to create deep model client: %w", err)
 		}

@@ -351,6 +351,34 @@ func (t *TemporalCalculator) CalculateIncidentCounts(ctx context.Context) (int, 
 	return int(blocksUpdated + zeroBlocks), nil
 }
 
+// MarkBlocksAsIndexed sets temporal_indexed_at for ALL blocks in the repository
+// This indicates the temporal incident analysis service has completed for all blocks
+// Reference: DATA_SCHEMA_REFERENCE.md line 311 - temporal_indexed_at marks service completion
+func (t *TemporalCalculator) MarkBlocksAsIndexed(ctx context.Context) (int, error) {
+	log.Printf("  ✅ Marking all blocks as temporal-indexed...")
+
+	// Mark ALL blocks in this repo as indexed (both with and without incidents)
+	updateQuery := `
+		UPDATE code_blocks
+		SET temporal_indexed_at = NOW()
+		WHERE repo_id = $1
+		  AND (temporal_indexed_at IS NULL OR temporal_indexed_at < NOW())
+	`
+
+	result, err := t.db.ExecContext(ctx, updateQuery, t.repoID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to mark blocks as indexed: %w", err)
+	}
+
+	blocksMarked, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	log.Printf("    → Marked %d blocks with temporal_indexed_at timestamp", blocksMarked)
+	return int(blocksMarked), nil
+}
+
 // GenerateTemporalSummaries creates LLM-generated summaries for blocks with incidents
 // Reference: AGENT-P3C §4 - LLM Temporal Summary
 // Idempotency: Only processes blocks that need summaries (no temporal_indexed_at or stale)
@@ -385,9 +413,12 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context, forc
 		log.Printf("  ⚠️  Force mode: Reprocessing ALL blocks with incidents")
 	}
 
+	// Filter for meaningful incident patterns (3+ incidents)
+	// Rationale: Blocks with 1-2 incidents have sparse context for LLM analysis
+	// Blocks with 3+ incidents represent meaningful temporal patterns worth summarizing
 	query += `
+		  AND cb.incident_count >= 3
 		ORDER BY cb.incident_count DESC
-		LIMIT 50  -- Process top 50 high-incident blocks
 	`
 
 	rows, err := t.db.QueryContext(ctx, query, t.repoID)
@@ -406,11 +437,11 @@ func (t *TemporalCalculator) GenerateTemporalSummaries(ctx context.Context, forc
 	rows.Close()
 
 	if blocksToProcess == 0 {
-		log.Printf("    → No blocks with incidents found")
+		log.Printf("    → No blocks with 3+ incidents found")
 		return 0, nil
 	}
 
-	log.Printf("    → Found %d blocks with incidents (processing top 50)", blocksToProcess)
+	log.Printf("    → Found %d blocks with 3+ incidents (processing all)", blocksToProcess)
 
 	// Re-query to process
 	rows, err = t.db.QueryContext(ctx, query, t.repoID)
