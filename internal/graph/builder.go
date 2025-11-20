@@ -496,8 +496,22 @@ func (b *Builder) processCommits(ctx context.Context, repoID int64, repoFullName
 			log.Printf("  ✓ Created %d edges (total so far: %d)", len(allEdges), stats.Edges)
 		}
 
-		// Mark as processed
+		// CRITICAL: Only mark as processed AFTER verifying Neo4j writes succeeded
+		// This implements the Postgres-First Write Protocol guarantee
+		// Reference: microservice_arch.md - Edge Case 4: Write Protocol
 		if len(commitIDs) > 0 {
+			// Verify Neo4j writes by sampling the first commit from this batch
+			if len(allNodes) > 0 {
+				firstNodeID := allNodes[0].ID
+				verified, err := b.verifyNodeExists(ctx, firstNodeID)
+				if err != nil {
+					return stats, fmt.Errorf("failed to verify Neo4j write: %w", err)
+				}
+				if !verified {
+					return stats, fmt.Errorf("Neo4j write verification failed: node %s not found after CreateNodes", firstNodeID)
+				}
+			}
+
 			log.Printf("  💾 Marking %d commits as processed in PostgreSQL...", len(commitIDs))
 			if err := b.stagingDB.MarkCommitsProcessed(ctx, commitIDs); err != nil {
 				return stats, fmt.Errorf("failed to mark commits as processed: %w", err)
@@ -844,8 +858,22 @@ func (b *Builder) processIssues(ctx context.Context, repoID int64, repoFullName 
 			stats.Nodes += len(allNodes)
 		}
 
-		// Mark as processed
+		// CRITICAL: Only mark as processed AFTER verifying Neo4j writes succeeded
+		// This implements the Postgres-First Write Protocol guarantee
+		// Reference: microservice_arch.md - Edge Case 4: Write Protocol
 		if len(issueIDs) > 0 {
+			// Verify Neo4j writes by sampling the first issue from this batch
+			if len(allNodes) > 0 {
+				firstNodeID := allNodes[0].ID
+				verified, err := b.verifyNodeExists(ctx, firstNodeID)
+				if err != nil {
+					return stats, fmt.Errorf("failed to verify Neo4j write: %w", err)
+				}
+				if !verified {
+					return stats, fmt.Errorf("Neo4j write verification failed: node %s not found after CreateNodes", firstNodeID)
+				}
+			}
+
 			if err := b.stagingDB.MarkIssuesProcessed(ctx, issueIDs); err != nil {
 				return stats, fmt.Errorf("failed to mark issues as processed: %w", err)
 			}
@@ -1083,6 +1111,35 @@ func (b *Builder) createTimelineEdges(ctx context.Context, repoID int64) (*Build
 	}
 
 	return stats, nil
+}
+
+// verifyNodeExists checks if a node with the given ID exists in Neo4j
+// This is used to verify that CreateNodes() actually committed successfully
+// before marking entities as processed in PostgreSQL
+// Returns: (exists bool, error)
+func (b *Builder) verifyNodeExists(ctx context.Context, nodeID string) (bool, error) {
+	// Simple existence check - just count the node
+	query := `MATCH (n {id: $nodeID}) RETURN count(n) > 0 as exists`
+	params := map[string]interface{}{
+		"nodeID": nodeID,
+	}
+
+	result, err := b.backend.QueryWithParams(ctx, query, params)
+	if err != nil {
+		return false, fmt.Errorf("verification query failed: %w", err)
+	}
+
+	// Parse result
+	if len(result) == 0 {
+		return false, nil
+	}
+
+	exists, ok := result[0]["exists"].(bool)
+	if !ok {
+		return false, fmt.Errorf("unexpected result type for exists check")
+	}
+
+	return exists, nil
 }
 
 // REMOVED: Deprecated methods (AddLayer2CoChangedEdges, AddLayer3IncidentNodes, AddLayer3CausedByEdges)
