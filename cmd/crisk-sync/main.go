@@ -229,6 +229,13 @@ func syncIncremental(ctx context.Context, db *sql.DB, driver neo4j.DriverWithCon
 		return 2, fmt.Errorf("CodeBlock sync failed: %w", err)
 	}
 
+	// Sync Commit→CodeBlock edges (MODIFIED_BLOCK, CREATED_BLOCK, DELETED_BLOCK)
+	edgeSyncer := sync.NewCommitBlockEdgeSyncer(db, driver, cfg.Neo4j.Database)
+	edgesSynced, err := edgeSyncer.SyncMissingEdges(ctx, repoID)
+	if err != nil {
+		return 2, fmt.Errorf("Commit→CodeBlock edge sync failed: %w", err)
+	}
+
 	// TODO: Add more syncers for other entities (Commits, Files, etc.)
 
 	// Run validation again to verify
@@ -243,6 +250,7 @@ func syncIncremental(ctx context.Context, db *sql.DB, driver neo4j.DriverWithCon
 	// Summary
 	fmt.Printf("\n✅ Incremental sync complete:\n")
 	fmt.Printf("   CodeBlocks synced: %d\n", blocksSynced)
+	fmt.Printf("   Commit→CodeBlock edges synced: %d\n", edgesSynced)
 
 	// Determine exit code based on final variance
 	minVariance := 100.0
