@@ -19,8 +19,8 @@ import (
 // Reference: AGENT_P3A_OWNERSHIP.md - Ownership Risk Calculator
 // Reference: DATA_SCHEMA_REFERENCE.md lines 262-265, 947-950 - PostgreSQL + Neo4j dual-write
 type OwnershipCalculator struct {
-	db       *sql.DB                // PostgreSQL connection (source of truth)
-	neo4j    *graph.Neo4jBackend    // Neo4j connection (derived cache)
+	db       *sql.DB                 // PostgreSQL connection (source of truth)
+	neo4j    *graph.Neo4jBackend     // Neo4j connection (derived cache)
 	driver   neo4j.DriverWithContext // Legacy Neo4j driver (for backward compatibility)
 	database string
 	llm      *llm.Client
@@ -57,10 +57,10 @@ type FamiliarityEntry struct {
 
 // OwnershipResult represents the result of ownership calculations
 type OwnershipResult struct {
-	BlocksUpdated  int
-	Error          error
-	Duration       time.Duration
-	Phase          string
+	BlocksUpdated int
+	Error         error
+	Duration      time.Duration
+	Phase         string
 }
 
 // CalculateOriginalAuthor sets the original_author property for all CodeBlocks
@@ -110,25 +110,9 @@ func (o *OwnershipCalculator) CalculateOriginalAuthor(ctx context.Context, repoI
 
 	log.Printf("    → Updated %d blocks in PostgreSQL", postgresCount)
 
-	// STEP 2: Sync to Neo4j (derived cache)
-	// Note: CodeBlock nodes use 'original_author' property (not original_author_email for space)
-	if o.neo4j != nil {
-		neo4jQuery := `
-			MATCH (b:CodeBlock {repo_id: $repoID})<-[:CREATED_BLOCK]-(c:Commit)<-[:AUTHORED]-(d:Developer)
-			SET b.original_author_email = d.email
-			RETURN count(b) AS blocks_updated
-		`
-		params := map[string]interface{}{
-			"repoID": repoID,
-		}
-		queries := []graph.QueryWithParams{{Query: neo4jQuery, Params: params}}
-		if err := o.neo4j.ExecuteBatchWithParams(ctx, queries); err != nil {
-			log.Printf("    ⚠️  Warning: Failed to sync original authors to Neo4j: %v", err)
-			// Continue - PostgreSQL is source of truth
-		} else {
-			log.Printf("    → Synced original authors to Neo4j")
-		}
-	}
+	// NOTE: Neo4j sync is now handled by crisk-sync service
+	// Following PostgreSQL-First Write Protocol: PostgreSQL is source of truth,
+	// crisk-sync rebuilds Neo4j from PostgreSQL as derived cache
 
 	count := int(postgresCount)
 	o.logger.Info("calculated original authors",
@@ -225,40 +209,9 @@ func (o *OwnershipCalculator) CalculateLastModifierAndStaleness(ctx context.Cont
 	totalCount := modifiedCount + unmodifiedCount
 	log.Printf("    → Updated %d blocks in PostgreSQL (%d modified, %d unmodified)", totalCount, modifiedCount, unmodifiedCount)
 
-	// STEP 2: Sync to Neo4j (derived cache)
-	// Store last_modified_date (STATIC timestamp) in Neo4j
-	// Staleness is computed dynamically at query time using duration.between()
-	if o.neo4j != nil {
-		// Sync modified blocks - store last_modified_date as static property
-		neo4jModifiedQuery := `
-			MATCH (b:CodeBlock {repo_id: $repoID})<-[:MODIFIED_BLOCK]-(c:Commit)<-[:AUTHORED]-(d:Developer)
-			WITH b, d, c ORDER BY c.author_date DESC
-			WITH b, head(collect(d)) AS lastDev, head(collect(c)) AS lastCommit
-			SET b.last_modifier_email = lastDev.email,
-			    b.last_modified_date = lastCommit.author_date
-			RETURN count(b) AS blocks_updated
-		`
-		params := map[string]interface{}{"repoID": repoID}
-		queries := []graph.QueryWithParams{{Query: neo4jModifiedQuery, Params: params}}
-		if err := o.neo4j.ExecuteBatchWithParams(ctx, queries); err != nil {
-			log.Printf("    ⚠️  Warning: Failed to sync modified blocks to Neo4j: %v", err)
-		}
-
-		// Sync unmodified blocks - use creation commit's author_date
-		neo4jUnmodifiedQuery := `
-			MATCH (b:CodeBlock {repo_id: $repoID})<-[:CREATED_BLOCK]-(c:Commit)<-[:AUTHORED]-(d:Developer)
-			WHERE NOT EXISTS((b)<-[:MODIFIED_BLOCK]-())
-			SET b.last_modifier_email = d.email,
-			    b.last_modified_date = c.author_date
-			RETURN count(b) AS blocks_updated
-		`
-		queries = []graph.QueryWithParams{{Query: neo4jUnmodifiedQuery, Params: params}}
-		if err := o.neo4j.ExecuteBatchWithParams(ctx, queries); err != nil {
-			log.Printf("    ⚠️  Warning: Failed to sync unmodified blocks to Neo4j: %v", err)
-		} else {
-			log.Printf("    → Synced last modifiers and last_modified_date to Neo4j")
-		}
-	}
+	// NOTE: Neo4j sync is now handled by crisk-sync service
+	// Following PostgreSQL-First Write Protocol: PostgreSQL is source of truth,
+	// crisk-sync rebuilds Neo4j from PostgreSQL as derived cache
 
 	count := int(totalCount)
 	o.logger.Info("calculated last modifier and staleness",
@@ -368,38 +321,10 @@ func (o *OwnershipCalculator) CalculateFamiliarityMap(ctx context.Context, repoI
 
 	log.Printf("    → Updated %d blocks in PostgreSQL", postgresCount)
 
-	// STEP 2: Sync to Neo4j (derived cache)
-	if o.neo4j != nil {
-		// Check if APOC is available for Neo4j JSON conversion
-		hasAPOC, _ := o.checkAPOCAvailable(ctx)
-
-		if hasAPOC {
-			// Use APOC for efficient JSON conversion in Neo4j
-			neo4jQuery := `
-				MATCH (b:CodeBlock {repo_id: $repoID})<-[:CREATED_BLOCK|MODIFIED_BLOCK]-(c:Commit)<-[:AUTHORED]-(d:Developer)
-				WITH b, d.email AS dev, count(c) AS edits
-				ORDER BY edits DESC
-				WITH b, collect({dev: dev, edits: edits})[0..10] AS famMap
-				SET b.familiarity_map = apoc.convert.toJson(famMap)
-				RETURN count(b) AS blocks_updated
-			`
-			params := map[string]interface{}{"repoID": repoID}
-			queries := []graph.QueryWithParams{{Query: neo4jQuery, Params: params}}
-			if err := o.neo4j.ExecuteBatchWithParams(ctx, queries); err != nil {
-				log.Printf("    ⚠️  Warning: Failed to sync familiarity maps to Neo4j: %v", err)
-			} else {
-				log.Printf("    → Synced familiarity maps to Neo4j (APOC)")
-			}
-		} else {
-			// Manual sync without APOC (slower but works)
-			log.Printf("    ℹ️  APOC not available, using manual Neo4j sync...")
-			if err := o.syncFamiliarityMapToNeo4jManual(ctx, repoID); err != nil {
-				log.Printf("    ⚠️  Warning: Failed to manually sync to Neo4j: %v", err)
-			} else {
-				log.Printf("    → Synced familiarity maps to Neo4j (manual)")
-			}
-		}
-	}
+	// NOTE: Neo4j sync is now handled by crisk-sync/ownership_props.go
+	// Following PostgreSQL-First Write Protocol: PostgreSQL is source of truth,
+	// crisk-sync rebuilds Neo4j from PostgreSQL as derived cache
+	// The familiarity_map JSONB is converted to JSON string for Neo4j by crisk-sync
 
 	count := int(postgresCount)
 	o.logger.Info("calculated familiarity maps",

@@ -28,15 +28,18 @@ func NewCodeBlockSyncer(db *sql.DB, driver neo4j.DriverWithContext, database str
 
 // CodeBlock represents a code block from PostgreSQL
 type CodeBlock struct {
-	ID               int64
-	RepoID           int64
-	FilePath         string
-	BlockName        string
-	BlockType        string
-	StartLine        *int
-	EndLine          *int
-	IncidentCount    int
-	LastIncidentDate *time.Time
+	ID                   int64
+	RepoID               int64
+	FilePath             string
+	BlockName            string
+	BlockType            string
+	StartLine            *int
+	EndLine              *int
+	Language             *string
+	Signature            *string
+	HistoricalBlockNames []byte // JSONB from PostgreSQL
+	IncidentCount        int
+	LastIncidentDate     *time.Time
 }
 
 // SyncMissingBlocks syncs code blocks from PostgreSQL to Neo4j (incremental)
@@ -87,6 +90,7 @@ func (s *CodeBlockSyncer) SyncMissingBlocks(ctx context.Context, repoID int64) (
 
 		_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 			// Create CodeBlock node with MERGE (idempotent)
+			// Note: historical_block_names stored as JSON string (Neo4j doesn't support JSONB)
 			query := `
 				MERGE (cb:CodeBlock {id: $compositeID, repo_id: $repoID})
 				SET cb.db_id = $dbID,
@@ -95,6 +99,9 @@ func (s *CodeBlockSyncer) SyncMissingBlocks(ctx context.Context, repoID int64) (
 				    cb.block_type = $blockType,
 				    cb.start_line = $startLine,
 				    cb.end_line = $endLine,
+				    cb.language = $language,
+				    cb.signature = $signature,
+				    cb.historical_block_names = $historicalBlockNames,
 				    cb.incident_count = $incidentCount,
 				    cb.last_incident_date = CASE WHEN $lastIncidentDate IS NOT NULL THEN datetime($lastIncidentDate) ELSE NULL END
 				RETURN cb.id as id`
@@ -107,17 +114,28 @@ func (s *CodeBlockSyncer) SyncMissingBlocks(ctx context.Context, repoID int64) (
 				lastIncidentDate = nil
 			}
 
+			// Convert JSONB to JSON string for Neo4j
+			var historicalBlockNames interface{}
+			if len(block.HistoricalBlockNames) > 0 {
+				historicalBlockNames = string(block.HistoricalBlockNames)
+			} else {
+				historicalBlockNames = nil
+			}
+
 			params := map[string]any{
-				"compositeID":      compositeID,
-				"repoID":           block.RepoID,
-				"dbID":             block.ID,
-				"filePath":         block.FilePath,
-				"blockName":        block.BlockName,
-				"blockType":        block.BlockType,
-				"startLine":        block.StartLine,
-				"endLine":          block.EndLine,
-				"incidentCount":    block.IncidentCount,
-				"lastIncidentDate": lastIncidentDate,
+				"compositeID":          compositeID,
+				"repoID":               block.RepoID,
+				"dbID":                 block.ID,
+				"filePath":             block.FilePath,
+				"blockName":            block.BlockName,
+				"blockType":            block.BlockType,
+				"startLine":            block.StartLine,
+				"endLine":              block.EndLine,
+				"language":             block.Language,
+				"signature":            block.Signature,
+				"historicalBlockNames": historicalBlockNames,
+				"incidentCount":        block.IncidentCount,
+				"lastIncidentDate":     lastIncidentDate,
 			}
 
 			result, err := tx.Run(ctx, query, params)
@@ -147,7 +165,8 @@ func (s *CodeBlockSyncer) SyncMissingBlocks(ctx context.Context, repoID int64) (
 func (s *CodeBlockSyncer) getAllBlocks(ctx context.Context, repoID int64) ([]CodeBlock, error) {
 	query := `
 		SELECT id, repo_id, file_path, block_name, block_type,
-		       start_line, end_line, incident_count, last_incident_date
+		       start_line, end_line, language, signature, historical_block_names,
+		       incident_count, last_incident_date
 		FROM code_blocks
 		WHERE repo_id = $1
 		ORDER BY id`
@@ -169,6 +188,9 @@ func (s *CodeBlockSyncer) getAllBlocks(ctx context.Context, repoID int64) ([]Cod
 			&b.BlockType,
 			&b.StartLine,
 			&b.EndLine,
+			&b.Language,
+			&b.Signature,
+			&b.HistoricalBlockNames,
 			&b.IncidentCount,
 			&b.LastIncidentDate,
 		)
@@ -212,4 +234,3 @@ func (s *CodeBlockSyncer) getNeo4jBlockCompositeIDs(ctx context.Context, repoID 
 
 	return ids, nil
 }
-
