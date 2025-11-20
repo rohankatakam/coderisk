@@ -70,6 +70,7 @@ func (d *DiffAtomizer) ExtractBlocksFromDiff(ctx context.Context, diff string) (
 			BlockName: event.TargetBlockName,
 			BlockType: event.BlockType,
 			Behavior:  event.Behavior,
+			Signature: event.Signature, // Extract signature from LLM response
 		})
 	}
 
@@ -121,6 +122,7 @@ func (d *DiffAtomizer) ExtractBlocksFromDiffWithContext(
 			BlockName: event.TargetBlockName,
 			BlockType: event.BlockType,
 			Behavior:  event.Behavior,
+			Signature: event.Signature, // Extract signature from LLM response
 		})
 	}
 

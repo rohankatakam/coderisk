@@ -32,6 +32,7 @@ type BlockReference struct {
 	BlockName string
 	BlockType string
 	Behavior  string
+	Signature string // Normalized signature like "(string,int):number"
 }
 
 // getUncommittedDiff returns git diff output for a specific file
