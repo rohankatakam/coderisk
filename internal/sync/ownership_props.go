@@ -66,23 +66,30 @@ func (s *OwnershipPropSyncer) SyncOwnershipProperties(ctx context.Context, repoI
 			return synced, err
 		}
 
-		// Parse familiarity_map JSONB
-		var familiarityMap map[string]interface{}
+		// Convert familiarity_map JSONB to JSON string for Neo4j storage
+		// Neo4j doesn't support map properties - must store as JSON string
+		var familiarityMapStr *string
 		if len(familiarityMapJSON) > 0 {
-			if err := json.Unmarshal(familiarityMapJSON, &familiarityMap); err != nil {
+			// Validate it's valid JSON (could be array or object)
+			var testJSON interface{}
+			if err := json.Unmarshal(familiarityMapJSON, &testJSON); err != nil {
 				log.Printf("     ⚠️  Failed to parse familiarity_map for block %d: %v", blockID, err)
-				familiarityMap = nil
+			} else {
+				// Store as JSON string
+				jsonStr := string(familiarityMapJSON)
+				familiarityMapStr = &jsonStr
 			}
 		}
 
 		_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 			// Update CodeBlock properties
+			// Note: familiarity_map stored as JSON string since Neo4j doesn't support maps
 			query := `
 				MATCH (b:CodeBlock {db_id: $blockID, repo_id: $repoID})
 				SET b.original_author_email = $originalAuthor,
 				    b.last_modifier_email = $lastModifier,
 				    b.last_modified_date = CASE WHEN $lastModifiedDate IS NOT NULL THEN datetime($lastModifiedDate) ELSE NULL END,
-				    b.familiarity_map = $familiarityMap
+				    b.familiarity_map_json = $familiarityMapJSON
 				RETURN count(b) as updated`
 
 			var lastModifiedDateStr interface{}
@@ -91,12 +98,12 @@ func (s *OwnershipPropSyncer) SyncOwnershipProperties(ctx context.Context, repoI
 			}
 
 			params := map[string]any{
-				"blockID":          blockID,
-				"repoID":           repoID,
-				"originalAuthor":   originalAuthor,
-				"lastModifier":     lastModifier,
-				"lastModifiedDate": lastModifiedDateStr,
-				"familiarityMap":   familiarityMap,
+				"blockID":            blockID,
+				"repoID":             repoID,
+				"originalAuthor":     originalAuthor,
+				"lastModifier":       lastModifier,
+				"lastModifiedDate":   lastModifiedDateStr,
+				"familiarityMapJSON": familiarityMapStr,
 			}
 
 			result, err := tx.Run(ctx, query, params)
