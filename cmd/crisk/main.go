@@ -67,5 +67,7 @@ Git commit: ` + GitCommit + `
 	rootCmd.AddCommand(initCmd)   // Initialize repo with graph construction
 	rootCmd.AddCommand(ingestCmd) // Build graph from staged data
 	rootCmd.AddCommand(checkCmd)  // Check files for risk
+	rootCmd.AddCommand(logCmd)    // Show function history (git on steroids)
+	rootCmd.AddCommand(blameCmd)  // Show ownership and risk attribution
 	// Note: login, logout, whoami are cloud auth commands (added via init())
 }
